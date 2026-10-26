@@ -29,13 +29,18 @@ fn main() {
         return;
     };
 
-    cc::Build::new()
+    let mut build = cc::Build::new();
+    build
         .cpp(true)
         .std("c++17")
         .file("cpp/nonius_occt.cpp")
         .include(&include)
-        .warnings(false)
-        .compile("nonius_occt");
+        .warnings(false);
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // Исходник в UTF-8 (русские сообщения), исключения C++ включены.
+        build.flag("/utf-8").flag("/EHsc");
+    }
+    build.compile("nonius_occt");
 
     println!("cargo::rustc-link-search=native={}", lib.display());
     for name in libraries(&lib) {

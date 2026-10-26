@@ -1,0 +1,170 @@
+name: Сборка программы
+
+# Готовый nonius.exe для Windows с OpenCascade внутри.
+# OpenCascade собирается из исходников в урезанном виде (только геометрия и STEP,
+# без сторонних библиотек) один раз и дальше берётся из кэша.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "crates/nonius-occt/**"
+      - "packaging/**"
+
+env:
+  OCCT_TAG: V7_9_3
+  CARGO_TERM_COLOR: never
+
+jobs:
+  windows:
+    name: nonius.exe (Windows x64)
+    runs-on: windows-2022
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Компилятор Visual C++
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Ninja
+        run: if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja -y --no-progress }
+
+      - name: Кэш OpenCascade
+        id: occt
+        uses: actions/cache@v4
+        with:
+          path: C:\occt
+          key: occt-${{ env.OCCT_TAG }}-win64-minimal-v1
+
+      - name: Сборка OpenCascade (только при пустом кэше)
+        if: steps.occt.outputs.cache-hit != 'true'
+        run: |
+          curl.exe -sSL -o occt.tar.gz "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/$env:OCCT_TAG.tar.gz"
+          tar -xzf occt.tar.gz
+          $src = (Get-ChildItem -Directory -Filter "OCCT-*" | Select-Object -First 1).FullName
+          cmake -S $src -B occt-build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DINSTALL_DIR=C:\occt -DBUILD_LIBRARY_TYPE=Shared `
+            -DBUILD_MODULE_FoundationClasses=OFF -DBUILD_MODULE_ModelingData=OFF `
+            -DBUILD_MODULE_ModelingAlgorithms=OFF -DBUILD_MODULE_Visualization=OFF `
+            -DBUILD_MODULE_ApplicationFramework=OFF -DBUILD_MODULE_DataExchange=OFF `
+            -DBUILD_MODULE_Draw=OFF -DBUILD_MODULE_DETools=OFF `
+            "-DBUILD_ADDITIONAL_TOOLKITS=TKDESTEP;TKBO;TKMesh;TKPrim;TKOffset" `
+            -DUSE_FREETYPE=OFF -DUSE_TK=OFF -DUSE_OPENGL=OFF -DUSE_GLES2=OFF -DUSE_D3D=OFF `
+            -DUSE_FREEIMAGE=OFF -DUSE_FFMPEG=OFF -DUSE_OPENVR=OFF -DUSE_TBB=OFF `
+            -DBUILD_DOC_Overview=OFF -DBUILD_SAMPLES_QT=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build occt-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --install occt-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Пути к OpenCascade
+        run: |
+          $inc = (Get-ChildItem C:\occt -Recurse -Filter Standard_Version.hxx | Select-Object -First 1).DirectoryName
+          $lib = (Get-ChildItem C:\occt -Recurse -Filter TKernel.lib | Select-Object -First 1).DirectoryName
+          $bin = (Get-ChildItem C:\occt -Recurse -Filter TKernel.dll | Select-Object -First 1).DirectoryName
+          if (-not ($inc -and $lib -and $bin)) { Write-Error "OpenCascade не найден в C:\occt"; exit 1 }
+          "include: $inc"; "lib: $lib"; "bin: $bin"
+          "NONIUS_OCCT_INCLUDE=$inc" >> $env:GITHUB_ENV
+          "NONIUS_OCCT_LIB=$lib" >> $env:GITHUB_ENV
+          "OCCT_BIN=$bin" >> $env:GITHUB_ENV
+          $bin >> $env:GITHUB_PATH
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Тесты геометрии и командной строки
+        run: |
+          cargo test --release -p nonius-occt -p nonius-cli 2>&1 | Tee-Object test.log
+          if ($LASTEXITCODE) {
+            Select-String -Path test.log -Pattern "^(error|warning)|panicked|FAILED|^---- " |
+              Select-Object -First 40 | ForEach-Object { "::error::$($_.Line)" }
+            exit 1
+          }
+
+      - name: Сборка nonius.exe
+        run: cargo build --release -p nonius-cli
+
+      - name: Упаковка
+        run: |
+          $d = "dist\nonius"
+          New-Item -ItemType Directory -Force $d | Out-Null
+          Copy-Item target\release\nonius.exe $d
+          Copy-Item "$env:OCCT_BIN\*.dll" $d
+          # Среда Visual C++ рядом с программой — чтобы не просить её ставить.
+          $crt = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          foreach ($f in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
+            Copy-Item (Join-Path $crt.FullName $f) $d
+          }
+          Copy-Item LICENSE, packaging\windows\README.txt $d
+          Get-ChildItem $d | Format-Table Name, Length
+          $mb = [math]::Round(((Get-ChildItem $d | Measure-Object Length -Sum).Sum / 1MB), 1)
+          "Всего: $mb МБ"
+
+      - name: Проверка готовой папки (без OpenCascade в PATH)
+        run: |
+          # Вывод nonius — UTF-8; без этого PowerShell исказит кириллицу.
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          # Оставляем в PATH только Windows и Git: всё остальное должно лежать рядом с exe.
+          $env:PATH = "C:\Windows\System32;C:\Windows;C:\Program Files\Git\cmd"
+          $exe = (Resolve-Path dist\nonius\nonius.exe).Path
+          $env:GIT_AUTHOR_NAME = "CI"; $env:GIT_AUTHOR_EMAIL = "ci@example.com"
+          $env:GIT_COMMITTER_NAME = "CI"; $env:GIT_COMMITTER_EMAIL = "ci@example.com"
+
+          & $exe modules | Tee-Object modules.txt
+          if (-not (Select-String -Path modules.txt -Pattern "geometry-occt" -Quiet)) { Write-Error "геометрия не включилась"; exit 1 }
+
+          $p = Join-Path $env:RUNNER_TEMP "проект"
+          & $exe init $p --name "Проверка"
+          if ($LASTEXITCODE) { exit 1 }
+          Push-Location $p
+          & $exe import "$env:GITHUB_WORKSPACE\packaging\smoke\plate-v1.step" --part пластина
+          if ($LASTEXITCODE) { exit 1 }
+          & $exe commit пластина -m "Первая версия"
+          if ($LASTEXITCODE) { exit 1 }
+          & $exe import "$env:GITHUB_WORKSPACE\packaging\smoke\plate-v2.step" --part пластина
+          & $exe diff пластина | Tee-Object diff.txt
+          if (-not (Select-String -Path diff.txt -Pattern "Добавлен материал" -Quiet)) { Write-Error "нет добавленного материала"; exit 1 }
+          if (-not (Select-String -Path diff.txt -Pattern "Убран материал" -Quiet)) { Write-Error "нет убранного материала"; exit 1 }
+          & $exe render пластина -o изменения.png
+          if (-not (Test-Path изменения.png)) { Write-Error "картинка не создана"; exit 1 }
+          Copy-Item изменения.png "$env:GITHUB_WORKSPACE\smoke-changes.png"
+          Pop-Location
+
+      - name: Архив
+        run: Compress-Archive -Path dist\nonius -DestinationPath nonius-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nonius-windows-x64
+          path: nonius-windows-x64.zip
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-changes
+          path: smoke-changes.png
+          retention-days: 30
+
+  publish:
+    name: Релиз на GitHub
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nonius-windows-x64
+      - name: Опубликовать
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" nonius-windows-x64.zip --repo "${{ github.repository }}" --title "Nonius ${{ github.ref_name }}" --generate-notes
