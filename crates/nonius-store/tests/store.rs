@@ -168,3 +168,21 @@ fn reopening_existing_repository_keeps_history() {
     let again = Store::open(Project::open(tmp.path()).unwrap(), &options()).unwrap();
     assert_eq!(again.versions(&item).unwrap().len(), 1);
 }
+
+#[test]
+fn snapshot_points_to_files_of_that_version() {
+    let (_tmp, store, item) = setup("кронштейн");
+    fs::write(item.dir.join("model.step"), b"first").unwrap();
+    let v1 = store.commit(&item, "v1").unwrap();
+    fs::write(item.dir.join("model.step"), b"second").unwrap();
+    store.commit(&item, "v2").unwrap();
+
+    let snap = store.snapshot(&item, &v1).unwrap();
+    assert_eq!(snap.version, Some(v(1)));
+    assert_ne!(snap.dir, item.dir, "старая версия — не рабочая папка");
+    assert_eq!(fs::read(snap.dir.join("model.step")).unwrap(), b"first");
+    // повторный вызов берёт кэш
+    assert_eq!(store.snapshot(&item, &v1).unwrap().dir, snap.dir);
+    // кэш не попадает в изменения детали
+    assert!(store.changes(&item).unwrap().is_empty());
+}
