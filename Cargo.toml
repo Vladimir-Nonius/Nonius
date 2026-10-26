@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/nonius-core", "crates/nonius-cli"]
+members = [
+    "crates/nonius-core",
+    "crates/nonius-store",
+    "crates/nonius-step",
+    "crates/nonius-cli",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +17,8 @@ authors = ["Nonius contributors"]
 
 [workspace.dependencies]
 nonius-core = { path = "crates/nonius-core" }
+nonius-store = { path = "crates/nonius-store" }
+nonius-step = { path = "crates/nonius-step" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 thiserror = "2"

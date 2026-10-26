@@ -2,14 +2,19 @@
 //!
 //! Тот же набор действий потом будет в веб-интерфейсе и в MCP для ИИ.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nonius_core::extension::Registry;
+use nonius_core::compare::{ChangeKind, CompareContext};
+use nonius_core::extension::{Registry, Snapshot};
 use nonius_core::meta::ItemKind;
-use nonius_core::{PartName, Project};
+use nonius_core::project::{Item, META_FILE};
+use nonius_core::{schema, PartName, Project, VersionNumber};
+use nonius_step::StepHeaderSource;
+use nonius_store::{FileChangeKind, GitOptions, Store, VersionInfo};
 
 /// Nonius — контроль версий для CAD-моделей.
 #[derive(Parser)]
@@ -42,6 +47,60 @@ enum Command {
     Info,
     /// Подключённые модули.
     Modules,
+    /// Добавить файл модели (STEP, SLDPRT, SLDASM) в деталь.
+    Import {
+        /// Файл модели.
+        file: PathBuf,
+        /// Деталь (по умолчанию — имя файла без расширения; создаётся, если нет).
+        #[arg(long)]
+        part: Option<String>,
+    },
+    /// Что изменилось с последней версии.
+    Status {
+        /// Деталь (по умолчанию — все).
+        part: Option<String>,
+    },
+    /// Зафиксировать новую версию детали.
+    Commit {
+        /// Деталь.
+        part: String,
+        /// Описание: что и почему изменено.
+        #[arg(short, long)]
+        message: String,
+    },
+    /// История версий детали.
+    Log {
+        /// Деталь.
+        part: String,
+    },
+    /// Сравнить версии: по умолчанию последнюю с текущим состоянием.
+    Diff {
+        /// Деталь.
+        part: String,
+        /// С какой версии (по умолчанию последняя).
+        from: Option<String>,
+        /// По какую версию (по умолчанию текущее состояние).
+        to: Option<String>,
+    },
+    /// Вернуть деталь к старой версии (создаётся новая версия, история сохраняется).
+    Restore {
+        /// Деталь.
+        part: String,
+        /// Версия: v3 или 3.
+        version: String,
+        /// Почему откатываем.
+        #[arg(short, long)]
+        message: Option<String>,
+    },
+    /// Выгрузить файлы версии в папку.
+    Export {
+        /// Деталь.
+        part: String,
+        /// Версия: v3 или 3.
+        version: String,
+        /// Куда выгрузить.
+        dest: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -66,6 +125,14 @@ fn main() -> ExitCode {
     }
 }
 
+/// Все модули, которые идут вместе с программой.
+fn registry() -> Registry {
+    let mut r = Registry::with_builtins();
+    r.add_geometry_source(Box::new(StepHeaderSource::new()))
+        .expect("встроенный модуль должен проходить проверку");
+    r
+}
+
 fn run(cli: Cli) -> Result<()> {
     let open = || -> Result<Project> {
         let start = match &cli.project {
@@ -74,6 +141,7 @@ fn run(cli: Cli) -> Result<()> {
         };
         Ok(Project::discover(&start)?)
     };
+    let store = || -> Result<Store> { Ok(Store::open(open()?, &GitOptions::default())?) };
 
     match &cli.command {
         Command::Init { path, name } => {
@@ -93,6 +161,14 @@ fn run(cli: Cli) -> Result<()> {
                 p.config().name,
                 p.root().display()
             );
+            match Store::open(p, &GitOptions::default()) {
+                Ok(s) if !s.lfs_enabled() => println!(
+                    "предупреждение: Git LFS не найден — модели будут храниться прямо в git. \
+                     Установите Git LFS (https://git-lfs.com)."
+                ),
+                Ok(_) => println!("История версий включена (git + LFS)."),
+                Err(e) => println!("предупреждение: история версий не включена: {e}"),
+            }
         }
         Command::Part(PartCommand::New { name, assembly }) => {
             let p = open()?;
@@ -129,12 +205,246 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Modules => {
-            for m in Registry::with_builtins().manifests() {
+            for m in registry().manifests() {
                 println!("{:<16} {} {} — {:?}", m.id, m.version, m.name, m.points);
             }
         }
+        Command::Import { file, part } => import(&open()?, file, part.as_deref())?,
+        Command::Status { part } => status(&store()?, part.as_deref())?,
+        Command::Commit { part, message } => {
+            let s = store()?;
+            let item = s.item(part)?;
+            let v = s.commit(&item, message)?;
+            println!("Зафиксирована {} {}: {}", item.name, v.version, v.summary());
+        }
+        Command::Log { part } => {
+            let s = store()?;
+            let item = s.item(part)?;
+            let versions = s.versions(&item)?;
+            if versions.is_empty() {
+                println!(
+                    "У «{}» ещё нет версий: nonius commit {} -m \"...\"",
+                    item.name, item.name
+                );
+            }
+            for v in versions {
+                let ver = v.version.to_string();
+                println!(
+                    "{ver:<5} {}  {}  {}",
+                    short_date(&v.date),
+                    v.author,
+                    v.summary()
+                );
+            }
+        }
+        Command::Diff { part, from, to } => diff(&store()?, part, from.as_deref(), to.as_deref())?,
+        Command::Restore {
+            part,
+            version,
+            message,
+        } => {
+            let s = store()?;
+            let item = s.item(part)?;
+            let v = s.restore(&item, parse_version(version)?, message.as_deref())?;
+            println!(
+                "Деталь «{}» возвращена: {} — {}",
+                item.name,
+                v.version,
+                v.summary()
+            );
+        }
+        Command::Export {
+            part,
+            version,
+            dest,
+        } => {
+            let s = store()?;
+            let item = s.item(part)?;
+            let v = s.version(&item, parse_version(version)?)?;
+            let files = s.export(&item, &v, dest)?;
+            println!(
+                "Выгружено {} файлов версии {} в {}",
+                files.len(),
+                v.version,
+                dest.display()
+            );
+        }
     }
     Ok(())
+}
+
+fn import(project: &Project, file: &Path, part: Option<&str>) -> Result<()> {
+    if !file.is_file() {
+        bail!("{}: файл не найден", file.display());
+    }
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    let (target, kind) = match ext.as_str() {
+        "step" | "stp" => ("model.step", ItemKind::Part),
+        "sldprt" => ("model.sldprt", ItemKind::Part),
+        "sldasm" => ("model.sldasm", ItemKind::Assembly),
+        _ => bail!(
+            "{}: неизвестный формат (поддерживаются STEP, SLDPRT, SLDASM)",
+            file.display()
+        ),
+    };
+    let name = match part {
+        Some(p) => p.to_string(),
+        None => file
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    };
+    let name = PartName::new(name.as_str())
+        .with_context(|| "имя детали из имени файла не подходит, задайте его: --part <имя>")?;
+
+    let item = match project.find_item(&name)? {
+        Some(i) => i,
+        None => project.create_item(kind, &name)?,
+    };
+    let dest = item.dir.join(target);
+    fs::copy(file, &dest)
+        .with_context(|| format!("не удалось скопировать в {}", dest.display()))?;
+
+    let mut meta = project.load_meta(&item)?;
+    if let Some(src) = registry().geometry_source_for(file) {
+        let read = src.read(file)?;
+        meta.geometry = read.geometry;
+        meta.source = read.source;
+        if read.material.is_some() {
+            meta.material = read.material;
+        }
+        meta.properties.extend(read.properties);
+    } else if meta.source.cad.is_none() {
+        meta.source.cad = Some("SolidWorks".into());
+    }
+    schema::save(&meta, &item.dir.join(META_FILE))?;
+
+    println!("Импортировано в «{}»: {target}", item.name);
+    if let Some(cad) = &meta.source.cad {
+        println!("Источник: {cad}");
+    }
+    println!(
+        "Зафиксируйте версию: nonius commit {} -m \"что изменилось\"",
+        item.name
+    );
+    Ok(())
+}
+
+fn status(store: &Store, part: Option<&str>) -> Result<()> {
+    let items: Vec<Item> = match part {
+        Some(p) => vec![store.item(p)?],
+        None => store.project().items()?,
+    };
+    let mut clean = 0;
+    for item in &items {
+        let changes = store.changes(item)?;
+        if changes.is_empty() {
+            clean += 1;
+            if part.is_some() {
+                println!("«{}»: изменений нет", item.name);
+            }
+            continue;
+        }
+        match store.latest(item)? {
+            Some(v) => println!("«{}» (последняя {}):", item.name, v.version),
+            None => println!("«{}» (ещё нет версий):", item.name),
+        }
+        for c in changes {
+            let word = match c.kind {
+                FileChangeKind::Added => "новый",
+                FileChangeKind::Modified => "изменён",
+                FileChangeKind::Deleted => "удалён",
+            };
+            println!("  {word:<8} {}", c.path);
+        }
+    }
+    if part.is_none() {
+        if items.is_empty() {
+            println!("Пока нет деталей.");
+        } else if clean == items.len() {
+            println!("Все детали зафиксированы, изменений нет.");
+        }
+    }
+    Ok(())
+}
+
+fn diff(store: &Store, part: &str, from: Option<&str>, to: Option<&str>) -> Result<()> {
+    let item = store.item(part)?;
+    let pick = |v: &str| -> Result<VersionInfo> { Ok(store.version(&item, parse_version(v)?)?) };
+
+    let before_info = match from {
+        Some(v) => pick(v)?,
+        None => match store.latest(&item)? {
+            Some(v) => v,
+            None => bail!("у «{}» ещё нет версий — сравнивать не с чем", item.name),
+        },
+    };
+    let before = store.snapshot(&item, &before_info)?;
+    let (after, after_label): (Snapshot, String) = match to {
+        Some(v) => {
+            let info = pick(v)?;
+            (store.snapshot(&item, &info)?, info.version.to_string())
+        }
+        None => (store.working_snapshot(&item)?, "текущее".to_string()),
+    };
+
+    println!("«{}»: {} → {after_label}", item.name, before_info.version);
+    let ctx = CompareContext {
+        tolerance_mm: store.project().config().compare.tolerance_mm,
+        ..CompareContext::default()
+    };
+    let mut any = false;
+    for report in registry().compare_all(&before, &after, &ctx)? {
+        for c in &report.changes {
+            any = true;
+            println!("  {} {c}", marker(c.kind));
+        }
+    }
+    if to.is_none() {
+        for c in store.changes(&item)? {
+            any = true;
+            let word = match c.kind {
+                FileChangeKind::Added => "+ файл",
+                FileChangeKind::Modified => "~ файл",
+                FileChangeKind::Deleted => "- файл",
+            };
+            println!("  {word} {}", c.path);
+        }
+    }
+    if !any {
+        println!("  изменений нет");
+    }
+    Ok(())
+}
+
+fn marker(kind: ChangeKind) -> &'static str {
+    match kind {
+        ChangeKind::Added => "+",
+        ChangeKind::Removed => "-",
+        ChangeKind::Modified => "~",
+        ChangeKind::Moved => "→",
+        ChangeKind::Renamed => "✎",
+    }
+}
+
+/// `v3` или `3` → номер версии.
+fn parse_version(s: &str) -> Result<VersionNumber> {
+    let s = s.trim();
+    let text = if s.starts_with('v') {
+        s.to_string()
+    } else {
+        format!("v{s}")
+    };
+    Ok(text.parse()?)
+}
+
+/// `2026-10-26T12:34:56+03:00` → `2026-10-26 12:34`.
+fn short_date(iso: &str) -> String {
+    iso.get(..16).unwrap_or(iso).replacen('T', " ", 1)
 }
 
 fn kind_word(kind: ItemKind) -> &'static str {
