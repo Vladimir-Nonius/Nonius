@@ -70,6 +70,8 @@ fn import_commit_log_diff_restore_export() {
 
     let step = d.join("кронштейн.step");
     std::fs::write(&step, STEP).unwrap();
+    // В этом STEP только заголовок, без геометрии: импорт не должен ломаться
+    // и с OpenCascade — сведения берутся из заголовка.
     let (ok, out) = nonius(d, &["import", "кронштейн.step"]);
     assert!(ok, "{out}");
     assert!(out.contains("Источник: SolidWorks 2020"), "{out}");

@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use nonius_core::compare::{ChangeKind, ChangeReport, CompareContext};
-use nonius_core::extension::{Registry, Snapshot};
+use nonius_core::extension::{GeometrySource, Registry, Snapshot};
 use nonius_core::meta::ItemKind;
 use nonius_core::project::{Item, META_FILE};
 use nonius_core::{schema, PartName, Project, VersionNumber};
@@ -342,7 +342,16 @@ fn import(project: &Project, file: &Path, part: Option<&str>) -> Result<()> {
 
     let mut meta = project.load_meta(&item)?;
     if let Some(src) = registry().geometry_source_for(file) {
-        let read = src.read(file)?;
+        // Геометрию прочитать не удалось (пустой или повреждённый STEP) —
+        // импорт не ломаем: берём сведения из заголовка и предупреждаем.
+        let read = match src.read(file) {
+            Ok(m) => m,
+            Err(e) if src.manifest().id != StepHeaderSource::ID => {
+                println!("предупреждение: геометрия не прочитана: {e}");
+                StepHeaderSource::new().read(file)?
+            }
+            Err(e) => return Err(e.into()),
+        };
         meta.geometry = read.geometry;
         meta.source = read.source;
         if read.material.is_some() {
