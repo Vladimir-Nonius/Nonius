@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/nonius-core", "crates/nonius-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+repository = "https://github.com/Vladimir-Nonius/Nonius"
+authors = ["Nonius contributors"]
+
+[workspace.dependencies]
+nonius-core = { path = "crates/nonius-core" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
