@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include <BOPAlgo_PaveFiller.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -185,6 +186,7 @@ NoniusShape* nonius_boolean(const NoniusShape* a, const NoniusShape* b, int32_t 
         algo->SetArguments(args);
         algo->SetTools(tools);
         algo->SetNonDestructive(Standard_True);
+        algo->SetRunParallel(Standard_True);
         if (fuzzy > 0) {
             algo->SetFuzzyValue(fuzzy);
         }
@@ -200,6 +202,47 @@ NoniusShape* nonius_boolean(const NoniusShape* a, const NoniusShape* b, int32_t 
         set_error(err, err_len, "неизвестная ошибка OpenCascade");
     }
     return nullptr;
+}
+
+int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusShape** added,
+                    NoniusShape** removed, char* err, size_t err_len) {
+    *added = nullptr;
+    *removed = nullptr;
+    try {
+        // Пересечение тел — самая дорогая часть — считается один раз,
+        // из него получаются обе разности. Без допуска: с ним обратная
+        // разность из общего пересечения бывает неверной (проверено на OCCT 7.9).
+        TopTools_ListOfShape args;
+        args.Append(before->shape);
+        args.Append(after->shape);
+        BOPAlgo_PaveFiller filler;
+        filler.SetArguments(args);
+        filler.SetRunParallel(Standard_True);
+        filler.SetNonDestructive(Standard_True);
+        filler.Perform();
+        if (filler.HasErrors()) {
+            set_error(err, err_len, "не удалось пересечь тела");
+            return 0;
+        }
+        BRepAlgoAPI_Cut gone(before->shape, after->shape, filler, Standard_True);
+        BRepAlgoAPI_Cut appeared(before->shape, after->shape, filler, Standard_False);
+        if (!gone.IsDone() || gone.HasErrors() || !appeared.IsDone() || appeared.HasErrors()) {
+            set_error(err, err_len, "булева операция не удалась");
+            return 0;
+        }
+        *removed = wrap(gone.Shape());
+        *added = wrap(appeared.Shape());
+        return 1;
+    } catch (const Standard_Failure& f) {
+        set_error(err, err_len, failure_text(f));
+    } catch (...) {
+        set_error(err, err_len, "неизвестная ошибка OpenCascade");
+    }
+    delete *added;
+    delete *removed;
+    *added = nullptr;
+    *removed = nullptr;
+    return 0;
 }
 
 int32_t nonius_shape_mesh(const NoniusShape* shape, double linear_deflection,

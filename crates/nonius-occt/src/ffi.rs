@@ -51,6 +51,14 @@ unsafe extern "C" {
         err: *mut c_char,
         err_len: usize,
     ) -> *mut NoniusShape;
+    pub(crate) fn nonius_diff(
+        before: *const NoniusShape,
+        after: *const NoniusShape,
+        added: *mut *mut NoniusShape,
+        removed: *mut *mut NoniusShape,
+        err: *mut c_char,
+        err_len: usize,
+    ) -> i32;
     pub(crate) fn nonius_shape_mesh(
         shape: *const NoniusShape,
         linear_deflection: f64,

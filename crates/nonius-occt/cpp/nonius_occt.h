@@ -48,6 +48,11 @@ int32_t nonius_shape_props(const NoniusShape* shape, NoniusProps* out);
 NoniusShape* nonius_boolean(const NoniusShape* a, const NoniusShape* b, int32_t op, double fuzzy,
                             char* err, size_t err_len);
 
+/* Разность версий за одно пересечение: added = after − before, removed = before − after.
+ * 1 — успех (оба результата нужно освободить), 0 — ошибка в err. */
+int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusShape** added,
+                    NoniusShape** removed, char* err, size_t err_len);
+
 int32_t nonius_shape_mesh(const NoniusShape* shape, double linear_deflection,
                           double angular_deflection, NoniusMesh* out);
 void nonius_mesh_free(NoniusMesh* mesh);

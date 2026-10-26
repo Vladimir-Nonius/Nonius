@@ -158,12 +158,26 @@ impl GeometryDiff {
         after: Shape,
         tolerance_mm: f64,
     ) -> std::result::Result<Self, OcctError> {
-        let fuzzy = tolerance_mm.max(0.0);
-        let added = after.cut(&before, fuzzy)?;
-        let removed = before.cut(&after, fuzzy)?;
-        let (a, r) = (added.props(), removed.props());
-        let scale = before.props().volume.max(after.props().volume);
+        let (vb, va) = (before.props().volume, after.props().volume);
+        let scale = vb.max(va);
         let threshold = (scale * 1e-6).max(tolerance_mm.powi(3));
+
+        // Быстрый путь: одно общее пересечение. Проверяем баланс
+        // «было + добавлено − убрано = стало»; если не сходится — медленный,
+        // но надёжный путь из двух отдельных вычитаний с допуском.
+        let fast = before.diff(&after).ok().filter(|(added, removed)| {
+            let (a, r) = (added.props().volume, removed.props().volume);
+            let mismatch = (vb + a - r - va).abs();
+            a >= -threshold && r >= -threshold && mismatch <= (scale * 1e-4).max(threshold * 10.0)
+        });
+        let (added, removed) = match fast {
+            Some(pair) => pair,
+            None => {
+                let fuzzy = tolerance_mm.max(0.0);
+                (after.cut(&before, fuzzy)?, before.cut(&after, fuzzy)?)
+            }
+        };
+        let (a, r) = (added.props(), removed.props());
         Ok(Self {
             added_volume: a.volume,
             removed_volume: r.volume,
@@ -192,12 +206,13 @@ impl GeometryDiff {
         self.removed_volume > self.threshold
     }
 
-    /// Нарисовать: неизменённое серым «рентгеном», добавленное зелёным, убранное красным.
+    /// Нарисовать: деталь серым «рентгеном», добавленное зелёным, убранное красным.
+    ///
+    /// Фон — новая версия целиком: добавленное лежит внутри неё и на совпадающих
+    /// гранях выигрывает у серого, убранное — снаружи и видно сквозь серое.
     pub fn render(&self, view: &View) -> std::result::Result<Image, OcctError> {
-        let fuzzy = (self.threshold.cbrt()).min(0.01);
-        let common = self.before.common(&self.after, fuzzy)?;
-        let defl = deflection(self.before.props().bbox.or(self.after.props().bbox));
-        let common_mesh = common.mesh(defl, ANGULAR);
+        let defl = deflection(self.after.props().bbox.or(self.before.props().bbox));
+        let common_mesh = self.after.mesh(defl, ANGULAR);
         let empty = Mesh::default();
         let added_mesh = if self.has_added() {
             self.added.mesh(defl, ANGULAR)

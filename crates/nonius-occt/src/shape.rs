@@ -150,6 +150,33 @@ impl Shape {
         self.boolean(other, 2, fuzzy, "объединение")
     }
 
+    /// Разность версий за одно пересечение: `(добавлено, убрано)`, где
+    /// добавлено = `after` − `self`, убрано = `self` − `after`. Быстрее двух
+    /// [`Shape::cut`]: самое дорогое — пересечение — считается один раз.
+    pub fn diff(&self, after: &Shape) -> Result<(Shape, Shape), OcctError> {
+        let mut err = [0 as c_char; ERR_LEN];
+        let mut added: *mut ffi::NoniusShape = std::ptr::null_mut();
+        let mut removed: *mut ffi::NoniusShape = std::ptr::null_mut();
+        // SAFETY: оба тела живые, указатели на результаты и буфер действительны.
+        let ok = unsafe {
+            ffi::nonius_diff(
+                self.ptr.as_ptr(),
+                after.ptr.as_ptr(),
+                &mut added,
+                &mut removed,
+                err.as_mut_ptr(),
+                ERR_LEN,
+            )
+        };
+        if ok != 1 {
+            return Err(OcctError(format!("сравнение: {}", error_text(&err))));
+        }
+        Ok((
+            wrap(added, &err, "сравнение")?,
+            wrap(removed, &err, "сравнение")?,
+        ))
+    }
+
     /// Треугольная сетка для отрисовки. `linear` — допуск, мм; `angular` — радианы.
     pub fn mesh(&self, linear: f64, angular: f64) -> Mesh {
         let mut m = ffi::NoniusMesh {
