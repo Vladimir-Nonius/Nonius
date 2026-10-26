@@ -430,12 +430,10 @@ fn parse_record(record: &str, item: &PartName) -> Option<VersionInfo> {
     }
     let version = found_version?;
 
-    if let Some(first) = kept.first_mut() {
-        let prefix = format!("{item} {version}: ");
-        let line: &str = *first;
-        if let Some(rest) = line.strip_prefix(prefix.as_str()) {
-            *first = rest;
-        }
+    let prefix = format!("{item} {version}: ");
+    let first: Option<&str> = kept.first().copied();
+    if let Some(rest) = first.and_then(|line| line.strip_prefix(prefix.as_str())) {
+        kept[0] = rest;
     }
     let message = kept.join("\n").trim().to_string();
     Some(VersionInfo {
