@@ -25,7 +25,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI проверяет то же самое на Linux и Windows и минимальную версию Rust 1.82.
+CI проверяет то же самое на Linux и Windows и минимальную версию Rust 1.85.
 
 ## Pull request
 

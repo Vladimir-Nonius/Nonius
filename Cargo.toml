@@ -1,11 +1,11 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/nonius-core", "crates/nonius-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.85"
 license = "GPL-3.0-only"
 repository = "https://github.com/Vladimir-Nonius/Nonius"
 authors = ["Nonius contributors"]

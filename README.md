@@ -25,7 +25,7 @@
 
 ## Попробовать
 
-Нужен [Rust](https://rustup.rs) 1.82 или новее.
+Нужен [Rust](https://rustup.rs) 1.85 или новее.
 
 ```sh
 cargo install --path crates/nonius-cli
