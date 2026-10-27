@@ -130,3 +130,49 @@ fn volume_and_rough_bbox_agree_with_props() {
         );
     }
 }
+
+#[test]
+fn tiny_changes_are_not_hidden_by_shared_faces() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = via_step(&plate_with_hole(15.0), dir.path(), "v1.step");
+
+    // Отверстие сдвинуто на 0,001 мм: грани почти совпадают, но это изменение.
+    let b = via_step(&plate_with_hole(15.001), dir.path(), "v2.step");
+    let d = GeometryDiff::of_shapes(a, b, 0.0001).unwrap();
+    let swept = 8.0 * 8.0 * 0.001;
+    assert!(
+        d.has_added() && d.has_removed(),
+        "{} / {}",
+        d.added_volume,
+        d.removed_volume
+    );
+    assert!(
+        close(d.added_volume, swept, swept * 0.3),
+        "добавлено {}",
+        d.added_volume
+    );
+    assert!(
+        close(d.removed_volume, swept, swept * 0.3),
+        "убрано {}",
+        d.removed_volume
+    );
+
+    // Пластина толще на 0,01 мм: верхняя грань сдвинута, остальные на месте.
+    let a = via_step(&plate_with_hole(15.0), dir.path(), "v3.step");
+    let thick = Shape::make_box([0.0; 3], [60.0, 30.0, 8.01])
+        .unwrap()
+        .cut(
+            &Shape::make_cylinder([15.0, 15.0, -1.0], 4.0, 10.0).unwrap(),
+            0.0,
+        )
+        .unwrap();
+    let b = via_step(&thick, dir.path(), "v4.step");
+    let d = GeometryDiff::of_shapes(a, b, 0.0001).unwrap();
+    let layer = (60.0 * 30.0 - PI * 16.0) * 0.01;
+    assert!(
+        close(d.added_volume, layer, 0.01),
+        "добавлено {}",
+        d.added_volume
+    );
+    assert!(!d.has_removed(), "убрано {}", d.removed_volume);
+}
