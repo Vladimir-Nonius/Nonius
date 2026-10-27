@@ -4,7 +4,9 @@
 //! - [`GeometryComparator`] — сравнивает форму: сколько материала добавлено и убрано;
 //! - [`HighlightRenderer`] — рисует изменения цветом: неизменённое серым
 //!   «рентгеном», добавленное зелёным, убранное красным;
-//! - [`render`] — свой растровый рендер, без видеокарты и графических библиотек.
+//! - [`SceneRenderer`] — объёмная модель изменений `changes.glb` для окна просмотра;
+//! - [`render`] — свой растровый рендер, без видеокарты и графических библиотек;
+//! - [`glb`] — запись сеток в glTF (`.glb`).
 //!
 //! OpenCascade подключается через тонкую C-прослойку (`cpp/`). Если при сборке
 //! OpenCascade не найден, крейт собирается без геометрии: [`available`] вернёт
@@ -12,9 +14,12 @@
 
 #[cfg(nonius_occt)]
 mod ffi;
+pub mod glb;
 #[cfg(nonius_occt)]
 mod modules;
 pub mod render;
+#[cfg(nonius_occt)]
+mod scene;
 #[cfg(nonius_occt)]
 mod shape;
 
@@ -31,7 +36,13 @@ pub use modules::{
     MODEL_STEP,
 };
 #[cfg(nonius_occt)]
+pub use scene::{shape_glb, SceneRenderer, CHANGES_GLB};
+#[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
+
+/// Идентификатор модуля объёмной модели изменений (`SceneRenderer`). Объявлен и
+/// без OpenCascade, чтобы программа могла спросить реестр, подключён ли он.
+pub const SCENE_RENDERER: &str = "scene-occt";
 
 /// Ошибка OpenCascade или прослойки.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,13 +74,15 @@ pub fn occt_version() -> Option<String> {
 }
 
 /// Подключить модули геометрии к реестру. Источник STEP встаёт первым,
-/// чтобы заменить чтение одного заголовка.
+/// чтобы заменить чтение одного заголовка. Картинка изменений — первой среди
+/// отрисовок, объёмная модель — после неё.
 pub fn register(registry: &mut Registry) -> nonius_core::Result<()> {
     #[cfg(nonius_occt)]
     {
         registry.add_geometry_source(Box::new(OcctStepSource::new()))?;
         registry.add_comparator(Box::new(GeometryComparator::new()))?;
         registry.add_renderer(Box::new(HighlightRenderer::new()))?;
+        registry.add_renderer(Box::new(SceneRenderer::new()))?;
     }
     #[cfg(not(nonius_occt))]
     {

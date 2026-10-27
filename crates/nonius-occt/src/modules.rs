@@ -21,7 +21,7 @@ pub const MODEL_STEP: &str = "model.step";
 /// Имя картинки изменений, которую рисует [`HighlightRenderer`].
 pub const CHANGES_PNG: &str = "changes.png";
 
-fn manifest(id: &str, name: &str, point: ExtensionPoint) -> ModuleManifest {
+pub(crate) fn manifest(id: &str, name: &str, point: ExtensionPoint) -> ModuleManifest {
     ModuleManifest {
         id: id.into(),
         name: name.into(),
@@ -32,7 +32,7 @@ fn manifest(id: &str, name: &str, point: ExtensionPoint) -> ModuleManifest {
     }
 }
 
-fn module_err(id: &str, e: OcctError) -> Error {
+pub(crate) fn module_err(id: &str, e: OcctError) -> Error {
     Error::Module {
         module: id.into(),
         message: e.0,
@@ -46,7 +46,7 @@ fn is_step(path: &Path) -> bool {
 }
 
 /// Допуск сетки по размеру тела: мелкие детали — мельче.
-fn deflection(props_bbox: Option<([f64; 3], [f64; 3])>) -> f64 {
+pub(crate) fn deflection(props_bbox: Option<([f64; 3], [f64; 3])>) -> f64 {
     let diag = props_bbox
         .map(|(lo, hi)| {
             ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt()
@@ -55,7 +55,7 @@ fn deflection(props_bbox: Option<([f64; 3], [f64; 3])>) -> f64 {
     (diag * 1.5e-3).max(0.005)
 }
 
-const ANGULAR: f64 = 0.3;
+pub(crate) const ANGULAR: f64 = 0.3;
 
 // ─── Источник геометрии ──────────────────────────────────────────────
 
@@ -261,13 +261,13 @@ pub fn preview(step: &Path, view: &View) -> std::result::Result<Image, OcctError
     ))
 }
 
-fn model_pair(before: &Snapshot, after: &Snapshot) -> Option<(PathBuf, PathBuf)> {
+pub(crate) fn model_pair(before: &Snapshot, after: &Snapshot) -> Option<(PathBuf, PathBuf)> {
     let a = before.dir.join(MODEL_STEP);
     let b = after.dir.join(MODEL_STEP);
     (a.is_file() && b.is_file()).then_some((a, b))
 }
 
-fn same_bytes(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_bytes(a: &Path, b: &Path) -> bool {
     match (std::fs::metadata(a), std::fs::metadata(b)) {
         (Ok(ma), Ok(mb)) if ma.len() != mb.len() => false,
         _ => matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y),

@@ -17,6 +17,7 @@ nonius-core.workspace = true
 nonius-store.workspace = true
 nonius-step.workspace = true
 nonius-occt.workspace = true
+nonius-view.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 
