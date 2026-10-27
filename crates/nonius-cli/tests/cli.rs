@@ -48,6 +48,16 @@ fn init_add_and_list() {
 }
 
 #[test]
+fn no_command_explains_how_to_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (ok, out) = nonius(tmp.path(), &[]);
+    assert!(ok, "{out}");
+    assert!(out.contains("PowerShell"), "{out}");
+    assert!(out.contains(".\\nonius.exe --help"), "{out}");
+    assert!(out.contains("import"), "список команд: {out}");
+}
+
+#[test]
 fn outside_project_gives_clear_error() {
     let tmp = tempfile::tempdir().unwrap();
     let (ok, out) = nonius(tmp.path(), &["list"]);
