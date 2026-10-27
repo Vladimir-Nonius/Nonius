@@ -3,11 +3,12 @@
 //! Тот же набор действий потом будет в веб-интерфейсе и в MCP для ИИ.
 
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use nonius_core::compare::{ChangeKind, ChangeReport, CompareContext};
 use nonius_core::extension::{GeometrySource, Registry, Snapshot};
 use nonius_core::meta::ItemKind;
@@ -128,12 +129,37 @@ enum PartCommand {
 }
 
 fn main() -> ExitCode {
+    // Без команды — скорее всего, двойной щелчок в Проводнике.
+    if std::env::args_os().len() <= 1 {
+        welcome();
+        return ExitCode::SUCCESS;
+    }
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("ошибка: {e:#}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Подсказка при запуске без команды. При двойном щелчке Windows закрывает
+/// окно сразу после выхода, поэтому там ждём Enter.
+fn welcome() {
+    println!(
+        "Nonius {} — контроль версий для CAD-моделей.\n\n\
+         Это программа для командной строки: её запускают из PowerShell, \
+         а не двойным щелчком.\n\
+         Как открыть PowerShell в папке с nonius.exe:\n  \
+         1. Откройте эту папку в Проводнике.\n  \
+         2. Щёлкните в адресной строке, наберите powershell и нажмите Enter.\n  \
+         3. Введите: .\\nonius.exe --help\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("{}", Cli::command().render_help());
+    if cfg!(windows) && std::io::stdin().is_terminal() {
+        println!("Нажмите Enter, чтобы закрыть окно.");
+        let _ = std::io::stdin().read_line(&mut String::new());
     }
 }
 
