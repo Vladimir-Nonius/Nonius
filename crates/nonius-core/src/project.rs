@@ -280,7 +280,13 @@ fn case_insensitive(ext: &str) -> String {
 }
 
 fn gitattributes() -> String {
-    let mut s = String::from("# Бинарные файлы CAD хранятся через Git LFS (создано Nonius)\n");
+    let mut s = String::from(
+        "# Создано Nonius.\n\
+         # Текстовые файлы проекта — с переводом строки LF на любой ОС.\n\
+         *.yaml text eol=lf\n\
+         *.md text eol=lf\n\
+         # Бинарные файлы CAD хранятся через Git LFS.\n",
+    );
     for ext in LFS_EXTENSIONS {
         s.push_str(&format!(
             "*.{} filter=lfs diff=lfs merge=lfs -text\n",
