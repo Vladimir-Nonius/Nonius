@@ -19,7 +19,7 @@
 | Сравнение паспортов (числа, материал, свойства) | `nonius-core/src/compare/meta.rs`, формат отчёта — `compare/mod.rs` |
 | Чтение заголовка STEP | `nonius-step/src/header.rs` |
 | Геометрия OpenCascade (объём, габариты) | `nonius-occt/src/modules/source.rs`, `shape.rs` |
-| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs` |
+| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/share.cpp`, `src/cache.rs` |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
 | Новая функция OpenCascade | `nonius-occt/cpp/nonius_occt.h` и `.cpp`, `src/ffi.rs`, `src/shape.rs` |
 | Сборка с OpenCascade / без него | `nonius-occt/build.rs`, `nonius-occt/src/lib.rs` |
@@ -75,10 +75,15 @@
 | Файл | Что внутри |
 |---|---|
 | `build.rs` | поиск OpenCascade, сборка C++-прослойки |
-| `cpp/nonius_occt.h`, `.cpp` | C-прослойка над OpenCascade |
+| `cpp/nonius_occt.h`, `.cpp` | C-прослойка над OpenCascade: STEP, BRep, булевы операции, разность версий, сетка |
+| `cpp/props.cpp` | контрольные числа: объём, площадь, центр масс, габариты (грани параллельно) |
+| `cpp/share.h`, `.cpp` | общие грани двух версий — сравнение пересекает только изменённое |
+| `cpp/same.h`, `.cpp` | совпадение рёбер и граней двух версий |
+| `cpp/internal.h` | общее для файлов прослойки |
 | `src/lib.rs` | `register`, `available`, `occt_version`, `preview_png`, запись PNG |
 | `src/ffi.rs` | объявления функций прослойки |
 | `src/shape.rs` | безопасная обёртка `Shape`: чтение, свойства, булевы операции, сетка |
+| `src/cache.rs` | кэш прочитанных STEP (BRep в папке временных файлов) |
 | `src/modules/mod.rs` | общие помощники модулей, `preview` |
 | `src/modules/source.rs` | `step-occt`: контрольные числа из STEP |
 | `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал |
@@ -108,6 +113,7 @@
 | `nonius-core/tests/project.rs` | папка проекта целиком |
 | `nonius-store/tests/store.rs` | версии на настоящем git |
 | `nonius-occt/tests/occt.rs`, `without_occt.rs` | геометрия с OpenCascade и сборка без него |
+| `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, кэш STEP |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 
 Карту обновляет тот, кто добавляет, переносит или удаляет файл, — в том же pull request.

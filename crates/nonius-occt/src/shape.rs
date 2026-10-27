@@ -5,9 +5,9 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr::NonNull;
 
-use crate::ffi;
 use crate::render::Mesh;
 use crate::OcctError;
+use crate::{cache, ffi};
 
 /// Контрольные числа тела. Единицы: мм, мм², мм³.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -73,13 +73,41 @@ pub fn version() -> String {
 }
 
 impl Shape {
-    /// Прочитать STEP. Единицы приводятся к мм.
+    /// Прочитать STEP. Единицы приводятся к мм. Повторное чтение того же
+    /// содержимого берётся из кэша (см. `cache.rs`) — в сотни раз быстрее.
     pub fn read_step(path: &Path) -> Result<Self, OcctError> {
+        let entry = cache::entry(path, &version());
+        if let Some(shape) = entry.as_deref().and_then(Self::read_brep) {
+            return Ok(shape);
+        }
+        let shape = Self::read_step_file(path)?;
+        if let Some(entry) = &entry {
+            cache::store(entry, |tmp| shape.write_brep(tmp));
+        }
+        Ok(shape)
+    }
+
+    fn read_step_file(path: &Path) -> Result<Self, OcctError> {
         let c = c_path(path)?;
         let mut err = [0 as c_char; ERR_LEN];
         // SAFETY: строки живут до конца вызова, буфер нужной длины.
         let ptr = unsafe { ffi::nonius_read_step(c.as_ptr(), err.as_mut_ptr(), ERR_LEN) };
         wrap(ptr, &err, &path.display().to_string())
+    }
+
+    fn read_brep(path: &Path) -> Option<Self> {
+        let c = c_path(path).ok()?;
+        // SAFETY: строка живёт до конца вызова.
+        let ptr = unsafe { ffi::nonius_read_brep(c.as_ptr()) };
+        NonNull::new(ptr).map(|ptr| Shape { ptr })
+    }
+
+    fn write_brep(&self, path: &Path) -> bool {
+        let Ok(c) = c_path(path) else {
+            return false;
+        };
+        // SAFETY: тело живое, строка живёт до конца вызова.
+        unsafe { ffi::nonius_write_brep(self.ptr.as_ptr(), c.as_ptr()) == 1 }
     }
 
     /// Записать STEP (AP214, мм).
@@ -117,6 +145,29 @@ impl Shape {
             solids: p.solids,
             faces: p.faces,
         }
+    }
+
+    /// Только объём, мм³. Быстрее [`Shape::props`]: без площади и точных габаритов.
+    pub fn volume(&self) -> f64 {
+        // SAFETY: тело живое.
+        unsafe { ffi::nonius_shape_volume(self.ptr.as_ptr()) }
+    }
+
+    /// Число твёрдых тел (отдельных кусков).
+    pub fn solid_count(&self) -> u32 {
+        // SAFETY: тело живое.
+        unsafe { ffi::nonius_shape_solid_count(self.ptr.as_ptr()) }
+    }
+
+    /// Габариты с запасом — мгновенно, в отличие от точных в [`Shape::props`].
+    /// Годятся для допуска сетки и вида, но не для паспорта детали.
+    pub fn rough_bbox(&self) -> Option<([f64; 3], [f64; 3])> {
+        let (mut lo, mut hi) = ([0.0; 3], [0.0; 3]);
+        // SAFETY: тело живое, массивы по три числа.
+        let ok = unsafe {
+            ffi::nonius_shape_rough_bbox(self.ptr.as_ptr(), lo.as_mut_ptr(), hi.as_mut_ptr())
+        };
+        (ok == 1).then_some((lo, hi))
     }
 
     fn boolean(&self, other: &Shape, op: i32, fuzzy: f64, what: &str) -> Result<Shape, OcctError> {
