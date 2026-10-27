@@ -8,8 +8,8 @@ use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nonius_core::compare::{ChangeKind, CompareContext};
-use nonius_core::extension::{Registry, Snapshot};
+use nonius_core::compare::{ChangeKind, ChangeReport, CompareContext};
+use nonius_core::extension::{GeometrySource, Registry, Snapshot};
 use nonius_core::meta::ItemKind;
 use nonius_core::project::{Item, META_FILE};
 use nonius_core::{schema, PartName, Project, VersionNumber};
@@ -92,6 +92,18 @@ enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
+    /// Нарисовать изменения цветом: зелёное — добавлено, красное — убрано.
+    Render {
+        /// Деталь.
+        part: String,
+        /// С какой версии (по умолчанию последняя).
+        from: Option<String>,
+        /// По какую версию (по умолчанию текущее состояние).
+        to: Option<String>,
+        /// Куда сохранить картинку (по умолчанию <деталь>-<было>-<стало>.png).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Выгрузить файлы версии в папку.
     Export {
         /// Деталь.
@@ -128,6 +140,9 @@ fn main() -> ExitCode {
 /// Все модули, которые идут вместе с программой.
 fn registry() -> Registry {
     let mut r = Registry::with_builtins();
+    // Геометрия OpenCascade (если программа собрана с ним) встаёт первой,
+    // заголовок STEP — запасной вариант.
+    nonius_occt::register(&mut r).expect("встроенный модуль должен проходить проверку");
     r.add_geometry_source(Box::new(StepHeaderSource::new()))
         .expect("встроенный модуль должен проходить проверку");
     r
@@ -208,6 +223,10 @@ fn run(cli: Cli) -> Result<()> {
             for m in registry().manifests() {
                 println!("{:<16} {} {} — {:?}", m.id, m.version, m.name, m.points);
             }
+            match nonius_occt::occt_version() {
+                Some(v) => println!("Геометрия: OpenCascade {v}"),
+                None => println!("Геометрия: нет (программа собрана без OpenCascade)"),
+            }
         }
         Command::Import { file, part } => import(&open()?, file, part.as_deref())?,
         Command::Status { part } => status(&store()?, part.as_deref())?,
@@ -238,6 +257,18 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Diff { part, from, to } => diff(&store()?, part, from.as_deref(), to.as_deref())?,
+        Command::Render {
+            part,
+            from,
+            to,
+            output,
+        } => render_changes(
+            &store()?,
+            part,
+            from.as_deref(),
+            to.as_deref(),
+            output.as_deref(),
+        )?,
         Command::Restore {
             part,
             version,
@@ -311,7 +342,16 @@ fn import(project: &Project, file: &Path, part: Option<&str>) -> Result<()> {
 
     let mut meta = project.load_meta(&item)?;
     if let Some(src) = registry().geometry_source_for(file) {
-        let read = src.read(file)?;
+        // Геометрию прочитать не удалось (пустой или повреждённый STEP) —
+        // импорт не ломаем: берём сведения из заголовка и предупреждаем.
+        let read = match src.read(file) {
+            Ok(m) => m,
+            Err(e) if src.manifest().id != StepHeaderSource::ID => {
+                println!("предупреждение: геометрия не прочитана: {e}");
+                StepHeaderSource::new().read(file)?
+            }
+            Err(e) => return Err(e.into()),
+        };
         meta.geometry = read.geometry;
         meta.source = read.source;
         if read.material.is_some() {
@@ -326,6 +366,16 @@ fn import(project: &Project, file: &Path, part: Option<&str>) -> Result<()> {
     println!("Импортировано в «{}»: {target}", item.name);
     if let Some(cad) = &meta.source.cad {
         println!("Источник: {cad}");
+    }
+    if let Some(v) = meta.geometry.volume_mm3 {
+        println!("Объём: {v:.1} мм³");
+    }
+    if target == "model.step" {
+        match nonius_occt::preview_png(&dest, &item.dir.join("preview.png")) {
+            Ok(true) => println!("Превью: preview.png"),
+            Ok(false) => {}
+            Err(e) => println!("предупреждение: превью не сделано: {e}"),
+        }
     }
     println!(
         "Зафиксируйте версию: nonius commit {} -m \"что изменилось\"",
@@ -374,25 +424,8 @@ fn status(store: &Store, part: Option<&str>) -> Result<()> {
 
 fn diff(store: &Store, part: &str, from: Option<&str>, to: Option<&str>) -> Result<()> {
     let item = store.item(part)?;
-    let pick = |v: &str| -> Result<VersionInfo> { Ok(store.version(&item, parse_version(v)?)?) };
-
-    let before_info = match from {
-        Some(v) => pick(v)?,
-        None => match store.latest(&item)? {
-            Some(v) => v,
-            None => bail!("у «{}» ещё нет версий — сравнивать не с чем", item.name),
-        },
-    };
-    let before = store.snapshot(&item, &before_info)?;
-    let (after, after_label): (Snapshot, String) = match to {
-        Some(v) => {
-            let info = pick(v)?;
-            (store.snapshot(&item, &info)?, info.version.to_string())
-        }
-        None => (store.working_snapshot(&item)?, "текущее".to_string()),
-    };
-
-    println!("«{}»: {} → {after_label}", item.name, before_info.version);
+    let (before, after, from_label, after_label) = snapshots(store, &item, from, to)?;
+    println!("«{}»: {from_label} → {after_label}", item.name);
     let ctx = CompareContext {
         tolerance_mm: store.project().config().compare.tolerance_mm,
         ..CompareContext::default()
@@ -418,6 +451,68 @@ fn diff(store: &Store, part: &str, from: Option<&str>, to: Option<&str>) -> Resu
     if !any {
         println!("  изменений нет");
     }
+    Ok(())
+}
+
+/// Пара снимков для сравнения: `from` (по умолчанию последняя версия) и
+/// `to` (по умолчанию текущее состояние). Возвращает подписи версий.
+fn snapshots(
+    store: &Store,
+    item: &Item,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<(Snapshot, Snapshot, String, String)> {
+    let pick = |v: &str| -> Result<VersionInfo> { Ok(store.version(item, parse_version(v)?)?) };
+    let before_info = match from {
+        Some(v) => pick(v)?,
+        None => match store.latest(item)? {
+            Some(v) => v,
+            None => bail!("у «{}» ещё нет версий — сравнивать не с чем", item.name),
+        },
+    };
+    let before = store.snapshot(item, &before_info)?;
+    let (after, after_label) = match to {
+        Some(v) => {
+            let info = pick(v)?;
+            (store.snapshot(item, &info)?, info.version.to_string())
+        }
+        None => (store.working_snapshot(item)?, "текущее".to_string()),
+    };
+    Ok((before, after, before_info.version.to_string(), after_label))
+}
+
+fn render_changes(
+    store: &Store,
+    part: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    output: Option<&Path>,
+) -> Result<()> {
+    let item = store.item(part)?;
+    let reg = registry();
+    let Some(renderer) = reg.renderers().next() else {
+        bail!("цветная подсветка доступна в сборке Nonius с OpenCascade");
+    };
+    let (before, after, from_label, to_label) = snapshots(store, &item, from, to)?;
+    let work = store
+        .project()
+        .root()
+        .join(".git")
+        .join("nonius")
+        .join("render");
+    let files = renderer.render(&before, &after, &ChangeReport::empty(""), &work)?;
+    let Some(image) = files.first() else {
+        bail!("у «{}» нет model.step — рисовать нечего", item.name);
+    };
+    let target = match output {
+        Some(p) => p.to_path_buf(),
+        None => PathBuf::from(format!("{}-{from_label}-{to_label}.png", item.name)),
+    };
+    fs::copy(image, &target)
+        .with_context(|| format!("не удалось сохранить {}", target.display()))?;
+    println!("«{}»: {from_label} → {to_label}", item.name);
+    println!("Картинка: {}", target.display());
+    println!("Зелёное — добавлено, красное — убрано, серое — без изменений.");
     Ok(())
 }
 

@@ -8,6 +8,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  OCCT_PACKAGES: >-
+    libocct-foundation-dev libocct-modeling-data-dev
+    libocct-modeling-algorithms-dev libocct-data-exchange-dev
 
 jobs:
   fmt:
@@ -22,9 +25,11 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+      - name: OpenCascade
+        run: sudo apt-get update -q && sudo apt-get install -y -q $OCCT_PACKAGES
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -57,6 +62,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+
+  geometry:
+    name: Геометрия (OpenCascade)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: OpenCascade
+        run: sudo apt-get update -q && sudo apt-get install -y -q $OCCT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set +e
+          cargo test --workspace 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "^(error|warning)|panicked|FAILED|^---- " test.log | head -40 | sed -E 's/^/::error::/'
+          fi
+          exit $status
+      - name: Проверка, что геометрия включилась
+        run: cargo run -q -p nonius-cli -- modules | tee modules.txt && grep -q "OpenCascade" modules.txt
 
   msrv:
     name: Минимальная версия Rust (1.85)

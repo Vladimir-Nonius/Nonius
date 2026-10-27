@@ -360,12 +360,55 @@ impl Store {
         Ok(written)
     }
 
-    /// Версия, как её видят модули сравнения.
+    /// Папка с файлами версии. Файлы выкладываются один раз в кэш внутри
+    /// `.git/nonius/versions/<коммит>` и дальше переиспользуются: версия не
+    /// меняется, а `.git` не попадает в историю.
+    pub fn version_dir(&self, item: &Item, version: &VersionInfo) -> Result<PathBuf> {
+        let cache = self
+            .project
+            .root()
+            .join(".git")
+            .join("nonius")
+            .join("versions");
+        let dir = cache.join(&version.commit);
+        let done = dir.join(".complete");
+        if done.is_file() {
+            return Ok(dir);
+        }
+        let tmp = cache.join(format!("{}.tmp", version.commit));
+        if tmp.exists() {
+            fs::remove_dir_all(&tmp).map_err(|e| StoreError::Io {
+                path: tmp.clone(),
+                source: e,
+            })?;
+        }
+        fs::create_dir_all(&tmp).map_err(|e| StoreError::Io {
+            path: tmp.clone(),
+            source: e,
+        })?;
+        self.export(item, version, &tmp)?;
+        fs::write(tmp.join(".complete"), b"").map_err(|e| StoreError::Io {
+            path: tmp.clone(),
+            source: e,
+        })?;
+        if dir.exists() {
+            // Другой процесс успел раньше — его копия такая же.
+            let _ = fs::remove_dir_all(&tmp);
+            return Ok(dir);
+        }
+        fs::rename(&tmp, &dir).map_err(|e| StoreError::Io {
+            path: dir.clone(),
+            source: e,
+        })?;
+        Ok(dir)
+    }
+
+    /// Версия, как её видят модули сравнения: файлы версии лежат в `dir`.
     pub fn snapshot(&self, item: &Item, version: &VersionInfo) -> Result<Snapshot> {
         Ok(Snapshot {
             item: item.name.clone(),
             version: Some(version.version),
-            dir: item.dir.clone(),
+            dir: self.version_dir(item, version)?,
             meta: self.meta_at(item, version)?,
             tree: self.tree_at(item, version)?,
         })
