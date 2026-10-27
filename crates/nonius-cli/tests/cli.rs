@@ -172,3 +172,13 @@ fn material_sets_mass_only_when_known() {
     let (ok, out) = nonius(d, &["materials"]);
     assert!(ok && out.contains("АМг6") && out.contains("2640"), "{out}");
 }
+
+#[test]
+fn density_needs_material() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    let (ok, _) = nonius(d, &["material", "вал", "--density", "7800"]);
+    assert!(!ok, "плотность без материала не принимается");
+}

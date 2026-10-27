@@ -30,10 +30,9 @@ use nonius_core::project::Item;
 use nonius_core::Project;
 use nonius_store::Store;
 
-pub use cache::CacheEntry;
 pub use compare::{CompareOptions, Comparison, NoProgress, Progress};
 pub use error::{Error, Result};
-pub use import::Imported;
+pub use import::{Imported, PREVIEW_FORMAT};
 pub use items::{ItemState, ItemStatus};
 pub use materials::{find_material, Material, MATERIALS};
 pub use passport::{Mass, MaterialChoice, Passport};
@@ -102,11 +101,6 @@ impl App {
         self.project
             .find_item(&parsed)?
             .ok_or_else(|| Error::UnknownItem(name.to_string()))
-    }
-
-    /// Папка служебных файлов программы: `.git/nonius`. В историю не попадает.
-    pub(crate) fn work_dir(&self) -> PathBuf {
-        self.project.root().join(".git").join("nonius")
     }
 }
 

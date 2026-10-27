@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::extension::Snapshot;
 use crate::meta::{ItemKind, PartMeta};
 use crate::names::PartName;
 use crate::schema::{self, Versioned};
@@ -254,6 +255,23 @@ impl Project {
     /// Прочитать `meta.yaml` детали.
     pub fn load_meta(&self, item: &Item) -> Result<PartMeta> {
         schema::load(&item.dir.join(META_FILE))
+    }
+
+    /// Текущее (ещё не зафиксированное) состояние детали, как его видят модули.
+    pub fn working_snapshot(&self, item: &Item) -> Result<Snapshot> {
+        let tree_path = item.dir.join(TREE_FILE);
+        let tree = if tree_path.is_file() {
+            Some(schema::load(&tree_path)?)
+        } else {
+            None
+        };
+        Ok(Snapshot {
+            item: item.name.clone(),
+            version: None,
+            dir: item.dir.clone(),
+            meta: self.load_meta(item)?,
+            tree,
+        })
     }
 }
 

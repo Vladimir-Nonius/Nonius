@@ -1,4 +1,4 @@
-//! Экспорт `png`: превью детали `preview.png` из `model.step` версии.
+//! Экспорт `preview`: превью детали `preview.png` из `model.step` версии.
 
 use std::path::{Path, PathBuf};
 
@@ -6,6 +6,9 @@ use nonius_core::extension::{Exporter, ExtensionPoint, Module, ModuleManifest, S
 use nonius_core::{Error, Result};
 
 use super::{manifest, module_err, MODEL_STEP};
+
+/// Формат экспорта «превью детали» (так его ищет программа).
+const FORMAT: &str = "preview";
 
 /// Имя превью, которое пишет [`PreviewExporter`].
 pub const PREVIEW_PNG: &str = "preview.png";
@@ -41,11 +44,11 @@ impl Module for PreviewExporter {
 
 impl Exporter for PreviewExporter {
     fn formats(&self) -> Vec<String> {
-        vec!["png".into()]
+        vec![FORMAT.into()]
     }
 
     fn export(&self, snapshot: &Snapshot, format: &str, out_dir: &Path) -> Result<PathBuf> {
-        if !format.eq_ignore_ascii_case("png") {
+        if !format.eq_ignore_ascii_case(FORMAT) {
             return Err(Error::Module {
                 module: Self::ID.into(),
                 message: format!("формат {format} не поддерживается"),

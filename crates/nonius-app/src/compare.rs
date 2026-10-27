@@ -4,6 +4,7 @@
 //! Отчёты и файлы кэшируются отдельно: сравнение без картинок быстрое, а
 //! картинки дорисовываются, когда их попросят.
 
+use std::cell::OnceCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,16 +13,27 @@ use nonius_core::extension::{ExtensionPoint, Snapshot};
 use nonius_core::project::Item;
 use nonius_core::schema::Versioned;
 use nonius_core::{PartName, VersionNumber};
-use nonius_store::{FileChange, VersionInfo};
+use nonius_store::{workdir, FileChange, StoreError, VersionInfo};
 
 use crate::cache::{self, CacheEntry};
 use crate::{App, Error, Result};
 
-/// Что посчитать при сравнении.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Что посчитать при сравнении. По умолчанию — только отчёты (быстро).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompareOptions {
+    /// Отчёты модулей сравнения: числа, материал, форма.
+    pub reports: bool,
     /// Нарисовать изменения (картинки, 3D-сцена). Дольше, чем одни числа.
     pub render: bool,
+}
+
+impl Default for CompareOptions {
+    fn default() -> Self {
+        Self {
+            reports: true,
+            render: false,
+        }
+    }
 }
 
 /// Ход долгого действия и его отмена. Окно показывает шаги и даёт кнопку
@@ -89,10 +101,29 @@ impl Comparison {
     }
 }
 
-/// Одна сторона сравнения: снимок для модулей и отпечаток для ключа кэша.
-struct Side {
-    snapshot: Snapshot,
-    id: String,
+/// Снимки обеих версий для модулей. Готовятся только при промахе кэша:
+/// выложить версию из git дороже, чем найти готовый результат.
+struct Sides<'a> {
+    app: &'a App,
+    item: &'a Item,
+    before: &'a VersionInfo,
+    after: Option<&'a VersionInfo>,
+    snapshots: OnceCell<(Snapshot, Snapshot)>,
+}
+
+impl Sides<'_> {
+    fn get(&self) -> Result<&(Snapshot, Snapshot)> {
+        if let Some(s) = self.snapshots.get() {
+            return Ok(s);
+        }
+        let store = self.app.store()?;
+        let before = store.snapshot(self.item, self.before)?;
+        let after = match self.after {
+            Some(v) => store.snapshot(self.item, v)?,
+            None => store.working_snapshot(self.item)?,
+        };
+        Ok(self.snapshots.get_or_init(|| (before, after)))
+    }
 }
 
 impl App {
@@ -106,103 +137,129 @@ impl App {
         options: &CompareOptions,
         progress: &dyn Progress,
     ) -> Result<Comparison> {
-        let check = || match progress.cancelled() {
-            true => Err(Error::Cancelled),
-            false => Ok(()),
+        let check = || {
+            if progress.cancelled() {
+                Err(Error::Cancelled)
+            } else {
+                Ok(())
+            }
         };
         let item = self.item(name)?;
         let store = self.store()?;
-        let before_info = match from {
-            Some(v) => store.version(&item, v)?,
-            None => store
-                .latest(&item)?
+        let versions = store.versions(&item)?;
+        let pick = |n: VersionNumber| {
+            versions.iter().find(|v| v.version == n).ok_or_else(|| {
+                Error::Store(StoreError::UnknownVersion {
+                    item: item.name.clone(),
+                    version: n,
+                })
+            })
+        };
+        let before = match from {
+            Some(n) => pick(n)?,
+            None => versions
+                .first()
                 .ok_or_else(|| Error::NoVersions(item.name.clone()))?,
         };
-        let after_info = to.map(|v| store.version(&item, v)).transpose()?;
+        let after = to.map(pick).transpose()?;
 
         progress.step("Готовлю версии");
-        let before = self.side(&item, Some(&before_info))?;
-        let after = self.side(&item, after_info.as_ref())?;
-        check()?;
-
         let ctx = CompareContext {
             tolerance_mm: self.project.config().compare.tolerance_mm,
             ..CompareContext::default()
         };
+        let after_id = match after {
+            Some(v) => format!("версия {}", v.commit),
+            None => format!("текущее {}", cache::dir_fingerprint(&item.dir)?),
+        };
+        let key = vec![
+            format!("nonius-cache {}", CacheEntry::CURRENT),
+            format!("версия {}", before.commit),
+            after_id,
+            format!("{} {}", ctx.tolerance_mm, ctx.relative_tolerance),
+        ];
+        let sides = Sides {
+            app: self,
+            item: &item,
+            before,
+            after,
+            snapshots: OnceCell::new(),
+        };
+        check()?;
+
         let mut out = Comparison {
             item: item.name.clone(),
-            from: before_info.version,
-            to: after_info.as_ref().map(|v| v.version),
+            from: before.version,
+            to: after.map(|v| v.version),
             reports: Vec::new(),
             file_changes: Vec::new(),
             files: Vec::new(),
             from_cache: true,
         };
-        let labels = (out.from_label(), out.to_label());
+        let base = CacheEntry {
+            schema: CacheEntry::CURRENT,
+            item: item.name.to_string(),
+            from: out.from_label(),
+            to: out.to_label(),
+            modules: Vec::new(),
+            reports: Vec::new(),
+            files: Vec::new(),
+        };
+        let comparators = if options.reports {
+            self.modules_of(ExtensionPoint::Comparator)
+        } else {
+            Vec::new()
+        };
 
-        let (entry, _, cached) =
-            self.cached("reports", &before, &after, &ctx, &labels, |_, base| {
-                progress.step("Сравниваю");
-                let reports = self
-                    .registry
-                    .compare_all(&before.snapshot, &after.snapshot, &ctx)?;
-                check()?;
-                Ok(CacheEntry { reports, ..base })
-            })?;
-        out.reports = entry.reports;
-        out.from_cache &= cached;
+        if options.reports {
+            let (entry, _, cached) =
+                self.cached("reports", &key, comparators.clone(), &base, |_| {
+                    let (a, b) = sides.get()?;
+                    progress.step("Сравниваю");
+                    let reports = self.registry.compare_all(a, b, &ctx)?;
+                    check()?;
+                    Ok((reports, Vec::new()))
+                })?;
+            out.reports = entry.reports;
+            out.from_cache &= cached;
+        }
 
         if options.render {
-            if self.modules_of(ExtensionPoint::Renderer).is_empty() {
+            if self.registry.renderers().next().is_none() {
                 return Err(Error::NoRenderer);
             }
-            let merged = ChangeReport {
-                comparator: "nonius-app".into(),
-                changes: out.reports.iter().flat_map(|r| r.changes.clone()).collect(),
-            };
-            let (entry, dir, cached) =
-                self.cached("files", &before, &after, &ctx, &labels, |dir, base| {
-                    let mut files = Vec::new();
-                    for r in self.registry.renderers() {
-                        check()?;
-                        progress.step("Рисую изменения");
-                        let id = r.manifest().id.clone();
-                        let rel_dir = format!("files/{id}");
-                        let made = r.render(
-                            &before.snapshot,
-                            &after.snapshot,
-                            &merged,
-                            &dir.join(&rel_dir),
-                        )?;
-                        for f in made {
-                            files.push(keep_file(dir, &rel_dir, &f)?);
-                        }
-                    }
+            // Картинки зависят и от отчётов: в ключе — оба набора модулей.
+            let mut modules = comparators;
+            modules.extend(self.modules_of(ExtensionPoint::Renderer));
+            let (entry, dir, cached) = self.cached("files", &key, modules, &base, |dir| {
+                let (a, b) = sides.get()?;
+                let merged = ChangeReport {
+                    comparator: "nonius-app".into(),
+                    changes: out.reports.iter().flat_map(|r| r.changes.clone()).collect(),
+                };
+                let mut files = Vec::new();
+                for r in self.registry.renderers() {
                     check()?;
-                    Ok(CacheEntry { files, ..base })
-                })?;
+                    progress.step("Рисую изменения");
+                    let rel_dir = format!("files/{}", r.manifest().id);
+                    for f in r.render(a, b, &merged, &dir.join(&rel_dir))? {
+                        files.push(keep_file(dir, &rel_dir, &f)?);
+                    }
+                }
+                check()?;
+                Ok((Vec::new(), files))
+            })?;
             out.files = entry.files.iter().map(|f| dir.join(f)).collect();
             out.from_cache &= cached;
         }
 
+        if !out.from_cache {
+            cache::prune(&self.cache_dir(), cache::KEEP_ENTRIES);
+        }
         if to.is_none() {
             out.file_changes = store.changes(&item)?;
         }
         Ok(out)
-    }
-
-    fn side(&self, item: &Item, version: Option<&VersionInfo>) -> Result<Side> {
-        let store = self.store()?;
-        Ok(match version {
-            Some(v) => Side {
-                snapshot: store.snapshot(item, v)?,
-                id: format!("версия {}", v.commit),
-            },
-            None => Side {
-                id: format!("текущее {}", cache::dir_fingerprint(&item.dir)?),
-                snapshot: store.working_snapshot(item)?,
-            },
-        })
     }
 
     /// `id версия` модулей точки — часть ключа кэша.
@@ -215,49 +272,37 @@ impl App {
             .collect()
     }
 
-    /// Взять запись из кэша или посчитать её `compute` и сохранить.
-    /// Возвращает запись, её папку и признак «из кэша».
+    /// Взять запись из кэша или посчитать `compute` (отчёты, файлы) и
+    /// сохранить. Возвращает запись, её папку и признак «из кэша».
     fn cached(
         &self,
         kind: &str,
-        before: &Side,
-        after: &Side,
-        ctx: &CompareContext,
-        labels: &(String, String),
-        compute: impl FnOnce(&Path, CacheEntry) -> Result<CacheEntry>,
+        key: &[String],
+        modules: Vec<String>,
+        base: &CacheEntry,
+        compute: impl FnOnce(&Path) -> Result<(Vec<ChangeReport>, Vec<String>)>,
     ) -> Result<(CacheEntry, PathBuf, bool)> {
-        // Картинки зависят и от отчётов: в ключе файлов — оба набора модулей.
-        let mut modules = self.modules_of(ExtensionPoint::Comparator);
-        if kind == "files" {
-            modules.extend(self.modules_of(ExtensionPoint::Renderer));
-        }
-        let mut parts = vec![
-            format!("nonius-cache {}", CacheEntry::CURRENT),
-            kind.to_string(),
-            before.id.clone(),
-            after.id.clone(),
-            format!("{} {}", ctx.tolerance_mm, ctx.relative_tolerance),
-        ];
+        let mut parts = key.to_vec();
+        parts.push(kind.to_string());
         parts.extend(modules.iter().cloned());
         let dir = self.cache_dir().join(cache::key(&parts));
         if let Some(entry) = cache::load(&dir) {
             return Ok((entry, dir, true));
         }
-        let base = CacheEntry {
-            schema: CacheEntry::CURRENT,
-            item: before.snapshot.item.to_string(),
-            from: labels.0.clone(),
-            to: labels.1.clone(),
-            modules,
-            reports: Vec::new(),
-            files: Vec::new(),
-        };
-        let entry = cache::store(&dir, |tmp| compute(tmp, base))?;
+        let entry = cache::store(&dir, |tmp| {
+            let (reports, files) = compute(tmp)?;
+            Ok(CacheEntry {
+                modules,
+                reports,
+                files,
+                ..base.clone()
+            })
+        })?;
         Ok((entry, dir, false))
     }
 
-    pub(crate) fn cache_dir(&self) -> PathBuf {
-        self.work_dir().join("cache")
+    fn cache_dir(&self) -> PathBuf {
+        workdir::work_dir(self.project.root()).join("cache")
     }
 }
 

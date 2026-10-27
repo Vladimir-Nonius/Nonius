@@ -212,6 +212,15 @@ fn mass_only_with_material() {
     let p = f.app.set_material("пластина", Some(own)).unwrap();
     assert!((p.mass.kg().unwrap() - 0.2).abs() < 1e-9, "{p:?}");
 
+    // Тот же материал без плотности — плотность остаётся прежней.
+    let again = MaterialChoice {
+        name: "Унобтаниум".into(),
+        density_kg_m3: None,
+    };
+    let p = f.app.set_material("пластина", Some(again)).unwrap();
+    assert_eq!(p.meta.density_kg_m3, Some(1000.0), "{p:?}");
+    assert!(matches!(p.mass, Mass::Computed { .. }), "{p:?}");
+
     let bad = MaterialChoice {
         name: "Ст3".into(),
         density_kg_m3: Some(-5.0),
@@ -276,7 +285,10 @@ fn compare_uses_cache() {
     assert_eq!(again.reports, first.reports);
 
     // Картинки: рисуются один раз, дальше из кэша.
-    let render = CompareOptions { render: true };
+    let render = CompareOptions {
+        render: true,
+        ..CompareOptions::default()
+    };
     let r1 = f
         .app
         .compare("пластина", None, None, &render, &NoProgress)
@@ -316,7 +328,10 @@ fn broken_cache_is_recomputed() {
     import(&f, 1000.0);
     f.app.save_version("пластина", "v1").unwrap();
     import(&f, 2000.0);
-    let render = CompareOptions { render: true };
+    let render = CompareOptions {
+        render: true,
+        ..CompareOptions::default()
+    };
     f.app
         .compare("пластина", None, None, &render, &NoProgress)
         .unwrap();
@@ -371,7 +386,10 @@ fn render_needs_a_renderer() {
         "пластина",
         None,
         None,
-        &CompareOptions { render: true },
+        &CompareOptions {
+            render: true,
+            ..CompareOptions::default()
+        },
         &NoProgress,
     );
     assert!(matches!(r, Err(Error::NoRenderer)), "{r:?}");
@@ -383,7 +401,10 @@ fn compare_from_two_threads() {
     import(&f, 1000.0);
     f.app.save_version("пластина", "v1").unwrap();
     import(&f, 3000.0);
-    let render = CompareOptions { render: true };
+    let render = CompareOptions {
+        render: true,
+        ..CompareOptions::default()
+    };
     std::thread::scope(|s| {
         let a = s.spawn(|| f.app.compare("пластина", None, None, &render, &NoProgress));
         let b = s.spawn(|| f.app.compare("пластина", None, None, &render, &NoProgress));

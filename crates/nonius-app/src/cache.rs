@@ -1,7 +1,8 @@
 //! Кэш результатов сравнения: `.git/nonius/cache/<ключ>/`.
 //!
-//! Ключ — хеш содержимого обеих версий, допусков и версий модулей. Поменялся
-//! файл детали или обновился модуль — ключ другой, и всё считается заново.
+//! Ключ — хеш обеих версий (коммит или отпечаток текущих файлов), допусков и
+//! версий модулей. Поменялся файл детали или обновился модуль — ключ другой,
+//! и всё считается заново. Хранится `KEEP_ENTRIES` последних записей.
 //! В папке записи: `cache.yaml` (описание, `schema: N`) и `files/` (картинки,
 //! сцены). Запись готовится во временной папке и переименовывается целиком,
 //! поэтому недописанных записей не бывает. Незнакомая или битая запись
@@ -9,17 +10,20 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use nonius_core::compare::ChangeReport;
 use nonius_core::schema::{self, Versioned};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use nonius_store::workdir;
+
 use crate::{Error, Result};
 
 /// Описание записи кэша (`cache.yaml`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CacheEntry {
+pub(crate) struct CacheEntry {
     /// Версия схемы файла.
     pub schema: u32,
     /// Деталь.
@@ -57,32 +61,44 @@ pub(crate) fn key(parts: &[String]) -> String {
     hex(&h.finalize())
 }
 
-/// Отпечаток содержимого папки: пути и байты всех файлов.
+/// Отпечаток текущего состояния папки детали: путь, размер и время
+/// изменения каждого файла. Файлы не перечитываются: модели бывают по сотне
+/// мегабайт, а сравнивают их часто.
 pub(crate) fn dir_fingerprint(dir: &Path) -> Result<String> {
     let mut files = Vec::new();
     collect(dir, dir, &mut files)?;
     files.sort();
     let mut h = Sha256::new();
-    for (rel, path) in files {
-        let bytes = fs::read(&path).map_err(|e| Error::io(&path, e))?;
+    for (rel, len, modified) in files {
         h.update(rel.as_bytes());
         h.update([0]);
-        h.update((bytes.len() as u64).to_le_bytes());
-        h.update(&bytes);
+        h.update(len.to_le_bytes());
+        h.update(modified.to_le_bytes());
     }
     Ok(hex(&h.finalize()))
 }
 
-fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
+fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, u64, u128)>) -> Result<()> {
     let entries = fs::read_dir(dir).map_err(|e| Error::io(dir, e))?;
     for entry in entries {
-        let path = entry.map_err(|e| Error::io(dir, e))?.path();
-        if path.is_dir() {
+        let entry = entry.map_err(|e| Error::io(dir, e))?;
+        let path = entry.path();
+        let meta = entry.metadata().map_err(|e| Error::io(&path, e))?;
+        if meta.is_dir() {
             collect(root, &path, out)?;
-        } else {
-            let rel = path.strip_prefix(root).unwrap_or(&path);
-            out.push((rel.to_string_lossy().replace('\\', "/"), path));
+            continue;
         }
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        let rel = path.strip_prefix(root).unwrap_or(&path);
+        out.push((
+            rel.to_string_lossy().replace('\\', "/"),
+            meta.len(),
+            modified,
+        ));
     }
     Ok(())
 }
@@ -103,47 +119,56 @@ pub(crate) fn load(dir: &Path) -> Option<CacheEntry> {
 }
 
 /// Записать запись: `fill` кладёт файлы во временную папку и возвращает
-/// описание; затем папка целиком переименовывается в `dir`.
+/// описание; затем папка целиком ставится на место `dir`. Если другой поток
+/// или процесс успел записать годную запись — возвращается она.
 pub(crate) fn store(
     dir: &Path,
     fill: impl FnOnce(&Path) -> Result<CacheEntry>,
 ) -> Result<CacheEntry> {
-    let parent = dir.parent().unwrap_or(dir);
-    fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
-    let tmp = parent.join(format!(
-        "{}.tmp-{}-{:?}",
-        dir.file_name().unwrap_or_default().to_string_lossy(),
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = fs::remove_dir_all(&tmp);
-    fs::create_dir_all(&tmp).map_err(|e| Error::io(&tmp, e))?;
-
-    let result = fill(&tmp).and_then(|entry| {
+    let tmp = workdir::tmp_dir_for(dir).map_err(|e| Error::io(dir, e))?;
+    let entry = match fill(&tmp).and_then(|entry| {
         schema::save(&entry, &tmp.join(CACHE_FILE))?;
         Ok(entry)
-    });
-    let entry = match result {
+    }) {
         Ok(e) => e,
         Err(e) => {
             let _ = fs::remove_dir_all(&tmp);
             return Err(e);
         }
     };
-    if dir.exists() {
-        // Битая или чужая запись (её уже признали негодной) — заменить.
-        // Если другой поток успел записать годную, берём её.
-        if let Some(ready) = load(dir) {
-            let _ = fs::remove_dir_all(&tmp);
-            return Ok(ready);
+    let mut theirs = None;
+    workdir::publish_dir(&tmp, dir, |d| {
+        theirs = load(d);
+        theirs.is_some()
+    })
+    .map_err(|e| Error::io(dir, e))?;
+    Ok(theirs.unwrap_or(entry))
+}
+
+/// Сколько записей хранить. Старые удаляются: кэш всегда можно пересчитать.
+pub(crate) const KEEP_ENTRIES: usize = 200;
+
+/// Убрать самые старые записи сверх `keep`. Ошибки не мешают работе —
+/// кэш вспомогательный. Временные папки убирает `workdir`.
+pub(crate) fn prune(root: &Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let mut ready: Vec<(SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(|e| !e.file_name().to_string_lossy().contains(".tmp-"))
+        .map(|e| {
+            let modified = e.metadata().and_then(|m| m.modified());
+            (modified.unwrap_or(SystemTime::UNIX_EPOCH), e.path())
+        })
+        .collect();
+    if ready.len() > keep {
+        ready.sort(); // старые первыми
+        for (_, path) in &ready[..ready.len() - keep] {
+            let _ = fs::remove_dir_all(path);
         }
-        let _ = fs::remove_dir_all(dir);
     }
-    if let Err(e) = fs::rename(&tmp, dir) {
-        let _ = fs::remove_dir_all(&tmp);
-        return load(dir).ok_or_else(|| Error::io(dir, e));
-    }
-    Ok(entry)
 }
 
 #[cfg(test)]
@@ -203,6 +228,22 @@ mod tests {
         assert!(store(&dir, |_| Err(Error::Cancelled)).is_err());
         assert!(!dir.exists());
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn prune_keeps_newest() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            store(&tmp.path().join(format!("k{i}")), |_| Ok(entry())).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        prune(tmp.path(), 3);
+        let mut left: Vec<String> = fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["k2", "k3", "k4"]);
     }
 
     #[test]

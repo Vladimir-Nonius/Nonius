@@ -194,7 +194,7 @@ fn preview_exporter_contract() {
     if let Err(v) = contract::exporter(&exp, &snap(dir.path()), &out) {
         panic!("нарушения контракта:\n- {}", v.join("\n- "));
     }
-    let png = exp.export(&snap(dir.path()), "png", &out).unwrap();
+    let png = exp.export(&snap(dir.path()), "preview", &out).unwrap();
     assert_eq!(png, out.join(PREVIEW_PNG));
     assert!(exp.export(&snap(dir.path()), "dxf", &out).is_err());
 }

@@ -3,13 +3,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use nonius_core::extension::Snapshot;
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::project::{Item, META_FILE};
 use nonius_core::{schema, PartName};
 
+use crate::materials::find_material;
 use crate::passport::update_mass;
 use crate::{App, Error, Result};
+
+/// Формат экспорта «превью детали»: модуль, который его объявляет, рисует
+/// `preview.png` для списка деталей.
+pub const PREVIEW_FORMAT: &str = "preview";
 
 /// Итог импорта.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,8 +71,13 @@ impl App {
             meta.geometry = read.geometry;
             meta.source = read.source;
             if read.material.is_some() && read.material != meta.material {
+                // Новый материал из CAD: плотность — из справочника, если он там есть.
+                meta.density_kg_m3 = read
+                    .material
+                    .as_deref()
+                    .and_then(find_material)
+                    .map(|m| m.density_kg_m3);
                 meta.material = read.material;
-                meta.density_kg_m3 = None;
             }
             meta.properties.extend(read.properties);
         } else if meta.source.cad.is_none() {
@@ -78,7 +87,7 @@ impl App {
         schema::save(&meta, &item.dir.join(META_FILE))?;
 
         let preview = if target == "model.step" {
-            self.make_preview(&item, &meta, &mut warnings)
+            self.make_preview(&item, &mut warnings)
         } else {
             None
         };
@@ -110,22 +119,16 @@ impl App {
         }
     }
 
-    /// Превью детали — модулем экспорта в `png`, если такой подключён.
-    fn make_preview(
-        &self,
-        item: &Item,
-        meta: &PartMeta,
-        warnings: &mut Vec<String>,
-    ) -> Option<PathBuf> {
-        let exporter = self.registry.exporter_for("png")?;
-        let snapshot = Snapshot {
-            item: item.name.clone(),
-            version: None,
-            dir: item.dir.clone(),
-            meta: meta.clone(),
-            tree: None,
-        };
-        match exporter.export(&snapshot, "png", &item.dir) {
+    /// Превью детали — модулем экспорта в формат [`PREVIEW_FORMAT`], если
+    /// такой подключён. Модуль кладёт файл в папку детали.
+    fn make_preview(&self, item: &Item, warnings: &mut Vec<String>) -> Option<PathBuf> {
+        let exporter = self.registry.exporter_for(PREVIEW_FORMAT)?;
+        let made = self
+            .project
+            .working_snapshot(item)
+            .map_err(Error::from)
+            .and_then(|s| Ok(exporter.export(&s, PREVIEW_FORMAT, &item.dir)?));
+        match made {
             Ok(p) => Some(p),
             Err(e) => {
                 warnings.push(format!("превью не сделано: {e}"));

@@ -63,6 +63,13 @@ impl Comparator for MetaComparator {
             b.material.as_deref(),
             &mut out,
         );
+        scalar(
+            "Плотность, кг/м³",
+            a.density_kg_m3,
+            b.density_kg_m3,
+            ctx,
+            &mut out,
+        );
         text_change(
             "Версия CAD",
             a.source.cad_version.as_deref(),

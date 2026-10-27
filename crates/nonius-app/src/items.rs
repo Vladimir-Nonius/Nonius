@@ -64,11 +64,20 @@ impl App {
         self.status_of(self.item(name)?)
     }
 
+    /// Несохранённые изменения детали — без истории, быстрее полного статуса.
+    pub fn changes(&self, item: &Item) -> Result<Vec<FileChange>> {
+        Ok(self.store()?.changes(item)?)
+    }
+
+    /// Последняя версия детали.
+    pub fn latest(&self, item: &Item) -> Result<Option<VersionInfo>> {
+        Ok(self.store()?.latest(item)?)
+    }
+
     fn status_of(&self, item: Item) -> Result<ItemStatus> {
-        let store = self.store()?;
         Ok(ItemStatus {
-            latest: store.latest(&item)?,
-            changes: store.changes(&item)?,
+            latest: self.latest(&item)?,
+            changes: self.changes(&item)?,
             item,
         })
     }

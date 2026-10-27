@@ -108,7 +108,7 @@ pub enum Command {
         /// Материал: Ст3, 09Г2С, АМг6… (без него — показать паспорт).
         material: Option<String>,
         /// Плотность, кг/м³ (по умолчанию — из справочника: nonius materials).
-        #[arg(long)]
+        #[arg(long, requires = "material")]
         density: Option<f64>,
         /// Убрать материал.
         #[arg(long, conflicts_with_all = ["material", "density"])]

@@ -3,29 +3,31 @@
 use std::path::Path;
 
 use anyhow::Result;
-use nonius_app::{App, FileChangeKind, ItemStatus};
+use nonius_app::{App, FileChangeKind};
 
 use crate::format::{parse_version, short_date};
 
 pub fn status(app: &App, part: Option<&str>) -> Result<()> {
-    let items: Vec<ItemStatus> = match part {
-        Some(p) => vec![app.item_status(p)?],
-        None => app.items()?,
+    let items = match part {
+        Some(p) => vec![app.item(p)?],
+        None => app.item_list()?,
     };
     let mut clean = 0;
-    for s in &items {
-        if s.changes.is_empty() {
+    for item in &items {
+        // История нужна только изменённым деталям: так быстрее на больших проектах.
+        let changes = app.changes(item)?;
+        if changes.is_empty() {
             clean += 1;
             if part.is_some() {
-                println!("«{}»: изменений нет", s.item.name);
+                println!("«{}»: изменений нет", item.name);
             }
             continue;
         }
-        match &s.latest {
-            Some(v) => println!("«{}» (последняя {}):", s.item.name, v.version),
-            None => println!("«{}» (ещё нет версий):", s.item.name),
+        match app.latest(item)? {
+            Some(v) => println!("«{}» (последняя {}):", item.name, v.version),
+            None => println!("«{}» (ещё нет версий):", item.name),
         }
-        for c in &s.changes {
+        for c in &changes {
             let word = match c.kind {
                 FileChangeKind::Added => "новый",
                 FileChangeKind::Modified => "изменён",

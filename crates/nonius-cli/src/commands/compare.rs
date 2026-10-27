@@ -50,7 +50,11 @@ pub fn render_changes(
     output: Option<&Path>,
 ) -> Result<()> {
     let (from, to) = versions(from, to)?;
-    let options = CompareOptions { render: true };
+    // Только картинка: числа здесь не печатаются, а считать форму дважды долго.
+    let options = CompareOptions {
+        reports: false,
+        render: true,
+    };
     let c = app.compare(part, from, to, &options, &NoProgress)?;
     let Some(image) = c.file("changes.png") else {
         bail!("у «{}» нет model.step — рисовать нечего", c.item);

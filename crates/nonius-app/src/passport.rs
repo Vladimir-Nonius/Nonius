@@ -101,8 +101,8 @@ pub(crate) fn update_mass(meta: &mut PartMeta) {
     if meta.material.is_none() {
         meta.density_kg_m3 = None;
     }
-    if let Some(d) = meta.density_kg_m3 {
-        meta.geometry.mass_kg = meta.geometry.volume_mm3.map(|v| mass_kg(v, d));
+    if let (Some(d), Some(v)) = (meta.density_kg_m3, meta.geometry.volume_mm3) {
+        meta.geometry.mass_kg = Some(mass_kg(v, d));
     }
 }
 
@@ -126,28 +126,29 @@ impl App {
         })
     }
 
-    /// Назначить материал (`None` — убрать). Меняет `meta.yaml` в папке
-    /// детали; чтобы изменение попало в историю, сохраните версию.
+    /// Назначить материал (`None` или пустое название — убрать). Меняет
+    /// `meta.yaml` в папке детали; чтобы изменение попало в историю,
+    /// сохраните версию.
     pub fn set_material(&self, name: &str, choice: Option<MaterialChoice>) -> Result<Passport> {
         let item = self.item(name)?;
         let mut meta = self.project.load_meta(&item)?;
-        match choice {
+        match choice.filter(|c| !c.name.trim().is_empty()) {
             None => {
                 meta.material = None;
-                meta.density_kg_m3 = None;
                 meta.geometry.mass_kg = None;
             }
             Some(c) => {
                 let material = c.name.trim();
-                if material.is_empty() {
-                    return self.set_material(name, None);
-                }
+                let same = meta.material.as_deref() == Some(material);
                 let density = match c.density_kg_m3 {
                     Some(d) if !(d.is_finite() && d > 0.0) => return Err(Error::BadDensity(d)),
                     Some(d) => Some(d),
-                    None => find_material(material).map(|m| m.density_kg_m3),
+                    // Тот же материал без новой плотности — плотность прежняя.
+                    None => find_material(material)
+                        .map(|m| m.density_kg_m3)
+                        .or(meta.density_kg_m3.filter(|_| same)),
                 };
-                if meta.material.as_deref() != Some(material) {
+                if !same {
                     // Старая масса относилась к другому материалу.
                     meta.geometry.mass_kg = None;
                 }
@@ -157,7 +158,12 @@ impl App {
         }
         update_mass(&mut meta);
         schema::save(&meta, &item.dir.join(META_FILE))?;
-        self.passport(name, None)
+        Ok(Passport {
+            mass: Mass::of(&meta),
+            item: item.name,
+            version: None,
+            meta,
+        })
     }
 }
 
@@ -208,6 +214,12 @@ mod tests {
         let mut m = meta(Some("Ст3"), Some(7850.0), Some(1e6));
         update_mass(&mut m);
         assert!((m.geometry.mass_kg.unwrap() - 7.85).abs() < 1e-9);
+        // Без объёма масса из CAD не стирается.
+        let mut m = meta(Some("Ст3"), Some(7850.0), None);
+        m.geometry.mass_kg = Some(2.5);
+        update_mass(&mut m);
+        assert_eq!(m.geometry.mass_kg, Some(2.5));
+        let mut m = meta(Some("Ст3"), Some(7850.0), Some(1e6));
         m.material = None;
         update_mass(&mut m);
         assert_eq!(m.density_kg_m3, None);

@@ -63,6 +63,7 @@
 | `message.rs` | сообщение коммита и строки `Nonius-Item` / `Nonius-Version` |
 | `version.rs` | `VersionInfo`, `FileChange` |
 | `git.rs` | запуск системного `git` |
+| `workdir.rs` | служебная папка `.git/nonius`, запись в неё целыми папками (временная папка → переименование) |
 | `error.rs` | ошибки хранилища |
 
 ### `nonius-step` — заголовок STEP
@@ -88,7 +89,7 @@
 | `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал |
 | `src/modules/compare.rs` | `geometry-occt`: сравнение формы |
 | `src/modules/highlight.rs` | `highlight-occt`: `changes.png` |
-| `src/modules/preview.rs` | `preview-occt`: экспорт `png` — превью `preview.png` |
+| `src/modules/preview.rs` | `preview-occt`: экспорт `preview` — превью `preview.png` |
 | `src/render/mod.rs` | сетка, слои, цвета, вид, картинка |
 | `src/render/raster.rs` | отрисовка: камера, z-буфер, свет, «рентген» |
 
