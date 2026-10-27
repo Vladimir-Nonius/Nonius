@@ -17,8 +17,6 @@ use nonius_core::{schema, PartName, Project, VersionNumber};
 use nonius_step::StepHeaderSource;
 use nonius_store::{FileChangeKind, GitOptions, Store, VersionInfo};
 
-mod view;
-
 /// Nonius — контроль версий для CAD-моделей.
 #[derive(Parser)]
 #[command(name = "nonius", version, about, long_about = None)]
@@ -106,18 +104,6 @@ enum Command {
         /// Куда сохранить картинку (по умолчанию <деталь>-<было>-<стало>.png).
         #[arg(short, long)]
         output: Option<PathBuf>,
-    },
-    /// Открыть деталь в браузере: крутить мышью, изменения подсвечены цветом.
-    View {
-        /// Деталь.
-        part: String,
-        /// С какой версии (по умолчанию последняя).
-        from: Option<String>,
-        /// По какую версию (по умолчанию текущее состояние).
-        to: Option<String>,
-        /// Не открывать браузер, только показать адрес.
-        #[arg(long)]
-        no_browser: bool,
     },
     /// Выгрузить файлы версии в папку.
     Export {
@@ -309,12 +295,6 @@ fn run(cli: Cli) -> Result<()> {
             to.as_deref(),
             output.as_deref(),
         )?,
-        Command::View {
-            part,
-            from,
-            to,
-            no_browser,
-        } => view::view(&store()?, part, from.as_deref(), to.as_deref(), !no_browser)?,
         Command::Restore {
             part,
             version,

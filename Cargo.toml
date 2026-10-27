@@ -5,7 +5,6 @@ members = [
     "crates/nonius-store",
     "crates/nonius-step",
     "crates/nonius-occt",
-    "crates/nonius-view",
     "crates/nonius-cli",
 ]
 
@@ -22,7 +21,6 @@ nonius-core = { path = "crates/nonius-core" }
 nonius-store = { path = "crates/nonius-store" }
 nonius-step = { path = "crates/nonius-step" }
 nonius-occt = { path = "crates/nonius-occt" }
-nonius-view = { path = "crates/nonius-view" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
