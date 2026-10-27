@@ -9,6 +9,15 @@ use crate::ffi;
 use crate::render::Mesh;
 use crate::OcctError;
 
+/// Чтение и запись STEP в OpenCascade держат общие настройки (`Interface_Static`)
+/// и из двух потоков сразу ломаются («StepSelect_StepType»). Окно считает в
+/// фоне, тесты идут параллельно — поэтому STEP читается и пишется по очереди.
+fn step_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Контрольные числа тела. Единицы: мм, мм², мм³.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Props {
@@ -77,6 +86,7 @@ impl Shape {
     pub fn read_step(path: &Path) -> Result<Self, OcctError> {
         let c = c_path(path)?;
         let mut err = [0 as c_char; ERR_LEN];
+        let _guard = step_lock();
         // SAFETY: строки живут до конца вызова, буфер нужной длины.
         let ptr = unsafe { ffi::nonius_read_step(c.as_ptr(), err.as_mut_ptr(), ERR_LEN) };
         wrap(ptr, &err, &path.display().to_string())
@@ -86,6 +96,7 @@ impl Shape {
     pub fn write_step(&self, path: &Path) -> Result<(), OcctError> {
         let c = c_path(path)?;
         let mut err = [0 as c_char; ERR_LEN];
+        let _guard = step_lock();
         // SAFETY: тело живое, строки живут до конца вызова.
         let ok = unsafe {
             ffi::nonius_write_step(self.ptr.as_ptr(), c.as_ptr(), err.as_mut_ptr(), ERR_LEN)

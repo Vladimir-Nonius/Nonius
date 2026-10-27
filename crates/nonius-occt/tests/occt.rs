@@ -8,13 +8,13 @@ use std::path::Path;
 
 use nonius_core::compare::{ChangeKind, CompareContext};
 use nonius_core::contract;
-use nonius_core::extension::{Comparator, GeometrySource, Renderer, Snapshot};
+use nonius_core::extension::{Comparator, Exporter, GeometrySource, Renderer, Snapshot};
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::PartName;
 use nonius_occt::render::View;
 use nonius_occt::{
-    GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource, Shape, CHANGES_PNG,
-    MODEL_STEP,
+    GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource, PreviewExporter, Shape,
+    CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
 };
 
 fn close(a: f64, b: f64, tol: f64) -> bool {
@@ -183,4 +183,18 @@ fn preview_png_is_written() {
     assert!(nonius_occt::preview_png(&step, &png).unwrap());
     assert!(std::fs::metadata(&png).unwrap().len() > 1000);
     assert!(nonius_occt::occt_version().is_some());
+}
+
+#[test]
+fn preview_exporter_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    plate().write_step(&dir.path().join(MODEL_STEP)).unwrap();
+    let out = dir.path().join("выгрузка");
+    let exp = PreviewExporter::new();
+    if let Err(v) = contract::exporter(&exp, &snap(dir.path()), &out) {
+        panic!("нарушения контракта:\n- {}", v.join("\n- "));
+    }
+    let png = exp.export(&snap(dir.path()), "png", &out).unwrap();
+    assert_eq!(png, out.join(PREVIEW_PNG));
+    assert!(exp.export(&snap(dir.path()), "dxf", &out).is_err());
 }

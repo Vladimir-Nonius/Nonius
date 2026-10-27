@@ -3,31 +3,29 @@
 use std::path::Path;
 
 use anyhow::Result;
-use nonius_core::project::Item;
-use nonius_store::{FileChangeKind, Store};
+use nonius_app::{App, FileChangeKind, ItemStatus};
 
 use crate::format::{parse_version, short_date};
 
-pub fn status(store: &Store, part: Option<&str>) -> Result<()> {
-    let items: Vec<Item> = match part {
-        Some(p) => vec![store.item(p)?],
-        None => store.project().items()?,
+pub fn status(app: &App, part: Option<&str>) -> Result<()> {
+    let items: Vec<ItemStatus> = match part {
+        Some(p) => vec![app.item_status(p)?],
+        None => app.items()?,
     };
     let mut clean = 0;
-    for item in &items {
-        let changes = store.changes(item)?;
-        if changes.is_empty() {
+    for s in &items {
+        if s.changes.is_empty() {
             clean += 1;
             if part.is_some() {
-                println!("«{}»: изменений нет", item.name);
+                println!("«{}»: изменений нет", s.item.name);
             }
             continue;
         }
-        match store.latest(item)? {
-            Some(v) => println!("«{}» (последняя {}):", item.name, v.version),
-            None => println!("«{}» (ещё нет версий):", item.name),
+        match &s.latest {
+            Some(v) => println!("«{}» (последняя {}):", s.item.name, v.version),
+            None => println!("«{}» (ещё нет версий):", s.item.name),
         }
-        for c in changes {
+        for c in &s.changes {
             let word = match c.kind {
                 FileChangeKind::Added => "новый",
                 FileChangeKind::Modified => "изменён",
@@ -47,22 +45,17 @@ pub fn status(store: &Store, part: Option<&str>) -> Result<()> {
 }
 
 /// `nonius commit`.
-pub fn commit(s: &Store, part: &str, message: &str) -> Result<()> {
-    let item = s.item(part)?;
-    let v = s.commit(&item, message)?;
-    println!("Зафиксирована {} {}: {}", item.name, v.version, v.summary());
+pub fn commit(app: &App, part: &str, message: &str) -> Result<()> {
+    let v = app.save_version(part, message)?;
+    println!("Зафиксирована {} {}: {}", v.item, v.version, v.summary());
     Ok(())
 }
 
 /// `nonius log`.
-pub fn log(s: &Store, part: &str) -> Result<()> {
-    let item = s.item(part)?;
-    let versions = s.versions(&item)?;
+pub fn log(app: &App, part: &str) -> Result<()> {
+    let versions = app.versions(part)?;
     if versions.is_empty() {
-        println!(
-            "У «{}» ещё нет версий: nonius commit {} -m \"...\"",
-            item.name, item.name
-        );
+        println!("У «{part}» ещё нет версий: nonius commit {part} -m \"...\"");
     }
     for v in versions {
         let ver = v.version.to_string();
@@ -77,12 +70,11 @@ pub fn log(s: &Store, part: &str) -> Result<()> {
 }
 
 /// `nonius restore`.
-pub fn restore(s: &Store, part: &str, version: &str, message: Option<&str>) -> Result<()> {
-    let item = s.item(part)?;
-    let v = s.restore(&item, parse_version(version)?, message)?;
+pub fn restore(app: &App, part: &str, version: &str, message: Option<&str>) -> Result<()> {
+    let v = app.restore(part, parse_version(version)?, message)?;
     println!(
         "Деталь «{}» возвращена: {} — {}",
-        item.name,
+        v.item,
         v.version,
         v.summary()
     );
@@ -90,10 +82,8 @@ pub fn restore(s: &Store, part: &str, version: &str, message: Option<&str>) -> R
 }
 
 /// `nonius export`.
-pub fn export(s: &Store, part: &str, version: &str, dest: &Path) -> Result<()> {
-    let item = s.item(part)?;
-    let v = s.version(&item, parse_version(version)?)?;
-    let files = s.export(&item, &v, dest)?;
+pub fn export(app: &App, part: &str, version: &str, dest: &Path) -> Result<()> {
+    let (v, files) = app.export(part, parse_version(version)?, dest)?;
     println!(
         "Выгружено {} файлов версии {} в {}",
         files.len(),

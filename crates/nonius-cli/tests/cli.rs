@@ -141,3 +141,34 @@ fn import_commit_log_diff_restore_export() {
     let (ok, out) = nonius(d, &["log", "нет-такой"]);
     assert!(!ok && out.contains("нет детали"), "{out}");
 }
+
+#[test]
+fn material_sets_mass_only_when_known() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init", "--name", "Станок"]).0);
+    assert!(nonius(d, &["part", "new", "кронштейн"]).0);
+
+    let (ok, out) = nonius(d, &["material", "кронштейн"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("Материал: не задан"), "{out}");
+
+    let (ok, out) = nonius(d, &["material", "кронштейн", "09Г2С"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("плотность 7850 кг/м³"), "{out}");
+    let meta = std::fs::read_to_string(d.join("parts/кронштейн/meta.yaml")).unwrap();
+    assert!(meta.contains("material: 09Г2С"), "{meta}");
+
+    let (ok, out) = nonius(d, &["material", "кронштейн", "Сплав-Х"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("Материал: Сплав-Х"), "{out}");
+
+    let (ok, out) = nonius(d, &["material", "кронштейн", "Сплав-Х", "--density", "0"]);
+    assert!(!ok && out.contains("больше нуля"), "{out}");
+
+    let (ok, out) = nonius(d, &["material", "кронштейн", "--remove"]);
+    assert!(ok && out.contains("Материал: не задан"), "{out}");
+
+    let (ok, out) = nonius(d, &["materials"]);
+    assert!(ok && out.contains("АМг6") && out.contains("2640"), "{out}");
+}

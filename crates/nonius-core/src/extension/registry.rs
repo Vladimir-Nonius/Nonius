@@ -92,6 +92,18 @@ impl Registry {
             .map(|m| m.as_ref())
     }
 
+    /// Все источники геометрии, которые умеют читать файл, в порядке
+    /// подключения: если первый не справился, можно попробовать следующий.
+    pub fn geometry_sources_for<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> impl Iterator<Item = &'a dyn GeometrySource> + 'a {
+        self.geometry
+            .iter()
+            .filter(move |m| m.can_read(path))
+            .map(|m| m.as_ref())
+    }
+
     /// Первый источник дерева, который умеет читать файл.
     pub fn tree_source_for(&self, path: &Path) -> Option<&dyn TreeSource> {
         self.trees

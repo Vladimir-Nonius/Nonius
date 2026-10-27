@@ -8,9 +8,13 @@
 
 | Задача | Файлы |
 |---|---|
-| Новая команда `nonius …` | `nonius-cli/src/args.rs` (команда и справка), `main.rs` (вызов), новый файл в `commands/` |
+| Новое действие программы (для CLI, окна, MCP) | `nonius-app/src/lib.rs`, файл темы в `nonius-app/src/` |
+| Новая команда `nonius …` | действие в `nonius-app`, затем `nonius-cli/src/args.rs` (команда и справка), `main.rs` (вызов), печать в `commands/` |
 | Изменить вывод команды | `nonius-cli/src/commands/<группа>.rs`, общие мелочи — `format.rs` |
-| Импорт файла модели | `nonius-cli/src/commands/import.rs` |
+| Импорт файла модели | `nonius-app/src/import.rs` |
+| Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
+| Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
+| Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Формат сообщения коммита | `nonius-store/src/message.rs` |
@@ -84,10 +88,29 @@
 | `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал |
 | `src/modules/compare.rs` | `geometry-occt`: сравнение формы |
 | `src/modules/highlight.rs` | `highlight-occt`: `changes.png` |
+| `src/modules/preview.rs` | `preview-occt`: экспорт `png` — превью `preview.png` |
 | `src/render/mod.rs` | сетка, слои, цвета, вид, картинка |
 | `src/render/raster.rs` | отрисовка: камера, z-буфер, свет, «рентген» |
 
+### `nonius-app` — действия программы
+
+Общие для командной строки, окна и MCP. Ничего не печатает, возвращает данные. Модули не знает: реестр передаёт вызывающий.
+
+| Файл | Что внутри |
+|---|---|
+| `lib.rs` | `App` (проект + реестр + хранилище), `create_project` |
+| `items.rs` | новая деталь, список, `ItemStatus` и `ItemState` |
+| `history.rs` | версии, `save_version`, `restore`, `export` |
+| `import.rs` | `import`: файл модели в деталь, паспорт, превью |
+| `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
+| `materials.rs` | справочник материалов с плотностью |
+| `compare.rs` | `compare`, `Comparison`, `CompareOptions`, `Progress` (ход и отмена) |
+| `cache.rs` | кэш сравнений `.git/nonius/cache/<ключ>/cache.yaml` (`schema: 1`) |
+| `error.rs` | ошибки действий |
+
 ### `nonius-cli` — команда `nonius`
+
+Тонкая обёртка над `nonius-app`: разбор команды и печать.
 
 | Файл | Что внутри |
 |---|---|
@@ -99,6 +122,7 @@
 | `commands/import.rs` | `import` |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `export` |
 | `commands/compare.rs` | `diff`, `render` |
+| `commands/passport.rs` | `material`, `materials` |
 
 ## Тесты
 
@@ -108,6 +132,7 @@
 | `nonius-core/tests/project.rs` | папка проекта целиком |
 | `nonius-store/tests/store.rs` | версии на настоящем git |
 | `nonius-occt/tests/occt.rs`, `without_occt.rs` | геометрия с OpenCascade и сборка без него |
+| `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 
 Карту обновляет тот, кто добавляет, переносит или удаляет файл, — в том же pull request.

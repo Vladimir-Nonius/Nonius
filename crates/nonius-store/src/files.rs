@@ -95,7 +95,14 @@ impl Store {
         if done.is_file() {
             return Ok(dir);
         }
-        let tmp = cache.join(format!("{}.tmp", version.commit));
+        // Своя временная папка у каждого потока: окно может выкладывать ту же
+        // версию в фоне, пока командная строка делает то же самое.
+        let tmp = cache.join(format!(
+            "{}.tmp-{}-{:?}",
+            version.commit,
+            std::process::id(),
+            std::thread::current().id()
+        ));
         if tmp.exists() {
             fs::remove_dir_all(&tmp).map_err(|e| StoreError::Io {
                 path: tmp.clone(),
@@ -116,10 +123,15 @@ impl Store {
             let _ = fs::remove_dir_all(&tmp);
             return Ok(dir);
         }
-        fs::rename(&tmp, &dir).map_err(|e| StoreError::Io {
-            path: dir.clone(),
-            source: e,
-        })?;
+        if let Err(e) = fs::rename(&tmp, &dir) {
+            let _ = fs::remove_dir_all(&tmp);
+            if !done.is_file() {
+                return Err(StoreError::Io {
+                    path: dir.clone(),
+                    source: e,
+                });
+            }
+        }
         Ok(dir)
     }
 

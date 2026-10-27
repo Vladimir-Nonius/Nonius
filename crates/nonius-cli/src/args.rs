@@ -101,6 +101,21 @@ pub enum Command {
         /// Куда выгрузить.
         dest: PathBuf,
     },
+    /// Материал и масса детали: показать, назначить (масса = объём × плотность) или убрать.
+    Material {
+        /// Деталь.
+        part: String,
+        /// Материал: Ст3, 09Г2С, АМг6… (без него — показать паспорт).
+        material: Option<String>,
+        /// Плотность, кг/м³ (по умолчанию — из справочника: nonius materials).
+        #[arg(long)]
+        density: Option<f64>,
+        /// Убрать материал.
+        #[arg(long, conflicts_with_all = ["material", "density"])]
+        remove: bool,
+    },
+    /// Справочник материалов с плотностью.
+    Materials,
 }
 
 #[derive(Subcommand)]
