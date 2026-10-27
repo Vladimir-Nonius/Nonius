@@ -4,9 +4,8 @@
 //! - [`GeometryComparator`] — сравнивает форму: сколько материала добавлено и убрано;
 //! - [`HighlightRenderer`] — рисует изменения цветом: неизменённое серым
 //!   «рентгеном», добавленное зелёным, убранное красным;
-//! - [`SceneRenderer`] — объёмная модель изменений `changes.glb` для окна просмотра;
-//! - [`render`] — свой растровый рендер, без видеокарты и графических библиотек;
-//! - [`glb`] — запись сеток в glTF (`.glb`).
+//! - [`SceneRenderer`] — сцена изменений `changes.glb` для окна (формат `nonius-scene`);
+//! - [`render`] — свой растровый рендер, без видеокарты и графических библиотек.
 //!
 //! OpenCascade подключается через тонкую C-прослойку (`cpp/`). Если при сборке
 //! OpenCascade не найден, крейт собирается без геометрии: [`available`] вернёт
@@ -14,7 +13,6 @@
 
 #[cfg(nonius_occt)]
 mod ffi;
-pub mod glb;
 #[cfg(nonius_occt)]
 mod modules;
 pub mod render;
@@ -36,11 +34,11 @@ pub use modules::{
     MODEL_STEP,
 };
 #[cfg(nonius_occt)]
-pub use scene::{shape_glb, SceneRenderer, CHANGES_GLB};
+pub use scene::{shape_scene, SceneRenderer, CHANGES_GLB};
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
 
-/// Идентификатор модуля объёмной модели изменений (`SceneRenderer`). Объявлен и
+/// Идентификатор модуля сцены изменений (`SceneRenderer`). Объявлен и
 /// без OpenCascade, чтобы программа могла спросить реестр, подключён ли он.
 pub const SCENE_RENDERER: &str = "scene-occt";
 

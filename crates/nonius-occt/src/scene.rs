@@ -1,99 +1,90 @@
-//! Объёмная модель изменений для окна просмотра: `changes.glb`.
+//! Сцена изменений для окна: `changes.glb` (формат `nonius-scene`).
 
 use std::path::{Path, PathBuf};
 
 use nonius_core::compare::{ChangeReport, CompareContext};
 use nonius_core::extension::{ExtensionPoint, Module, ModuleManifest, Renderer, Snapshot};
 use nonius_core::{Error, Result};
+use nonius_scene::{Mesh, Region, Role, Scene};
 
-use crate::glb::{to_glb, GlbLayer};
 use crate::modules::{deflection, manifest, model_pair, module_err, same_bytes, ANGULAR};
-use crate::render::{colors, Mesh};
+use crate::render;
 use crate::shape::Shape;
 use crate::{GeometryDiff, OcctError, SCENE_RENDERER};
 
-/// Имя модели изменений, которую пишет [`SceneRenderer`].
+/// Имя файла сцены, которую пишет [`SceneRenderer`].
 pub const CHANGES_GLB: &str = "changes.glb";
 
-/// Непрозрачность серого «рентгена», когда есть изменения.
-const XRAY_OPACITY: f32 = 0.35;
+fn to_scene_mesh(m: render::Mesh) -> Mesh {
+    Mesh {
+        positions: m.positions,
+        triangles: m.triangles,
+    }
+}
+
+/// Места одной роли: каждое твёрдое тело — отдельное место.
+fn places(shape: &Shape, role: Role, defl: f64, out: &mut Vec<Region>) {
+    for solid in shape.solids() {
+        let volume = solid.props().volume;
+        let mesh = to_scene_mesh(solid.mesh(defl, ANGULAR));
+        if !mesh.is_empty() {
+            out.push(Region {
+                role,
+                volume_mm3: volume.max(0.0),
+                mesh,
+            });
+        }
+    }
+}
 
 impl GeometryDiff {
-    /// Объёмная модель: серое — новая версия целиком, зелёное — добавлено,
-    /// красное — убрано. Без изменений серое непрозрачно.
-    pub fn to_glb(&self) -> Vec<u8> {
+    /// Сцена изменений: серое — новая версия целиком, зелёное и красное — каждое
+    /// добавленное и убранное тело отдельным местом, крупные первыми.
+    pub fn scene(&self) -> Scene {
         let after = self.after.props();
         let defl = deflection(after.bbox.or(self.before.props().bbox));
-        let empty = Mesh::default();
-        let common = self.after.mesh(defl, ANGULAR);
-        let added = if self.has_added() {
-            self.added.mesh(defl, ANGULAR)
-        } else {
-            empty.clone()
-        };
-        let removed = if self.has_removed() {
-            self.removed.mesh(defl, ANGULAR)
-        } else {
-            empty
-        };
-        let opacity = if self.changed() { XRAY_OPACITY } else { 1.0 };
-        to_glb(&[
-            GlbLayer {
-                name: "Без изменений",
-                role: "unchanged",
-                mesh: &common,
-                color: colors::UNCHANGED,
-                opacity,
-                volume_mm3: after.volume,
-                pieces: after.solids,
-            },
-            GlbLayer {
-                name: "Добавлено",
-                role: "added",
-                mesh: &added,
-                color: colors::ADDED,
-                opacity: 1.0,
-                volume_mm3: self.added_volume,
-                pieces: self.added_pieces,
-            },
-            GlbLayer {
-                name: "Убрано",
-                role: "removed",
-                mesh: &removed,
-                color: colors::REMOVED,
-                opacity: 1.0,
-                volume_mm3: self.removed_volume,
-                pieces: self.removed_pieces,
-            },
-        ])
+        let mut regions = vec![Region {
+            role: Role::Unchanged,
+            volume_mm3: after.volume.max(0.0),
+            mesh: to_scene_mesh(self.after.mesh(defl, ANGULAR)),
+        }];
+        let mut changes = Vec::new();
+        if self.has_added() {
+            places(&self.added, Role::Added, defl, &mut changes);
+        }
+        if self.has_removed() {
+            places(&self.removed, Role::Removed, defl, &mut changes);
+        }
+        // Шум булевых операций (крошки меньше порога) местом не считается.
+        changes.retain(|r| r.volume_mm3 > self.threshold);
+        changes.sort_by(|a, b| b.volume_mm3.total_cmp(&a.volume_mm3));
+        regions.extend(changes);
+        Scene { regions }
     }
 }
 
-/// Объёмная модель одной детали без сравнения.
-pub fn shape_glb(shape: &Shape) -> Vec<u8> {
+/// Сцена одной детали без сравнения.
+pub fn shape_scene(shape: &Shape) -> Scene {
     let p = shape.props();
-    let mesh = shape.mesh(deflection(p.bbox), ANGULAR);
-    to_glb(&[GlbLayer {
-        name: "Деталь",
-        role: "unchanged",
-        mesh: &mesh,
-        color: colors::UNCHANGED,
-        opacity: 1.0,
-        volume_mm3: p.volume,
-        pieces: p.solids,
-    }])
+    Scene {
+        regions: vec![Region {
+            role: Role::Unchanged,
+            volume_mm3: p.volume.max(0.0),
+            mesh: to_scene_mesh(shape.mesh(deflection(p.bbox), ANGULAR)),
+        }],
+    }
 }
 
-fn scene_of(before: &Path, after: &Path) -> std::result::Result<Vec<u8>, OcctError> {
-    // Одинаковые файлы: булевы операции не нужны, рисуем деталь как есть.
+fn scene_of(before: &Path, after: &Path) -> std::result::Result<Scene, OcctError> {
+    // Одинаковые файлы: булевы операции не нужны, показываем деталь как есть.
     if same_bytes(before, after) {
-        return Ok(shape_glb(&Shape::read_step(after)?));
+        return Ok(shape_scene(&Shape::read_step(after)?));
     }
     let tolerance = CompareContext::default().tolerance_mm;
-    Ok(GeometryDiff::of_files(before, after, tolerance)?.to_glb())
+    Ok(GeometryDiff::of_files(before, after, tolerance)?.scene())
 }
 
-/// Модель изменений для окна просмотра: `changes.glb` (glTF) с цветными слоями.
+/// Сцена изменений для окна: `changes.glb` с местами изменений.
 pub struct SceneRenderer {
     manifest: ModuleManifest,
 }
@@ -107,7 +98,7 @@ impl SceneRenderer {
         Self {
             manifest: manifest(
                 Self::ID,
-                "Объёмная модель изменений (glTF)",
+                "Сцена изменений для окна",
                 ExtensionPoint::Renderer,
             ),
         }
@@ -137,13 +128,13 @@ impl Renderer for SceneRenderer {
         let Some((a, b)) = model_pair(before, after) else {
             return Ok(Vec::new());
         };
-        let glb = scene_of(&a, &b).map_err(|e| module_err(Self::ID, e))?;
+        let scene = scene_of(&a, &b).map_err(|e| module_err(Self::ID, e))?;
         std::fs::create_dir_all(out_dir).map_err(|e| Error::Io {
             path: out_dir.to_path_buf(),
             source: e,
         })?;
         let path = out_dir.join(CHANGES_GLB);
-        std::fs::write(&path, glb).map_err(|e| Error::Io {
+        std::fs::write(&path, scene.to_glb()).map_err(|e| Error::Io {
             path: path.clone(),
             source: e,
         })?;

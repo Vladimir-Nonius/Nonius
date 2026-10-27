@@ -42,6 +42,9 @@ NoniusShape* nonius_read_step(const char* path, char* err, size_t err_len);
 int32_t nonius_write_step(const NoniusShape* shape, const char* path, char* err, size_t err_len);
 void nonius_shape_free(NoniusShape* shape);
 
+/* Твёрдое тело номер index (с 0) внутри формы; NULL — нет такого. */
+NoniusShape* nonius_shape_solid(const NoniusShape* shape, uint32_t index);
+
 int32_t nonius_shape_props(const NoniusShape* shape, NoniusProps* out);
 
 /* op: 0 — a минус b, 1 — общее a и b, 2 — объединение. fuzzy — допуск, мм. */

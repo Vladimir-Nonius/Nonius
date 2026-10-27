@@ -1,0 +1,17 @@
+[package]
+name = "nonius-scene"
+description = "Scene model for Nonius: colored change regions as meshes, stored as glTF"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+gltf = { version = "1.4", default-features = false, features = ["utils", "extras"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

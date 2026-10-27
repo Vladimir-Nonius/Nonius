@@ -5,15 +5,14 @@
 use std::path::Path;
 
 use nonius_core::compare::ChangeReport;
-use nonius_core::contract;
+use nonius_core::contract as core_contract;
 use nonius_core::extension::{ExtensionPoint, Registry, Renderer, Snapshot};
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::PartName;
-use nonius_occt::glb::parse_glb;
 use nonius_occt::{
-    shape_glb, GeometryDiff, SceneRenderer, Shape, CHANGES_GLB, MODEL_STEP, SCENE_RENDERER,
+    shape_scene, GeometryDiff, SceneRenderer, Shape, CHANGES_GLB, MODEL_STEP, SCENE_RENDERER,
 };
-use serde_json::Value;
+use nonius_scene::{contract, Role, Scene};
 
 /// Пластина 60×30×8.
 fn plate() -> Shape {
@@ -37,55 +36,67 @@ fn snap(dir: &Path) -> Snapshot {
     }
 }
 
-fn roles(doc: &Value) -> Vec<String> {
-    doc["nodes"]
-        .as_array()
-        .map(|nodes| {
-            nodes
-                .iter()
-                .map(|n| n["extras"]["role"].as_str().unwrap().to_string())
-                .collect()
-        })
-        .unwrap_or_default()
+fn roles(scene: &Scene) -> Vec<Role> {
+    scene.regions.iter().map(|r| r.role).collect()
+}
+
+/// Пластина с двумя бобышками и двумя отверстиями: четыре места.
+fn plate_v3() -> Shape {
+    let mut s = plate();
+    for x in [10.0, 25.0] {
+        let hole = Shape::make_cylinder([x, 15.0, -1.0], 3.0, 10.0).unwrap();
+        s = s.cut(&hole, 0.0).unwrap();
+    }
+    for x in [38.0, 50.0] {
+        let boss = Shape::make_box([x, 5.0, 8.0], [6.0, 6.0, 5.0]).unwrap();
+        s = s.fuse(&boss, 0.0).unwrap();
+    }
+    s
 }
 
 #[test]
-fn diff_scene_has_three_colored_layers() {
+fn diff_scene_has_places() {
     let diff = GeometryDiff::of_shapes(plate(), plate_v2(), 0.01).unwrap();
-    let (doc, bin) = parse_glb(&diff.to_glb()).expect("корректный GLB");
-    assert_eq!(roles(&doc), ["unchanged", "added", "removed"]);
-    assert!(!bin.is_empty());
-
-    // Бобышка 12×14×12 = 2016 мм³, отверстие π·4²·8 ≈ 402 мм³.
-    let added = doc["nodes"][1]["extras"]["volume_mm3"].as_f64().unwrap();
-    let removed = doc["nodes"][2]["extras"]["volume_mm3"].as_f64().unwrap();
-    assert!((added - 2016.0).abs() < 1.0, "{added}");
-    assert!((removed - 402.1).abs() < 1.0, "{removed}");
-
-    // Серое полупрозрачное, цветное — нет.
-    assert_eq!(doc["materials"][0]["alphaMode"], "BLEND");
-    assert!(doc["materials"][1].get("alphaMode").is_none());
-
-    // Габариты новой версии в метрах, Y вверх: высота 8 + 12 = 20 мм.
-    let max_y = doc["accessors"][0]["max"][1].as_f64().unwrap();
-    assert!((max_y - 0.020).abs() < 1e-5, "{max_y}");
+    let scene = diff.scene();
+    contract::scene(&scene).unwrap_or_else(|v| panic!("{v:#?}"));
+    // Крупное первым: бобышка 12×14×12 = 2016 мм³, отверстие π·4²·8 ≈ 402 мм³.
+    assert_eq!(roles(&scene), [Role::Unchanged, Role::Added, Role::Removed]);
+    assert!((scene.regions[1].volume_mm3 - 2016.0).abs() < 1.0);
+    assert!((scene.regions[2].volume_mm3 - 402.1).abs() < 1.0);
+    // Габариты новой версии: высота 8 + 12 = 20 мм.
+    let b = scene.bounds().unwrap();
+    assert!((b.max[2] - 20.0).abs() < 1e-3, "{b:?}");
 }
 
 #[test]
-fn same_part_is_one_opaque_layer() {
-    let (doc, _) = parse_glb(&shape_glb(&plate())).unwrap();
-    assert_eq!(roles(&doc), ["unchanged"]);
-    assert!(doc["materials"][0].get("alphaMode").is_none());
+fn each_piece_is_its_own_place() {
+    let scene = GeometryDiff::of_shapes(plate(), plate_v3(), 0.01)
+        .unwrap()
+        .scene();
+    assert_eq!(scene.regions_of(Role::Added).count(), 2);
+    assert_eq!(scene.regions_of(Role::Removed).count(), 2);
+    for r in scene.changes() {
+        let b = r.mesh.bounds().unwrap();
+        // каждое место — один кусок, а не весь слой
+        assert!(b.max[0] - b.min[0] < 10.0, "{:?}: {b:?}", r.role);
+    }
+}
 
-    let diff = GeometryDiff::of_shapes(plate(), plate(), 0.01).unwrap();
-    let (doc, _) = parse_glb(&diff.to_glb()).unwrap();
-    assert_eq!(roles(&doc), ["unchanged"]);
+#[test]
+fn same_part_is_one_place() {
+    let scene = shape_scene(&plate());
+    assert_eq!(roles(&scene), [Role::Unchanged]);
+    assert!(!scene.has_changes());
+    let scene = GeometryDiff::of_shapes(plate(), plate(), 0.01)
+        .unwrap()
+        .scene();
+    assert_eq!(roles(&scene), [Role::Unchanged]);
 }
 
 #[test]
 fn scene_renderer_module() {
     let renderer = SceneRenderer::new();
-    if let Err(v) = contract::manifest(&renderer, ExtensionPoint::Renderer) {
+    if let Err(v) = core_contract::manifest(&renderer, ExtensionPoint::Renderer) {
         panic!("нарушения контракта:\n- {}", v.join("\n- "));
     }
     assert_eq!(SceneRenderer::ID, SCENE_RENDERER);
@@ -102,15 +113,16 @@ fn scene_renderer_module() {
         .render(&snap(&a), &snap(&b), &ChangeReport::empty(""), &out)
         .unwrap();
     assert_eq!(files, [out.join(CHANGES_GLB)]);
-    let (doc, _) = parse_glb(&std::fs::read(&files[0]).unwrap()).unwrap();
-    assert_eq!(roles(&doc), ["unchanged", "added", "removed"]);
+    let scene =
+        contract::glb(&std::fs::read(&files[0]).unwrap()).unwrap_or_else(|v| panic!("{v:#?}"));
+    assert_eq!(roles(&scene), [Role::Unchanged, Role::Added, Role::Removed]);
 
     // Одна и та же версия — деталь целиком, без булевых операций.
     let files = renderer
         .render(&snap(&b), &snap(&b), &ChangeReport::empty(""), &out)
         .unwrap();
-    let (doc, _) = parse_glb(&std::fs::read(&files[0]).unwrap()).unwrap();
-    assert_eq!(roles(&doc), ["unchanged"]);
+    let scene = contract::glb(&std::fs::read(&files[0]).unwrap()).unwrap();
+    assert_eq!(roles(&scene), [Role::Unchanged]);
 
     // Нет model.step — модуль молча пропускает деталь.
     assert!(renderer

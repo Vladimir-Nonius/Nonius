@@ -13,7 +13,7 @@ build = "build.rs"
 nonius-core.workspace = true
 nonius-step.workspace = true
 png = "0.17"
-serde_json.workspace = true
+nonius-scene.workspace = true
 
 [build-dependencies]
 cc = "1"

@@ -177,6 +177,17 @@ impl Shape {
         ))
     }
 
+    /// Отдельные твёрдые тела внутри формы (куски добавленного или убранного).
+    pub fn solids(&self) -> Vec<Shape> {
+        (0u32..)
+            .map_while(|i| {
+                // SAFETY: тело живое; новое тело принадлежит возвращённому `Shape`.
+                let ptr = unsafe { ffi::nonius_shape_solid(self.ptr.as_ptr(), i) };
+                NonNull::new(ptr).map(|ptr| Shape { ptr })
+            })
+            .collect()
+    }
+
     /// Треугольная сетка для отрисовки. `linear` — допуск, мм; `angular` — радианы.
     pub fn mesh(&self, linear: f64, angular: f64) -> Mesh {
         let mut m = ffi::NoniusMesh {
