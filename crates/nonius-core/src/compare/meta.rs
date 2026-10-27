@@ -1,101 +1,13 @@
-//! Отчёт об изменениях и встроенное сравнение паспортов версий (`meta.yaml`).
-//!
-//! Геометрическое сравнение с цветной подсветкой и сравнение дерева построения —
-//! отдельные модули ([`crate::extension::Comparator`]). Здесь — общий формат
-//! отчёта и простое сравнение контрольных чисел, которое работает всегда.
+//! Встроенное сравнение паспортов версий (`meta.yaml`): контрольные числа,
+//! габариты, материал, свойства.
 
 use std::collections::BTreeSet;
-use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
+use super::number::{fmt_num, fmt_point, fmt_size, Trim};
+use super::{Change, ChangeKind, ChangeReport, CompareContext};
 use crate::error::Result;
 use crate::extension::{Comparator, ExtensionPoint, Module, ModuleManifest, Snapshot, API_VERSION};
 use crate::meta::GeometrySummary;
-
-/// Параметры сравнения.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CompareContext {
-    /// Допуск по длинам, мм.
-    pub tolerance_mm: f64,
-    /// Относительный допуск для объёма, площади, массы.
-    pub relative_tolerance: f64,
-}
-
-impl Default for CompareContext {
-    fn default() -> Self {
-        Self {
-            tolerance_mm: 0.01,
-            relative_tolerance: 1e-6,
-        }
-    }
-}
-
-/// Вид изменения. Цвет подсветки в интерфейсе привязан к виду.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChangeKind {
-    /// Добавлено (зелёный).
-    Added,
-    /// Убрано (красный).
-    Removed,
-    /// Изменено значение.
-    Modified,
-    /// Сдвинуто без изменения формы (жёлтый).
-    Moved,
-    /// Переименовано.
-    Renamed,
-}
-
-/// Одно изменение.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Change {
-    /// Вид изменения.
-    pub kind: ChangeKind,
-    /// Что изменилось: «Масса», «D1@Эскиз2», «Фаска1».
-    pub subject: String,
-    /// Было.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before: Option<String>,
-    /// Стало.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<String>,
-}
-
-impl fmt::Display for Change {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (&self.before, &self.after) {
-            (Some(b), Some(a)) => write!(f, "{}: {b} → {a}", self.subject),
-            (None, Some(a)) => write!(f, "{}: добавлено ({a})", self.subject),
-            (Some(b), None) => write!(f, "{}: убрано ({b})", self.subject),
-            (None, None) => write!(f, "{}", self.subject),
-        }
-    }
-}
-
-/// Отчёт одного сравнения.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChangeReport {
-    /// Какой модуль сравнивал.
-    pub comparator: String,
-    /// Изменения в стабильном порядке.
-    pub changes: Vec<Change>,
-}
-
-impl ChangeReport {
-    /// Пустой отчёт.
-    pub fn empty(comparator: impl Into<String>) -> Self {
-        Self {
-            comparator: comparator.into(),
-            changes: Vec::new(),
-        }
-    }
-
-    /// Изменений нет.
-    pub fn is_empty(&self) -> bool {
-        self.changes.is_empty()
-    }
-}
 
 /// Встроенное сравнение паспортов: контрольные числа, габариты, материал,
 /// свойства, версия CAD.
@@ -275,33 +187,6 @@ fn opt_change(subject: &str, a: Option<String>, b: Option<String>, out: &mut Vec
         before: a,
         after: b,
     });
-}
-
-/// Число без лишних нулей: 12.5, 0.003, 1200.
-struct Trim(f64);
-
-impl fmt::Display for Trim {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = format!("{:.6}", self.0);
-        let s = s.trim_end_matches('0').trim_end_matches('.');
-        let s = if s == "-0" { "0" } else { s };
-        if f.sign_plus() && !s.starts_with('-') {
-            f.write_str("+")?;
-        }
-        f.write_str(s)
-    }
-}
-
-fn fmt_num(x: f64) -> String {
-    Trim(x).to_string()
-}
-
-fn fmt_size(s: [f64; 3]) -> String {
-    format!("{} × {} × {}", Trim(s[0]), Trim(s[1]), Trim(s[2]))
-}
-
-fn fmt_point(p: [f64; 3]) -> String {
-    format!("({}, {}, {})", Trim(p[0]), Trim(p[1]), Trim(p[2]))
 }
 
 #[cfg(test)]

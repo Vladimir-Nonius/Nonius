@@ -21,6 +21,8 @@
  STEP, YAML, Markdown   браузер / Tauri      Forgejo: роли, блокировки
 ```
 
+Какой файл за что отвечает — в [CODEMAP.md](CODEMAP.md).
+
 ## Папка проекта
 
 ```
