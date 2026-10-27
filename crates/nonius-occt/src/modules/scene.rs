@@ -10,10 +10,7 @@ use nonius_scene::{Mesh, Region, Role, Scene};
 use super::{deflection, manifest, model_pair, module_err, same_bytes, GeometryDiff, ANGULAR};
 use crate::render;
 use crate::shape::Shape;
-use crate::{OcctError, SCENE_RENDERER};
-
-/// Имя файла сцены, которую пишет [`SceneRenderer`].
-pub const CHANGES_GLB: &str = "changes.glb";
+use crate::{OcctError, CHANGES_GLB, SCENE_RENDERER};
 
 fn to_scene_mesh(m: render::Mesh) -> Mesh {
     Mesh {

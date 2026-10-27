@@ -21,6 +21,9 @@
 | Геометрия OpenCascade (объём, габариты) | `nonius-occt/src/modules/source.rs`, `shape.rs` |
 | Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs` |
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
+| Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
+| 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
+| Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window.rs` (реализация на хранилище) |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
 | Новая функция OpenCascade | `nonius-occt/cpp/nonius_occt.h` и `.cpp`, `src/ffi.rs`, `src/shape.rs` |
 | Сборка с OpenCascade / без него | `nonius-occt/build.rs`, `nonius-occt/src/lib.rs` |
@@ -99,13 +102,38 @@
 | `glb/read.rs` | `.glb` → сцена, через библиотеку `gltf` |
 | `contract.rs` | контрактная проверка сцены и файла `.glb` |
 
+### `nonius-gui` — окно программы
+
+| Файл | Что внутри |
+|---|---|
+| `lib.rs` | `run` — открыть окно, `show_error` — сообщение без консоли |
+| `source.rs` | `ProjectSource`: детали, версии, сравнение — всё, что окно берёт у программы |
+| `texts.rs` | все надписи окна (русский) |
+| `app/mod.rs` | `App`: состояние окна, порядок работы, раскладка панелей |
+| `app/panels.rs` | детали слева, «Что изменилось» справа, строка состояния, надписи поверх 3D |
+| `app/toolbar.rs` | «Было» / «Стало», режимы, кнопки видов, сохранение картинки |
+| `app/start.rs` | начальный экран: открыть папку проекта |
+| `app/jobs.rs` | фоновая работа и ход выполнения |
+| `app/settings.rs` | что окно помнит между запусками (`window.txt`) |
+| `app/numbers.rs` | числа для человека: разряды, округление |
+| `view/widget.rs` | 3D-вид в окне: ввод, кадр, оси в углу |
+| `view/controls.rs` | мышь и клавиши как в SolidWorks → движения камеры |
+| `view/camera.rs` | ортогональная камера, виды, вращение, масштаб к курсору |
+| `view/model.rs` | режимы «Было / Изменения / Стало», цвета, выбранное место |
+| `view/mesh.rs` | нормали и рёбра сетки |
+| `view/pick.rs` | что под курсором |
+| `view/gpu/mod.rs` | отрисовка wgpu: порядок кусков, рентген, рёбра |
+| `view/gpu/pipelines.rs`, `shader.wgsl` | конвейеры и шейдер |
+| `view/gpu/target.rs`, `readback.rs` | картинка кадра и чтение её в PNG |
+
 ### `nonius-cli` — команда `nonius`
 
 | Файл | Что внутри |
 |---|---|
 | `main.rs` | запуск, выбор команды, набор модулей (`registry`) |
 | `args.rs` | команды и параметры, текст справки |
-| `welcome.rs` | подсказка при двойном щелчке |
+| `window.rs` | окно: `nonius` без команды, `nonius view`, мост от хранилища к окну |
+| `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `modules` |
 | `commands/import.rs` | `import` |
@@ -122,6 +150,8 @@
 | `nonius-occt/tests/occt.rs`, `without_occt.rs` | геометрия с OpenCascade и сборка без него |
 | `nonius-occt/tests/scene.rs` | сцена изменений на настоящем OpenCascade |
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
+| `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений |
+| `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 
 Карту обновляет тот, кто добавляет, переносит или удаляет файл, — в том же pull request.

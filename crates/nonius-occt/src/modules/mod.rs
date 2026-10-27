@@ -23,7 +23,7 @@ use crate::OcctError;
 pub use compare::GeometryComparator;
 pub use diff::GeometryDiff;
 pub use highlight::HighlightRenderer;
-pub use scene::{shape_scene, SceneRenderer, CHANGES_GLB};
+pub use scene::{shape_scene, SceneRenderer};
 pub use source::OcctStepSource;
 
 /// Имя модели в папке детали.

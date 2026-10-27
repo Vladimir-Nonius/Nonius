@@ -16,10 +16,19 @@ anyhow.workspace = true
 eframe = { version = "0.32", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "x11", "wayland"] }
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.30"
+# Та же версия, что у egui-wgpu; набор по умолчанию — DirectX 12, Vulkan, Metal, OpenGL.
+wgpu = "25"
 png = "0.17"
+pollster = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+# Окна выбора папки и файла Windows.
+rfd = { version = "0.15", default-features = false }
 
 [dev-dependencies]
-pollster = "0.4"
+egui_kittest = { version = "0.32", features = ["eframe"] }
+tempfile.workspace = true
+glam = "0.30"
 
 [lints]
 workspace = true

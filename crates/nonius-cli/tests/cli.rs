@@ -10,6 +10,8 @@ fn nonius(dir: &std::path::Path, args: &[&str]) -> (bool, String) {
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
         .env("GIT_COMMITTER_NAME", "Тестировщик")
         .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        // Окно в проверках не открываем.
+        .env("NONIUS_NO_WINDOW", "1")
         .output()
         .unwrap();
     let text =
@@ -48,7 +50,7 @@ fn init_add_and_list() {
 }
 
 #[test]
-fn no_command_explains_how_to_run() {
+fn no_command_without_window_explains_how_to_run() {
     let tmp = tempfile::tempdir().unwrap();
     let (ok, out) = nonius(tmp.path(), &[]);
     assert!(ok, "{out}");

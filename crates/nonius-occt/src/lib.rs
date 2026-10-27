@@ -29,7 +29,7 @@ use nonius_core::extension::Registry;
 #[cfg(nonius_occt)]
 pub use modules::{
     preview, shape_scene, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource,
-    SceneRenderer, CHANGES_GLB, CHANGES_PNG, MODEL_STEP,
+    SceneRenderer, CHANGES_PNG, MODEL_STEP,
 };
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
@@ -37,6 +37,9 @@ pub use shape::{Props, Shape};
 /// Идентификатор модуля сцены изменений (`SceneRenderer`). Объявлен и
 /// без OpenCascade, чтобы программа могла спросить реестр, подключён ли он.
 pub const SCENE_RENDERER: &str = "scene-occt";
+
+/// Имя файла сцены, которую пишет `SceneRenderer`.
+pub const CHANGES_GLB: &str = "changes.glb";
 
 /// Ошибка OpenCascade или прослойки.
 #[derive(Debug, Clone, PartialEq, Eq)]

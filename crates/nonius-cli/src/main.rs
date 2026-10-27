@@ -1,15 +1,17 @@
-//! `nonius` — командная строка Nonius.
+//! `nonius` — командная строка и окно Nonius.
 //!
-//! Тот же набор действий потом будет в веб-интерфейсе и в MCP для ИИ.
+//! Тот же набор действий потом будет в MCP для ИИ.
 //!
 //! Файлы: здесь — запуск и выбор команды, `args.rs` — команды и справка,
 //! `commands/` — выполнение команд, `format.rs` — мелочи вывода,
-//! `welcome.rs` — подсказка при двойном щелчке.
+//! `window.rs` — окно (`nonius` без команды и `nonius view`),
+//! `welcome.rs` — подсказка, если окно не открылось.
 
 mod args;
 mod commands;
 mod format;
 mod welcome;
+mod window;
 
 use std::process::ExitCode;
 
@@ -24,15 +26,20 @@ use args::{Cli, Command, PartCommand};
 use commands::{compare, history, import, project};
 
 fn main() -> ExitCode {
-    // Без команды — скорее всего, двойной щелчок в Проводнике.
+    // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
     if std::env::args_os().len() <= 1 {
-        welcome::welcome();
-        return ExitCode::SUCCESS;
+        return window::double_click();
     }
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let in_window = matches!(cli.command, Command::View { .. });
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("ошибка: {e:#}");
+            if in_window {
+                // У окна, запущенного двойным щелчком, консоли нет.
+                nonius_gui::show_error(&format!("{e:#}"));
+            }
             ExitCode::FAILURE
         }
     }
@@ -98,6 +105,12 @@ fn run(cli: Cli) -> Result<()> {
             version,
             dest,
         } => history::export(&store()?, part, version, dest)?,
+        Command::View { part, from, to } => window::open(
+            cli.project.as_deref(),
+            part.as_deref(),
+            from.as_deref(),
+            to.as_deref(),
+        )?,
     }
     Ok(())
 }
