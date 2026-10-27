@@ -1,7 +1,7 @@
 //! Модель сцены Nonius: что показывается в 3D.
 //!
-//! Сцена — набор **мест**: кусков материала с ролью (без изменений,
-//! добавлено, убрано, сдвинуто), сеткой и объёмом. Модули-отрисовщики
+//! Сцена — набор **мест**: кусков материала с ролью (новая версия целиком,
+//! старая версия целиком, добавлено, убрано, сдвинуто), сеткой и объёмом. Модули-отрисовщики
 //! делают сцену из любого CAD-формата, окно её показывает. Ни те, ни другие
 //! не знают друг о друге: между ними только этот формат.
 //!
@@ -9,7 +9,7 @@
 //! [`Scene::from_glb`]. Формат — публичный контракт с номером версии
 //! [`FORMAT_VERSION`]; проверка — [`contract`].
 //!
-//! Единицы — мм, ось Z смотрит вверх, как в CAD.
+//! Единицы — мм, оси — как в исходном файле CAD (у SolidWorks Y смотрит вверх).
 
 pub mod contract;
 mod glb;
@@ -27,8 +27,10 @@ pub const FORMAT_VERSION: u32 = 1;
 /// Роль места: что с этим материалом произошло.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Role {
-    /// Материал есть в обеих версиях (или деталь показана без сравнения).
-    Unchanged,
+    /// Новая версия целиком («стало»). Без сравнения — просто деталь.
+    After,
+    /// Старая версия целиком («было»).
+    Before,
     /// Материал добавлен.
     Added,
     /// Материал убран.
@@ -39,12 +41,19 @@ pub enum Role {
 
 impl Role {
     /// Все роли в порядке показа.
-    pub const ALL: [Role; 4] = [Role::Unchanged, Role::Added, Role::Removed, Role::Moved];
+    pub const ALL: [Role; 5] = [
+        Role::After,
+        Role::Before,
+        Role::Added,
+        Role::Removed,
+        Role::Moved,
+    ];
 
-    /// Имя в файле: `unchanged`, `added`, `removed`, `moved`.
+    /// Имя в файле: `after`, `before`, `added`, `removed`, `moved`.
     pub fn as_str(self) -> &'static str {
         match self {
-            Role::Unchanged => "unchanged",
+            Role::After => "after",
+            Role::Before => "before",
             Role::Added => "added",
             Role::Removed => "removed",
             Role::Moved => "moved",
@@ -59,16 +68,16 @@ impl Role {
     /// Цвет sRGB, общий для картинок, 3D и интерфейса.
     pub fn color(self) -> [u8; 3] {
         match self {
-            Role::Unchanged => [176, 182, 190],
+            Role::After | Role::Before => [176, 182, 190],
             Role::Added => [34, 170, 76],
             Role::Removed => [214, 48, 49],
             Role::Moved => [240, 180, 20],
         }
     }
 
-    /// Изменение ли это (всё, кроме «без изменений»).
+    /// Изменение ли это: добавлено, убрано или сдвинуто.
     pub fn is_change(self) -> bool {
-        self != Role::Unchanged
+        matches!(self, Role::Added | Role::Removed | Role::Moved)
     }
 }
 
@@ -181,7 +190,7 @@ impl Scene {
         self.regions.iter().any(|r| r.role.is_change())
     }
 
-    /// Места изменений (без серого фона) — по ним ходит список «Места изменений».
+    /// Места изменений (без целых версий) — по ним ходит список «Места изменений».
     pub fn changes(&self) -> impl Iterator<Item = &Region> {
         self.regions.iter().filter(|r| r.role.is_change())
     }

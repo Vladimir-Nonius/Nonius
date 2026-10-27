@@ -30,12 +30,17 @@ fn cuboid(o: [f32; 3], s: [f32; 3]) -> Mesh {
     }
 }
 
-/// Пластина 60×30×8 с бобышкой (добавлено) и вырезом (убрано).
+/// Пластина 60×30×8: стало — с бобышкой (добавлено), без выреза (убрано).
 fn sample() -> Scene {
     Scene {
         regions: vec![
             Region {
-                role: Role::Unchanged,
+                role: Role::After,
+                volume_mm3: 15904.0,
+                mesh: cuboid([0.0; 3], [60.0, 30.0, 8.0]),
+            },
+            Region {
+                role: Role::Before,
                 volume_mm3: 14400.0,
                 mesh: cuboid([0.0; 3], [60.0, 30.0, 8.0]),
             },
@@ -61,8 +66,11 @@ fn close(a: [f32; 3], b: [f32; 3]) -> bool {
 fn round_trip_keeps_everything() {
     let scene = sample();
     let read = Scene::from_glb(&scene.to_glb()).unwrap();
-    assert_eq!(read.regions.len(), 3);
-    for (a, b) in scene.regions.iter().zip(&read.regions) {
+    assert_eq!(read.regions.len(), 4);
+    // Старая версия читается последней: она во второй сцене glTF.
+    let mut expected = scene.regions.clone();
+    expected.sort_by_key(|r| r.role == Role::Before);
+    for (a, b) in expected.iter().zip(&read.regions) {
         assert_eq!(a.role, b.role);
         assert_eq!(a.volume_mm3, b.volume_mm3);
         assert_eq!(a.mesh.triangles, b.mesh.triangles);
@@ -86,7 +94,7 @@ fn round_trip_keeps_everything() {
 #[test]
 fn written_scene_passes_contract() {
     let read = contract::glb(&sample().to_glb()).unwrap_or_else(|v| panic!("{v:#?}"));
-    assert_eq!(read.regions.len(), 3);
+    assert_eq!(read.regions.len(), 4);
 }
 
 #[test]
@@ -94,8 +102,8 @@ fn contract_catches_bad_scenes() {
     assert!(contract::scene(&Scene::default()).is_err());
 
     let mut bad = sample();
-    bad.regions[1].mesh.triangles.push([0, 1, 99]);
-    bad.regions[2].volume_mm3 = -1.0;
+    bad.regions[2].mesh.triangles.push([0, 1, 99]);
+    bad.regions[3].volume_mm3 = -1.0;
     let v = contract::scene(&bad).unwrap_err();
     assert_eq!(v.len(), 2, "{v:?}");
 
@@ -137,6 +145,21 @@ fn newer_format_is_refused_with_explanation() {
     assert!(err.to_string().contains("обновите программу"));
 }
 
+/// Сторонние просмотрщики показывают сцену по умолчанию: в ней нет старой версии.
+#[test]
+fn before_lives_in_second_gltf_scene() {
+    let gltf = gltf::Gltf::from_slice(&sample().to_glb()).unwrap();
+    let default: Vec<String> = gltf
+        .default_scene()
+        .unwrap()
+        .nodes()
+        .map(|n| n.name().unwrap().to_string())
+        .collect();
+    assert_eq!(default, ["Стало 1", "Добавлено 1", "Убрано 1"]);
+    let second: Vec<_> = gltf.scenes().nth(1).unwrap().nodes().collect();
+    assert_eq!(second.len(), 1);
+}
+
 #[test]
 fn garbage_is_broken() {
     assert!(matches!(
@@ -153,7 +176,7 @@ fn empty_regions_are_skipped() {
         volume_mm3: 0.0,
         mesh: Mesh::default(),
     });
-    assert_eq!(Scene::from_glb(&scene.to_glb()).unwrap().regions.len(), 3);
+    assert_eq!(Scene::from_glb(&scene.to_glb()).unwrap().regions.len(), 4);
 }
 
 /// Образец каждой версии формата лежит в репозитории: новые программы
@@ -163,7 +186,10 @@ fn format_v1_sample_is_readable() {
     let data = include_bytes!("fixtures/scene-v1.glb");
     let read = contract::glb(data).unwrap_or_else(|v| panic!("{v:#?}"));
     let roles: Vec<_> = read.regions.iter().map(|r| r.role).collect();
-    assert_eq!(roles, [Role::Unchanged, Role::Added, Role::Removed]);
+    assert_eq!(
+        roles,
+        [Role::After, Role::Added, Role::Removed, Role::Before]
+    );
     assert_eq!(read.volume_of(Role::Removed), 512.0);
     let b: Bounds = read.bounds().unwrap();
     assert!(close(b.max, [60.0, 30.0, 20.0]), "{b:?}");

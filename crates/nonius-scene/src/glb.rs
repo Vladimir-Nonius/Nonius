@@ -1,8 +1,8 @@
 //! Сцена ↔ glTF 2.0 (`.glb`).
 //!
 //! Каждое место — узел со своей сеткой. В `extras` узла — роль и объём, в
-//! `asset.extras.nonius_scene` — номер формата. Оси: в CAD вверх смотрит Z,
-//! в glTF — Y, единицы glTF — метры: `(x, y, z) мм → (x, z, −y) / 1000 м`.
+//! `asset.extras.nonius_scene` — номер формата. Оси не меняются (у glTF, как у
+//! SolidWorks, Y вверх), единицы glTF — метры: мм делятся на 1000.
 
 use serde_json::{json, Value};
 
@@ -33,18 +33,18 @@ const UNSIGNED_INT: u32 = 5125;
 const ARRAY_BUFFER: u32 = 34962;
 const ELEMENT_ARRAY_BUFFER: u32 = 34963;
 
-/// Непрозрачность серого, когда в сцене есть изменения: чтобы изменения
+/// Непрозрачность новой версии, когда в сцене есть изменения: чтобы изменения
 /// внутри детали были видны в сторонних просмотрщиках.
 const XRAY_OPACITY: f64 = 0.35;
 
-/// CAD (мм, Z вверх) → glTF (м, Y вверх).
+/// мм → м.
 fn to_gltf(p: [f32; 3]) -> [f32; 3] {
-    [p[0] * 1e-3, p[2] * 1e-3, -p[1] * 1e-3]
+    [p[0] * 1e-3, p[1] * 1e-3, p[2] * 1e-3]
 }
 
-/// glTF (м, Y вверх) → CAD (мм, Z вверх).
+/// м → мм.
 fn from_gltf(p: [f32; 3]) -> [f32; 3] {
-    [p[0] * 1e3, -p[2] * 1e3, p[1] * 1e3]
+    [p[0] * 1e3, p[1] * 1e3, p[2] * 1e3]
 }
 
 fn srgb_to_linear(c: u8) -> f64 {
@@ -58,7 +58,8 @@ fn srgb_to_linear(c: u8) -> f64 {
 
 fn role_name(role: Role) -> &'static str {
     match role {
-        Role::Unchanged => "Без изменений",
+        Role::After => "Стало",
+        Role::Before => "Было",
         Role::Added => "Добавлено",
         Role::Removed => "Убрано",
         Role::Moved => "Сдвинуто",
@@ -76,7 +77,7 @@ impl Scene {
         let mut materials: Vec<Value> = Vec::new();
         let mut material_of: Vec<(Role, usize)> = Vec::new();
         let mut nodes = Vec::new();
-        let mut places = [0u32; 4];
+        let mut places = [0u32; 5];
 
         for region in self.regions.iter().filter(|r| !r.mesh.is_empty()) {
             let mesh = &region.mesh;
@@ -133,7 +134,7 @@ impl Scene {
                 Some(&(_, m)) => m,
                 None => {
                     let [r, g, b] = region.role.color();
-                    let opacity = if region.role == Role::Unchanged && changed {
+                    let opacity = if region.role == Role::After && changed {
                         XRAY_OPACITY
                     } else {
                         1.0
@@ -174,6 +175,18 @@ impl Scene {
             }));
         }
 
+        // Старая версия целиком нужна окну для режима «было», а сторонним
+        // просмотрщикам мешала бы. Поэтому она во второй сцене glTF: они
+        // показывают только сцену по умолчанию, окно Nonius читает обе.
+        let is_before = |n: &Value| n["extras"]["role"] == Role::Before.as_str();
+        let main: Vec<usize> = (0..nodes.len())
+            .filter(|&i| !is_before(&nodes[i]))
+            .collect();
+        let before: Vec<usize> = (0..nodes.len()).filter(|&i| is_before(&nodes[i])).collect();
+        let mut scenes = vec![json!({ "name": "Сравнение", "nodes": main })];
+        if !before.is_empty() {
+            scenes.push(json!({ "name": "Было", "nodes": before }));
+        }
         let mut doc = json!({
             "asset": {
                 "version": "2.0",
@@ -181,7 +194,7 @@ impl Scene {
                 "extras": { "nonius_scene": FORMAT_VERSION },
             },
             "scene": 0,
-            "scenes": [{ "nodes": (0..nodes.len()).collect::<Vec<_>>() }],
+            "scenes": scenes,
         });
         if !nodes.is_empty() {
             doc["nodes"] = Value::Array(nodes);
@@ -195,7 +208,7 @@ impl Scene {
     }
 
     /// Прочитать сцену из `.glb`. Понимает и glTF сторонних программ: у них
-    /// всё считается «без изменений».
+    /// всё считается деталью целиком (`after`).
     pub fn from_glb(data: &[u8]) -> Result<Scene, SceneError> {
         let gltf = gltf::Gltf::from_slice(data).map_err(|e| SceneError::Broken(e.to_string()))?;
         if let Some(found) = format_version(&gltf) {
@@ -212,12 +225,18 @@ impl Scene {
         };
 
         let mut scene = Scene::default();
-        let root = gltf.default_scene().or_else(|| gltf.scenes().next());
-        let mut stack: Vec<(gltf::Node<'_>, [[f32; 4]; 4])> = root
-            .map(|s| s.nodes().map(|n| (n, IDENTITY)).collect())
-            .unwrap_or_default();
+        // Все сцены glTF по порядку, каждый узел один раз.
+        let mut seen = vec![false; gltf.nodes().count()];
+        let mut stack: Vec<(gltf::Node<'_>, [[f32; 4]; 4])> = gltf
+            .scenes()
+            .flat_map(|s| s.nodes().collect::<Vec<_>>())
+            .map(|n| (n, IDENTITY))
+            .collect();
         stack.reverse();
         while let Some((node, parent)) = stack.pop() {
+            if std::mem::replace(&mut seen[node.index()], true) {
+                continue;
+            }
             let world = mul(parent, node.transform().matrix());
             if let Some(mesh) = node.mesh() {
                 let extras = extras_json(node.extras());
@@ -225,7 +244,7 @@ impl Scene {
                     .get("role")
                     .and_then(Value::as_str)
                     .and_then(Role::parse)
-                    .unwrap_or(Role::Unchanged);
+                    .unwrap_or(Role::After);
                 let volume_mm3 = extras
                     .get("volume_mm3")
                     .and_then(Value::as_f64)
@@ -351,10 +370,10 @@ mod tests {
     }
 
     #[test]
-    fn axes_round_trip() {
+    fn units_round_trip() {
         let p = [10.0, 20.0, 30.0];
         let q = to_gltf(p);
-        assert!((q[1] - 0.03).abs() < 1e-7 && (q[2] + 0.02).abs() < 1e-7);
+        assert!((q[1] - 0.02).abs() < 1e-7 && (q[2] - 0.03).abs() < 1e-7);
         let back = from_gltf(q);
         for i in 0..3 {
             assert!((back[i] - p[i]).abs() < 1e-3);

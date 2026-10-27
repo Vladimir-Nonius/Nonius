@@ -38,16 +38,24 @@ fn places(shape: &Shape, role: Role, defl: f64, out: &mut Vec<Region>) {
 }
 
 impl GeometryDiff {
-    /// Сцена изменений: серое — новая версия целиком, зелёное и красное — каждое
-    /// добавленное и убранное тело отдельным местом, крупные первыми.
+    /// Сцена изменений: новая и старая версии целиком, зелёное и красное —
+    /// каждое добавленное и убранное тело отдельным местом, крупные первыми.
     pub fn scene(&self) -> Scene {
         let after = self.after.props();
-        let defl = deflection(after.bbox.or(self.before.props().bbox));
+        let before = self.before.props();
+        let defl = deflection(after.bbox.or(before.bbox));
         let mut regions = vec![Region {
-            role: Role::Unchanged,
+            role: Role::After,
             volume_mm3: after.volume.max(0.0),
             mesh: to_scene_mesh(self.after.mesh(defl, ANGULAR)),
         }];
+        if self.changed() {
+            regions.push(Region {
+                role: Role::Before,
+                volume_mm3: before.volume.max(0.0),
+                mesh: to_scene_mesh(self.before.mesh(defl, ANGULAR)),
+            });
+        }
         let mut changes = Vec::new();
         if self.has_added() {
             places(&self.added, Role::Added, defl, &mut changes);
@@ -68,7 +76,7 @@ pub fn shape_scene(shape: &Shape) -> Scene {
     let p = shape.props();
     Scene {
         regions: vec![Region {
-            role: Role::Unchanged,
+            role: Role::After,
             volume_mm3: p.volume.max(0.0),
             mesh: to_scene_mesh(shape.mesh(deflection(p.bbox), ANGULAR)),
         }],

@@ -60,9 +60,13 @@ fn diff_scene_has_places() {
     let scene = diff.scene();
     contract::scene(&scene).unwrap_or_else(|v| panic!("{v:#?}"));
     // Крупное первым: бобышка 12×14×12 = 2016 мм³, отверстие π·4²·8 ≈ 402 мм³.
-    assert_eq!(roles(&scene), [Role::Unchanged, Role::Added, Role::Removed]);
-    assert!((scene.regions[1].volume_mm3 - 2016.0).abs() < 1.0);
-    assert!((scene.regions[2].volume_mm3 - 402.1).abs() < 1.0);
+    assert_eq!(
+        roles(&scene),
+        [Role::After, Role::Before, Role::Added, Role::Removed]
+    );
+    assert!((scene.regions[1].volume_mm3 - 14400.0).abs() < 1.0);
+    assert!((scene.regions[2].volume_mm3 - 2016.0).abs() < 1.0);
+    assert!((scene.regions[3].volume_mm3 - 402.1).abs() < 1.0);
     // Габариты новой версии: высота 8 + 12 = 20 мм.
     let b = scene.bounds().unwrap();
     assert!((b.max[2] - 20.0).abs() < 1e-3, "{b:?}");
@@ -85,12 +89,12 @@ fn each_piece_is_its_own_place() {
 #[test]
 fn same_part_is_one_place() {
     let scene = shape_scene(&plate());
-    assert_eq!(roles(&scene), [Role::Unchanged]);
+    assert_eq!(roles(&scene), [Role::After]);
     assert!(!scene.has_changes());
     let scene = GeometryDiff::of_shapes(plate(), plate(), 0.01)
         .unwrap()
         .scene();
-    assert_eq!(roles(&scene), [Role::Unchanged]);
+    assert_eq!(roles(&scene), [Role::After]);
 }
 
 #[test]
@@ -115,14 +119,17 @@ fn scene_renderer_module() {
     assert_eq!(files, [out.join(CHANGES_GLB)]);
     let scene =
         contract::glb(&std::fs::read(&files[0]).unwrap()).unwrap_or_else(|v| panic!("{v:#?}"));
-    assert_eq!(roles(&scene), [Role::Unchanged, Role::Added, Role::Removed]);
+    assert_eq!(
+        roles(&scene),
+        [Role::After, Role::Added, Role::Removed, Role::Before]
+    );
 
     // Одна и та же версия — деталь целиком, без булевых операций.
     let files = renderer
         .render(&snap(&b), &snap(&b), &ChangeReport::empty(""), &out)
         .unwrap();
     let scene = contract::glb(&std::fs::read(&files[0]).unwrap()).unwrap();
-    assert_eq!(roles(&scene), [Role::Unchanged]);
+    assert_eq!(roles(&scene), [Role::After]);
 
     // Нет model.step — модуль молча пропускает деталь.
     assert!(renderer

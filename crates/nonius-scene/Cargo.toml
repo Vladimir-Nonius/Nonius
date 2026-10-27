@@ -15,3 +15,6 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+gltf = { version = "1.4", default-features = false, features = ["utils", "extras", "names"] }
