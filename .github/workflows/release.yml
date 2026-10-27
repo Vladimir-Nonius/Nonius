@@ -1,8 +1,10 @@
 name: Сборка программы
 
-# Готовый nonius.exe для Windows с OpenCascade внутри.
+# Готовый nonius.exe для Windows с OpenCascade внутри — один файл без DLL.
 # OpenCascade собирается из исходников в урезанном виде (только геометрия и STEP,
-# без сторонних библиотек) один раз и дальше берётся из кэша.
+# без сторонних библиотек) статически и со статической средой Visual C++ (/MT),
+# один раз, дальше берётся из кэша. Rust тоже собирается со статической средой,
+# поэтому nonius.exe запускается на любой Windows 10/11 без установки чего-либо.
 
 on:
   workflow_dispatch:
@@ -17,6 +19,10 @@ on:
 env:
   OCCT_TAG: V7_9_3
   CARGO_TERM_COLOR: never
+  # Среда Visual C++ внутри exe, а не в vcruntime140.dll.
+  RUSTFLAGS: -C target-feature=+crt-static
+  # OpenCascade — статические .lib, входят в exe целиком.
+  NONIUS_OCCT_STATIC: "1"
 
 jobs:
   windows:
@@ -40,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\occt
-          key: occt-${{ env.OCCT_TAG }}-win64-minimal-v1
+          key: occt-${{ env.OCCT_TAG }}-win64-static-mt-v1
 
       - name: Сборка OpenCascade (только при пустом кэше)
         if: steps.occt.outputs.cache-hit != 'true'
@@ -49,7 +55,8 @@ jobs:
           tar -xzf occt.tar.gz
           $src = (Get-ChildItem -Directory -Filter "OCCT-*" | Select-Object -First 1).FullName
           cmake -S $src -B occt-build -G Ninja -DCMAKE_BUILD_TYPE=Release `
-            -DINSTALL_DIR=C:\occt -DBUILD_LIBRARY_TYPE=Shared `
+            -DINSTALL_DIR=C:\occt -DBUILD_LIBRARY_TYPE=Static `
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
             -DBUILD_MODULE_FoundationClasses=OFF -DBUILD_MODULE_ModelingData=OFF `
             -DBUILD_MODULE_ModelingAlgorithms=OFF -DBUILD_MODULE_Visualization=OFF `
             -DBUILD_MODULE_ApplicationFramework=OFF -DBUILD_MODULE_DataExchange=OFF `
@@ -68,13 +75,14 @@ jobs:
         run: |
           $inc = (Get-ChildItem C:\occt -Recurse -Filter Standard_Version.hxx | Select-Object -First 1).DirectoryName
           $lib = (Get-ChildItem C:\occt -Recurse -Filter TKernel.lib | Select-Object -First 1).DirectoryName
-          $bin = (Get-ChildItem C:\occt -Recurse -Filter TKernel.dll | Select-Object -First 1).DirectoryName
-          if (-not ($inc -and $lib -and $bin)) { Write-Error "OpenCascade не найден в C:\occt"; exit 1 }
-          "include: $inc"; "lib: $lib"; "bin: $bin"
+          if (-not ($inc -and $lib)) { Write-Error "OpenCascade не найден в C:\occt"; exit 1 }
+          "include: $inc"; "lib: $lib"
+          if (Get-ChildItem C:\occt -Recurse -Filter TKernel.dll) { Write-Error "OpenCascade собран с DLL, а нужен статический"; exit 1 }
+          # Статическая среда Visual C++ (LIBCMT), иначе exe потребует vcruntime140.dll.
+          $dir = (dumpbin /nologo /directives "$lib\TKernel.lib" | Out-String)
+          if ($dir -match "MSVCRT") { Write-Error "OpenCascade собран с /MD, а нужен /MT"; exit 1 }
           "NONIUS_OCCT_INCLUDE=$inc" >> $env:GITHUB_ENV
           "NONIUS_OCCT_LIB=$lib" >> $env:GITHUB_ENV
-          "OCCT_BIN=$bin" >> $env:GITHUB_ENV
-          $bin >> $env:GITHUB_PATH
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -96,25 +104,36 @@ jobs:
           $d = "dist\nonius"
           New-Item -ItemType Directory -Force $d | Out-Null
           Copy-Item target\release\nonius.exe $d
-          Copy-Item "$env:OCCT_BIN\*.dll" $d
-          # Среда Visual C++ рядом с программой — чтобы не просить её ставить.
-          $crt = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
-          foreach ($f in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
-            Copy-Item (Join-Path $crt.FullName $f) $d
-          }
           Copy-Item LICENSE, packaging\windows\README.txt $d
           Get-ChildItem $d | Format-Table Name, Length
           $mb = [math]::Round(((Get-ChildItem $d | Measure-Object Length -Sum).Sum / 1MB), 1)
           "Всего: $mb МБ"
 
-      - name: Проверка готовой папки (без OpenCascade в PATH)
+      - name: nonius.exe не зависит от сторонних DLL
+        run: |
+          dumpbin /nologo /dependents dist\nonius\nonius.exe | Tee-Object deps.txt
+          $dlls = Select-String -Path deps.txt -Pattern "^\s+(\S+\.dll)\s*$" | ForEach-Object { $_.Matches[0].Groups[1].Value.ToLower() }
+          # Только то, что есть в любой Windows 10/11.
+          $system = "kernel32.dll", "ntdll.dll", "advapi32.dll", "user32.dll", "gdi32.dll", "shell32.dll",
+            "ws2_32.dll", "wsock32.dll", "psapi.dll", "bcrypt.dll", "bcryptprimitives.dll", "ole32.dll",
+            "oleaut32.dll", "userenv.dll", "secur32.dll", "crypt32.dll", "shlwapi.dll", "comdlg32.dll"
+          $foreign = $dlls | Where-Object { $_ -notin $system -and $_ -notlike "api-ms-win-core-*" }
+          if (-not $dlls) { Write-Error "не удалось прочитать список DLL"; exit 1 }
+          if ($foreign) { Write-Error "nonius.exe требует сторонние DLL: $($foreign -join ', ')"; exit 1 }
+          "Сторонних DLL нет."
+
+      - name: Проверка одного nonius.exe в пустой папке (без OpenCascade в PATH)
         run: |
           # Вывод nonius — UTF-8; без этого PowerShell исказит кириллицу.
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           # Оставляем в PATH только Windows и Git: всё остальное должно лежать рядом с exe.
           $env:PATH = "C:\Windows\System32;C:\Windows;C:\Program Files\Git\cmd"
-          $exe = (Resolve-Path dist\nonius\nonius.exe).Path
+          # Только сам exe, без соседних файлов.
+          $solo = Join-Path $env:RUNNER_TEMP "один"
+          New-Item -ItemType Directory -Force $solo | Out-Null
+          Copy-Item dist\nonius\nonius.exe $solo
+          $exe = Join-Path $solo "nonius.exe"
           $env:GIT_AUTHOR_NAME = "CI"; $env:GIT_AUTHOR_EMAIL = "ci@example.com"
           $env:GIT_COMMITTER_NAME = "CI"; $env:GIT_COMMITTER_EMAIL = "ci@example.com"
 

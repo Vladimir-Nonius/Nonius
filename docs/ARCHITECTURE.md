@@ -21,6 +21,8 @@
  STEP, YAML, Markdown   (egui, в nonius.exe) Forgejo: роли, блокировки
 ```
 
+Какой файл за что отвечает — в [CODEMAP.md](CODEMAP.md).
+
 ## Папка проекта
 
 ```

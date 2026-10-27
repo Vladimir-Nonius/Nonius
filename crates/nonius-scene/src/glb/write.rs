@@ -1,51 +1,16 @@
-//! Сцена ↔ glTF 2.0 (`.glb`).
-//!
-//! Каждое место — узел со своей сеткой. В `extras` узла — роль и объём, в
-//! `asset.extras.nonius_scene` — номер формата. Оси не меняются (у glTF, как у
-//! SolidWorks, Y вверх), единицы glTF — метры: мм делятся на 1000.
+//! Сцена → `.glb`.
 
 use serde_json::{json, Value};
 
-use crate::{Mesh, Region, Role, Scene, FORMAT_VERSION};
-
-/// Ошибка чтения сцены.
-#[derive(Debug, thiserror::Error, PartialEq)]
-pub enum SceneError {
-    /// Файл не glTF или испорчен.
-    #[error("файл сцены испорчен или это не glTF: {0}")]
-    Broken(String),
-    /// Сцена записана более новой программой.
-    #[error("сцена записана более новой версией Nonius (формат {found}, эта программа понимает до {FORMAT_VERSION}) — обновите программу")]
-    TooNew {
-        /// Номер формата в файле.
-        found: u64,
-    },
-    /// В файле то, что Nonius не показывает.
-    #[error("в сцене есть то, что программа не умеет показать: {0}")]
-    Unsupported(String),
-}
-
-const GLB_MAGIC: u32 = 0x4654_6C67; // "glTF"
-const CHUNK_JSON: u32 = 0x4E4F_534A; // "JSON"
-const CHUNK_BIN: u32 = 0x004E_4942; // "BIN\0"
-const FLOAT: u32 = 5126;
-const UNSIGNED_INT: u32 = 5125;
-const ARRAY_BUFFER: u32 = 34962;
-const ELEMENT_ARRAY_BUFFER: u32 = 34963;
+use super::{
+    to_gltf, ARRAY_BUFFER, CHUNK_BIN, CHUNK_JSON, ELEMENT_ARRAY_BUFFER, FLOAT, GLB_MAGIC,
+    UNSIGNED_INT,
+};
+use crate::{Role, Scene, FORMAT_VERSION};
 
 /// Непрозрачность новой версии, когда в сцене есть изменения: чтобы изменения
 /// внутри детали были видны в сторонних просмотрщиках.
 const XRAY_OPACITY: f64 = 0.35;
-
-/// мм → м.
-fn to_gltf(p: [f32; 3]) -> [f32; 3] {
-    [p[0] * 1e-3, p[1] * 1e-3, p[2] * 1e-3]
-}
-
-/// м → мм.
-fn from_gltf(p: [f32; 3]) -> [f32; 3] {
-    [p[0] * 1e3, p[1] * 1e3, p[2] * 1e3]
-}
 
 fn srgb_to_linear(c: u8) -> f64 {
     let c = c as f64 / 255.0;
@@ -206,125 +171,6 @@ impl Scene {
         }
         glb_container(doc, bin)
     }
-
-    /// Прочитать сцену из `.glb`. Понимает и glTF сторонних программ: у них
-    /// всё считается деталью целиком (`after`).
-    pub fn from_glb(data: &[u8]) -> Result<Scene, SceneError> {
-        let gltf = gltf::Gltf::from_slice(data).map_err(|e| SceneError::Broken(e.to_string()))?;
-        if let Some(found) = format_version(&gltf) {
-            if found > FORMAT_VERSION as u64 {
-                return Err(SceneError::TooNew { found });
-            }
-        }
-        let blob = gltf.blob.as_deref();
-        let buffer = |b: gltf::Buffer<'_>| -> Option<&[u8]> {
-            match b.source() {
-                gltf::buffer::Source::Bin => blob,
-                gltf::buffer::Source::Uri(_) => None,
-            }
-        };
-
-        let mut scene = Scene::default();
-        // Все сцены glTF по порядку, каждый узел один раз.
-        let mut seen = vec![false; gltf.nodes().count()];
-        let mut stack: Vec<(gltf::Node<'_>, [[f32; 4]; 4])> = gltf
-            .scenes()
-            .flat_map(|s| s.nodes().collect::<Vec<_>>())
-            .map(|n| (n, IDENTITY))
-            .collect();
-        stack.reverse();
-        while let Some((node, parent)) = stack.pop() {
-            if std::mem::replace(&mut seen[node.index()], true) {
-                continue;
-            }
-            let world = mul(parent, node.transform().matrix());
-            if let Some(mesh) = node.mesh() {
-                let extras = extras_json(node.extras());
-                let role = extras
-                    .get("role")
-                    .and_then(Value::as_str)
-                    .and_then(Role::parse)
-                    .unwrap_or(Role::After);
-                let volume_mm3 = extras
-                    .get("volume_mm3")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0);
-                let mut out = Mesh::default();
-                for prim in mesh.primitives() {
-                    if prim.mode() != gltf::mesh::Mode::Triangles {
-                        return Err(SceneError::Unsupported("сетка не из треугольников".into()));
-                    }
-                    let reader = prim.reader(buffer);
-                    let Some(positions) = reader.read_positions() else {
-                        continue;
-                    };
-                    let base = out.positions.len() as u32;
-                    out.positions
-                        .extend(positions.map(|p| from_gltf(apply(&world, p))));
-                    let count = out.positions.len() as u32 - base;
-                    let indices: Vec<u32> = match reader.read_indices() {
-                        Some(ix) => ix.into_u32().collect(),
-                        None => (0..count).collect(),
-                    };
-                    for t in indices.chunks_exact(3) {
-                        if t.iter().all(|&i| i < count) {
-                            out.triangles.push([base + t[0], base + t[1], base + t[2]]);
-                        }
-                    }
-                }
-                if !out.is_empty() {
-                    scene.regions.push(Region {
-                        role,
-                        volume_mm3,
-                        mesh: out,
-                    });
-                }
-            }
-            let children: Vec<_> = node.children().map(|c| (c, world)).collect();
-            stack.extend(children.into_iter().rev());
-        }
-        Ok(scene)
-    }
-}
-
-/// Номер формата сцены из `asset.extras.nonius_scene`; нет — не сцена Nonius.
-pub(crate) fn format_version(gltf: &gltf::Gltf) -> Option<u64> {
-    extras_json(&gltf.document.as_json().asset.extras)
-        .get("nonius_scene")
-        .and_then(Value::as_u64)
-}
-
-fn extras_json(extras: &gltf::json::Extras) -> Value {
-    extras
-        .as_ref()
-        .and_then(|raw| serde_json::from_str(raw.get()).ok())
-        .unwrap_or(Value::Null)
-}
-
-const IDENTITY: [[f32; 4]; 4] = [
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.0],
-    [0.0, 0.0, 0.0, 1.0],
-];
-
-/// Произведение матриц glTF (по столбцам): `a · b`.
-fn mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
-    let mut m = [[0.0; 4]; 4];
-    for (c, col) in m.iter_mut().enumerate() {
-        for (r, v) in col.iter_mut().enumerate() {
-            *v = (0..4).map(|k| a[k][r] * b[c][k]).sum();
-        }
-    }
-    m
-}
-
-fn apply(m: &[[f32; 4]; 4], p: [f32; 3]) -> [f32; 3] {
-    let mut out = [0.0; 3];
-    for (r, v) in out.iter_mut().enumerate() {
-        *v = m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r];
-    }
-    out
 }
 
 /// Упаковать JSON и двоичную часть в контейнер `.glb`.
@@ -351,32 +197,4 @@ fn glb_container(doc: Value, mut bin: Vec<u8>) -> Vec<u8> {
         out.extend_from_slice(&bin);
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn matrices() {
-        let shift = [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [1.0, 2.0, 3.0, 1.0],
-        ];
-        assert_eq!(mul(IDENTITY, shift), shift);
-        assert_eq!(apply(&mul(shift, shift), [0.0; 3]), [2.0, 4.0, 6.0]);
-    }
-
-    #[test]
-    fn units_round_trip() {
-        let p = [10.0, 20.0, 30.0];
-        let q = to_gltf(p);
-        assert!((q[1] - 0.02).abs() < 1e-7 && (q[2] - 0.03).abs() < 1e-7);
-        let back = from_gltf(q);
-        for i in 0..3 {
-            assert!((back[i] - p[i]).abs() < 1e-3);
-        }
-    }
 }

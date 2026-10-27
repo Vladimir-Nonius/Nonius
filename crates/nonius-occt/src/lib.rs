@@ -17,8 +17,6 @@ mod ffi;
 mod modules;
 pub mod render;
 #[cfg(nonius_occt)]
-mod scene;
-#[cfg(nonius_occt)]
 mod shape;
 
 use std::fmt;
@@ -30,11 +28,9 @@ use nonius_core::extension::Registry;
 
 #[cfg(nonius_occt)]
 pub use modules::{
-    preview, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource, CHANGES_PNG,
-    MODEL_STEP,
+    preview, shape_scene, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource,
+    SceneRenderer, CHANGES_GLB, CHANGES_PNG, MODEL_STEP,
 };
-#[cfg(nonius_occt)]
-pub use scene::{shape_scene, SceneRenderer, CHANGES_GLB};
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
 

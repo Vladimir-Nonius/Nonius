@@ -3,6 +3,9 @@
 //! OpenCascade ищется в `NONIUS_OCCT_INCLUDE` / `NONIUS_OCCT_LIB`, затем в
 //! обычных системных папках. Если его нет, крейт собирается без геометрии
 //! (`nonius_occt::available()` вернёт `false`), а программа работает дальше.
+//!
+//! `NONIUS_OCCT_STATIC=1` (Windows) — OpenCascade собран статически (`.lib` без DLL):
+//! он целиком войдёт в `nonius.exe`, и рядом с программой ничего класть не нужно.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -15,6 +18,7 @@ fn main() {
         "NONIUS_OCCT_INCLUDE",
         "NONIUS_OCCT_LIB",
         "NONIUS_OCCT_DISABLE",
+        "NONIUS_OCCT_STATIC",
     ] {
         println!("cargo::rerun-if-env-changed={var}");
     }
@@ -29,6 +33,9 @@ fn main() {
         return;
     };
 
+    let is_static = env::var_os("NONIUS_OCCT_STATIC").is_some_and(|v| v != "0");
+    let msvc = env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+
     let mut build = cc::Build::new();
     build
         .cpp(true)
@@ -36,15 +43,35 @@ fn main() {
         .file("cpp/nonius_occt.cpp")
         .include(&include)
         .warnings(false);
-    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+    if msvc {
         // Исходник в UTF-8 (русские сообщения), исключения C++ включены.
         build.flag("/utf-8").flag("/EHsc");
+    }
+    if is_static {
+        // Заголовки OpenCascade без __declspec(dllimport).
+        build
+            .define("OCCT_STATIC_BUILD", None)
+            .define("HAVE_NO_DLL", None);
     }
     build.compile("nonius_occt");
 
     println!("cargo::rustc-link-search=native={}", lib.display());
-    for name in libraries(&lib) {
-        println!("cargo::rustc-link-lib=dylib={name}");
+    if is_static {
+        // Берём все библиотеки OpenCascade из папки: компоновщик возьмёт из них
+        // только нужное, а зависимости между ними искать вручную не придётся.
+        // `-bundle` — не копировать сотни мегабайт .lib внутрь rlib.
+        for name in all_toolkits(&lib) {
+            println!("cargo::rustc-link-lib=static:-bundle={name}");
+        }
+        if msvc {
+            for name in WINDOWS_SYSTEM_LIBS {
+                println!("cargo::rustc-link-lib=dylib={name}");
+            }
+        }
+    } else {
+        for name in libraries(&lib) {
+            println!("cargo::rustc-link-lib=dylib={name}");
+        }
     }
     println!("cargo::rustc-cfg=nonius_occt");
 }
@@ -102,6 +129,31 @@ fn has_lib(dir: &Path, name: &str) -> bool {
             .iter()
             .any(|c| f == *c || f.starts_with(&format!("{c}.")))
     })
+}
+
+/// Библиотеки Windows, которые нужны статическому OpenCascade (сеть, реестр,
+/// сведения о процессе). Все они есть в любой Windows.
+const WINDOWS_SYSTEM_LIBS: &[&str] = &[
+    "advapi32", "user32", "gdi32", "shell32", "ws2_32", "wsock32", "psapi",
+];
+
+/// Все библиотеки OpenCascade (`TK*`) в папке, по алфавиту.
+fn all_toolkits(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let f = e.file_name().to_string_lossy().into_owned();
+            let stem = f
+                .strip_suffix(".lib")
+                .or_else(|| f.strip_prefix("lib").and_then(|s| s.strip_suffix(".a")))?;
+            stem.starts_with("TK").then(|| stem.to_string())
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Нужные библиотеки. В OpenCascade 7.8 STEP собран в TKDESTEP,

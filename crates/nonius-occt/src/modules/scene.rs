@@ -7,10 +7,10 @@ use nonius_core::extension::{ExtensionPoint, Module, ModuleManifest, Renderer, S
 use nonius_core::{Error, Result};
 use nonius_scene::{Mesh, Region, Role, Scene};
 
-use crate::modules::{deflection, manifest, model_pair, module_err, same_bytes, ANGULAR};
+use super::{deflection, manifest, model_pair, module_err, same_bytes, GeometryDiff, ANGULAR};
 use crate::render;
 use crate::shape::Shape;
-use crate::{GeometryDiff, OcctError, SCENE_RENDERER};
+use crate::{OcctError, SCENE_RENDERER};
 
 /// Имя файла сцены, которую пишет [`SceneRenderer`].
 pub const CHANGES_GLB: &str = "changes.glb";
