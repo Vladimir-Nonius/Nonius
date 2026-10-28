@@ -1,6 +1,8 @@
 // Тонкий C-интерфейс к OpenCascade для Nonius. См. nonius_occt.h.
 
 #include "nonius_occt.h"
+#include "internal.h"
+#include "share.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -13,14 +15,11 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
-#include <BRepBndLib.hxx>
-#include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Tool.hxx>
-#include <Bnd_Box.hxx>
-#include <GProp_GProps.hxx>
+#include <BinTools.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <Interface_Static.hxx>
 #include <Poly_Triangulation.hxx>
@@ -36,10 +35,6 @@
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Pnt.hxx>
-
-struct NoniusShape {
-    TopoDS_Shape shape;
-};
 
 namespace {
 
@@ -60,14 +55,6 @@ std::string failure_text(const Standard_Failure& f) {
         text += m;
     }
     return text;
-}
-
-uint32_t count(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
-    uint32_t n = 0;
-    for (TopExp_Explorer ex(shape, kind); ex.More(); ex.Next()) {
-        ++n;
-    }
-    return n;
 }
 
 NoniusShape* wrap(const TopoDS_Shape& shape) {
@@ -130,36 +117,23 @@ int32_t nonius_write_step(const NoniusShape* shape, const char* path, char* err,
 
 void nonius_shape_free(NoniusShape* shape) { delete shape; }
 
-int32_t nonius_shape_props(const NoniusShape* shape, NoniusProps* out) {
-    std::memset(out, 0, sizeof(NoniusProps));
+int32_t nonius_write_brep(const NoniusShape* shape, const char* path) {
     try {
-        const TopoDS_Shape& s = shape->shape;
-        GProp_GProps volume;
-        BRepGProp::VolumeProperties(s, volume);
-        double v = volume.Mass();
-        out->volume = v < 0 ? -v : v;
-        if (out->volume > 0) {
-            gp_Pnt c = volume.CentreOfMass();
-            out->center[0] = c.X();
-            out->center[1] = c.Y();
-            out->center[2] = c.Z();
-        }
-        GProp_GProps surface;
-        BRepGProp::SurfaceProperties(s, surface);
-        out->area = surface.Mass();
-
-        Bnd_Box box;
-        BRepBndLib::AddOptimal(s, box, Standard_False, Standard_False);
-        if (!box.IsVoid()) {
-            out->has_bbox = 1;
-            box.Get(out->bbox_min[0], out->bbox_min[1], out->bbox_min[2], out->bbox_max[0],
-                    out->bbox_max[1], out->bbox_max[2]);
-        }
-        out->solids = count(s, TopAbs_SOLID);
-        out->faces = count(s, TopAbs_FACE);
-        return 1;
+        return BinTools::Write(shape->shape, path) ? 1 : 0;
     } catch (...) {
         return 0;
+    }
+}
+
+NoniusShape* nonius_read_brep(const char* path) {
+    try {
+        TopoDS_Shape shape;
+        if (!BinTools::Read(shape, path) || shape.IsNull()) {
+            return nullptr;
+        }
+        return wrap(shape);
+    } catch (...) {
+        return nullptr;
     }
 }
 
@@ -212,9 +186,13 @@ int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusS
         // Пересечение тел — самая дорогая часть — считается один раз,
         // из него получаются обе разности. Без допуска: с ним обратная
         // разность из общего пересечения бывает неверной (проверено на OCCT 7.9).
+        // Одинаковые грани версий делаются общими (share.h) — пересекается
+        // только изменённое.
+        TopoDS_Shape was, now;
+        nonius::share_faces(before->shape, after->shape, &was, &now);
         TopTools_ListOfShape args;
-        args.Append(before->shape);
-        args.Append(after->shape);
+        args.Append(was);
+        args.Append(now);
         BOPAlgo_PaveFiller filler;
         filler.SetArguments(args);
         filler.SetRunParallel(Standard_True);
@@ -224,8 +202,8 @@ int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusS
             set_error(err, err_len, "не удалось пересечь тела");
             return 0;
         }
-        BRepAlgoAPI_Cut gone(before->shape, after->shape, filler, Standard_True);
-        BRepAlgoAPI_Cut appeared(before->shape, after->shape, filler, Standard_False);
+        BRepAlgoAPI_Cut gone(was, now, filler, Standard_True);
+        BRepAlgoAPI_Cut appeared(was, now, filler, Standard_False);
         if (!gone.IsDone() || gone.HasErrors() || !appeared.IsDone() || appeared.HasErrors()) {
             set_error(err, err_len, "булева операция не удалась");
             return 0;

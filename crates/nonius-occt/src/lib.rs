@@ -12,6 +12,8 @@
 //! `false`, а [`register`] ничего не подключит — программа работает дальше.
 
 #[cfg(nonius_occt)]
+mod cache;
+#[cfg(nonius_occt)]
 mod ffi;
 #[cfg(nonius_occt)]
 mod modules;
