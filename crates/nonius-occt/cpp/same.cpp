@@ -82,6 +82,20 @@ Handle(Geom_Surface) basis(Handle(Geom_Surface) s) {
     return s;
 }
 
+// Полюса и веса сплайновой кривой.
+template <class C>
+bool same_curve_poles(const C& a, const gp_Trsf& ta, const C& b, const gp_Trsf& tb) {
+    if (a.NbPoles() != b.NbPoles()) {
+        return false;
+    }
+    for (int i = 1; i <= a.NbPoles(); ++i) {
+        if (!same_pnt(a.Pole(i), ta, b.Pole(i), tb) || !same_param(a.Weight(i), b.Weight(i), 1.0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Определение кривой: у прямых и конических сечений его задают точки, которые
 // сверяет same_edge; у сплайнов — полюса, веса и узлы. Прочие виды кривых не
 // сверяются — такие рёбра остаются своими (медленнее, но верно).
@@ -95,31 +109,13 @@ bool same_curve_definition(const Handle(Geom_Curve)& ca, const gp_Trsf& ta,
     }
     if (auto a = Handle(Geom_BSplineCurve)::DownCast(ca)) {
         auto b = Handle(Geom_BSplineCurve)::DownCast(cb);
-        if (a->Degree() != b->Degree() || a->NbPoles() != b->NbPoles() ||
-            a->IsPeriodic() != b->IsPeriodic() || !same_reals(a->Knots(), b->Knots()) ||
-            !same_ints(a->Multiplicities(), b->Multiplicities())) {
-            return false;
-        }
-        for (int i = 1; i <= a->NbPoles(); ++i) {
-            if (!same_pnt(a->Pole(i), ta, b->Pole(i), tb) ||
-                !same_param(a->Weight(i), b->Weight(i), 1.0)) {
-                return false;
-            }
-        }
-        return true;
+        return a->Degree() == b->Degree() && a->IsPeriodic() == b->IsPeriodic() &&
+               same_reals(a->Knots(), b->Knots()) &&
+               same_ints(a->Multiplicities(), b->Multiplicities()) &&
+               same_curve_poles(*a, ta, *b, tb);
     }
     if (auto a = Handle(Geom_BezierCurve)::DownCast(ca)) {
-        auto b = Handle(Geom_BezierCurve)::DownCast(cb);
-        if (a->NbPoles() != b->NbPoles()) {
-            return false;
-        }
-        for (int i = 1; i <= a->NbPoles(); ++i) {
-            if (!same_pnt(a->Pole(i), ta, b->Pole(i), tb) ||
-                !same_param(a->Weight(i), b->Weight(i), 1.0)) {
-                return false;
-            }
-        }
-        return true;
+        return same_curve_poles(*a, ta, *Handle(Geom_BezierCurve)::DownCast(cb), tb);
     }
     return false;
 }

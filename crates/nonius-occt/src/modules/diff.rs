@@ -54,21 +54,25 @@ impl GeometryDiff {
         // Быстрый путь: одно общее пересечение. Проверяем баланс
         // «было + добавлено − убрано = стало»; если не сходится — медленный,
         // но надёжный путь из двух отдельных вычитаний с допуском.
-        let fast = before.diff(&after).ok().and_then(|(added, removed)| {
+        let measured = |(added, removed): (Shape, Shape)| {
             let (a, r) = (added.volume(), removed.volume());
-            let mismatch = (vb + a - r - va).abs();
-            let ok = a >= -threshold
-                && r >= -threshold
-                && mismatch <= (scale * 1e-4).max(threshold * 10.0);
-            ok.then_some((added, a, removed, r))
-        });
+            (added, a, removed, r)
+        };
+        let fast = before
+            .diff(&after)
+            .ok()
+            .map(measured)
+            .filter(|&(_, a, _, r)| {
+                let mismatch = (vb + a - r - va).abs();
+                a >= -threshold
+                    && r >= -threshold
+                    && mismatch <= (scale * 1e-4).max(threshold * 10.0)
+            });
         let (added, a, removed, r) = match fast {
             Some(found) => found,
             None => {
                 let fuzzy = tolerance_mm.max(0.0);
-                let (added, removed) = (after.cut(&before, fuzzy)?, before.cut(&after, fuzzy)?);
-                let (a, r) = (added.volume(), removed.volume());
-                (added, a, removed, r)
+                measured((after.cut(&before, fuzzy)?, before.cut(&after, fuzzy)?))
             }
         };
         Ok(Self {
@@ -104,7 +108,7 @@ impl GeometryDiff {
     /// Фон — новая версия целиком: добавленное лежит внутри неё и на совпадающих
     /// гранях выигрывает у серого, убранное — снаружи и видно сквозь серое.
     pub fn render(&self, view: &View) -> std::result::Result<Image, OcctError> {
-        let defl = deflection(self.after.rough_bbox().or(self.before.rough_bbox()));
+        let defl = deflection(self.after.rough_bbox().or_else(|| self.before.rough_bbox()));
         let common_mesh = self.after.mesh(defl, ANGULAR);
         let empty = Mesh::default();
         let added_mesh = if self.has_added() {

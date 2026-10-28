@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <vector>
 
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepTools_ReShape.hxx>
 #include <BRep_Builder.hxx>
@@ -24,7 +25,6 @@
 #include <Geom2d_Curve.hxx>
 #include <Geom_Surface.hxx>
 #include <TopExp.hxx>
-#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -129,19 +129,15 @@ bool share(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* 
     std::vector<TopoDS_Shape> twin(FB.Extent() + 1);
     for (int j = 1; j <= FB.Extent(); ++j) {
         const TopoDS_Face& fb = TopoDS::Face(FB(j));
-        const std::vector<TopoDS_Shape> eb = real_edges(fb);
-        if (eb.empty()) {
+        // Рёбра «было», в которые переходят рёбра этой грани; 0 — ребро своё.
+        std::vector<int> mapped;
+        for (const TopoDS_Shape& e : real_edges(fb)) {
+            mapped.push_back(emap[EB.FindIndex(e)]);
+        }
+        if (mapped.empty() || std::count(mapped.begin(), mapped.end(), 0) > 0) {
             continue;
         }
-        bool all_mapped = true;
-        for (const TopoDS_Shape& e : eb) {
-            all_mapped = all_mapped && emap[EB.FindIndex(e)] != 0;
-        }
-        if (!all_mapped) {
-            continue;
-        }
-        const TopoDS_Shape& first = EA(emap[EB.FindIndex(eb.front())]);
-        const int k = edge_faces.FindIndex(first);
+        const int k = edge_faces.FindIndex(EA(mapped.front()));
         if (k == 0) {
             continue;
         }
@@ -151,7 +147,7 @@ bool share(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* 
                 continue;
             }
             const std::vector<TopoDS_Shape> ea = real_edges(fa);
-            if (ea.size() != eb.size()) {
+            if (ea.size() != mapped.size()) {
                 continue;
             }
             TopTools_IndexedMapOfShape ea_set;
@@ -159,8 +155,8 @@ bool share(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* 
                 ea_set.Add(e);
             }
             bool same_edges = true;
-            for (const TopoDS_Shape& e : eb) {
-                same_edges = same_edges && ea_set.Contains(EA(emap[EB.FindIndex(e)]));
+            for (int i : mapped) {
+                same_edges = same_edges && ea_set.Contains(EA(i));
             }
             // Ориентация грани берётся из её тела: у «было» и «стало» она
             // должна совпасть, иначе материал по разные стороны.
@@ -224,20 +220,17 @@ bool share(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* 
     }
 
     BRepTools_ReShape reshape;
+    auto put = [&reshape](const TopoDS_Shape& from, const TopoDS_Shape& to) {
+        reshape.Replace(from.Oriented(TopAbs_FORWARD), to.Oriented(TopAbs_FORWARD));
+    };
     for (int j = 1; j <= VB.Extent(); ++j) {
-        if (vmap[j] != 0) {
-            reshape.Replace(VB(j).Oriented(TopAbs_FORWARD), VA(vmap[j]).Oriented(TopAbs_FORWARD));
-        }
+        if (vmap[j] != 0) put(VB(j), VA(vmap[j]));
     }
     for (int j = 1; j <= EB.Extent(); ++j) {
-        if (emap[j] != 0) {
-            reshape.Replace(EB(j).Oriented(TopAbs_FORWARD), EA(emap[j]).Oriented(TopAbs_FORWARD));
-        }
+        if (emap[j] != 0) put(EB(j), EA(emap[j]));
     }
     for (int j = 1; j <= FB.Extent(); ++j) {
-        if (!twin[j].IsNull()) {
-            reshape.Replace(FB(j).Oriented(TopAbs_FORWARD), twin[j].Oriented(TopAbs_FORWARD));
-        }
+        if (!twin[j].IsNull()) put(FB(j), twin[j]);
     }
     TopoDS_Shape shared = reshape.Apply(after);
 
@@ -253,12 +246,22 @@ bool share(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* 
 
 }  // namespace
 
-bool share_faces(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* result) {
+bool share_faces(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* was,
+                 TopoDS_Shape* now) {
+    *was = before;
+    *now = after;
     try {
-        return share(before, after, result);
+        // Копия без геометрии: рёбрам копии добавляются кривые, исходник не трогаем.
+        TopoDS_Shape copy = BRepBuilderAPI_Copy(before, Standard_False).Shape();
+        TopoDS_Shape shared;
+        if (share(copy, after, &shared)) {
+            *was = copy;
+            *now = shared;
+            return true;
+        }
     } catch (...) {
-        return false;
     }
+    return false;
 }
 
 }  // namespace nonius

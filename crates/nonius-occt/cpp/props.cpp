@@ -9,7 +9,9 @@
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <OSD_Parallel.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 
@@ -136,8 +138,10 @@ int32_t nonius_shape_rough_bbox(const NoniusShape* shape, double min[3], double 
         // По рёбрам: кривые считаются быстро и точно, а грани между рёбрами
         // выпирают редко и немного — для допуска сетки этого хватает.
         Bnd_Box box;
-        for (TopExp_Explorer ex(shape->shape, TopAbs_EDGE); ex.More(); ex.Next()) {
-            BRepBndLib::AddOptimal(ex.Current(), box, Standard_False, Standard_False);
+        TopTools_IndexedMapOfShape edges;
+        TopExp::MapShapes(shape->shape, TopAbs_EDGE, edges);
+        for (int i = 1; i <= edges.Extent(); ++i) {
+            BRepBndLib::AddOptimal(edges(i), box, Standard_False, Standard_False);
         }
         if (box.IsVoid()) {
             BRepBndLib::Add(shape->shape, box);

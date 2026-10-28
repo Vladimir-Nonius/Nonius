@@ -3,16 +3,18 @@
 //! STEP на 5 МБ OpenCascade читает секунд шесть, а сравнение и картинка читают
 //! обе версии заново при каждом запуске. Прочитанное тело сохраняется в
 //! двоичном формате OpenCascade (BRep): он без потерь и читается за сотые доли
-//! секунды. Ключ — содержимое файла и версия OpenCascade, поэтому изменённый
+//! секунды. Ключ — SHA-256 содержимого файла и версии OpenCascade, поэтому изменённый
 //! файл кэш не обманет. Кэш — только ускорение: если папки нет или файл
 //! повреждён, STEP читается как обычно. Хранятся [`MAX_FILES`] тел, которые
 //! брали последними.
 
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
+
+use sha2::{Digest, Sha256};
 
 /// Сколько тел держать в кэше; старые удаляются.
 const MAX_FILES: usize = 64;
@@ -37,19 +39,26 @@ fn dir() -> PathBuf {
 
 /// Файл кэша для STEP с таким содержимым. `None` — файл не прочитать.
 pub(crate) fn entry(step: &Path, occt_version: &str) -> Option<PathBuf> {
-    let bytes = fs::read(step).ok()?;
-    let mut h = DefaultHasher::new();
-    FORMAT.hash(&mut h);
-    occt_version.hash(&mut h);
-    bytes.hash(&mut h);
-    Some(dir().join(format!("{:x}-{:016x}.brep", bytes.len(), h.finish())))
+    let mut file = fs::File::open(step).ok()?;
+    let mut h = Sha256::new();
+    h.update(FORMAT.to_le_bytes());
+    h.update(occt_version.as_bytes());
+    h.update([0]);
+    io::copy(&mut file, &mut h).ok()?;
+    let name: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    Some(dir().join(format!("{name}.brep")))
+}
+
+fn set_mtime(path: &Path, time: SystemTime) -> io::Result<()> {
+    fs::File::options()
+        .append(true)
+        .open(path)?
+        .set_modified(time)
 }
 
 /// Отметить, что тело взяли: при чистке уходят те, что не брали дольше всех.
 pub(crate) fn touch(entry: &Path) {
-    if let Ok(f) = fs::File::options().append(true).open(entry) {
-        let _ = f.set_modified(SystemTime::now());
-    }
+    let _ = set_mtime(entry, SystemTime::now());
 }
 
 /// Сохранить тело: `write` пишет во временный файл, он переименовывается
@@ -149,17 +158,11 @@ mod tests {
         for i in 0..MAX_FILES {
             let p = dir.path().join(format!("{i}.brep"));
             fs::write(&p, b"x").unwrap();
-            let f = fs::File::options().append(true).open(&p).unwrap();
-            f.set_modified(old).unwrap();
+            set_mtime(&p, old).unwrap();
         }
         let stale = dir.path().join("tmp-1-1");
         fs::write(&stale, b"x").unwrap();
-        fs::File::options()
-            .append(true)
-            .open(&stale)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
+        set_mtime(&stale, old).unwrap();
         touch(&keep);
         store(&dir.path().join("new.brep"), |tmp| {
             fs::write(tmp, b"x").is_ok()

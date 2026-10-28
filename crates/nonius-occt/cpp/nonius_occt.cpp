@@ -15,7 +15,6 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -36,7 +35,6 @@
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Pnt.hxx>
-
 
 namespace {
 
@@ -189,13 +187,9 @@ int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusS
         // из него получаются обе разности. Без допуска: с ним обратная
         // разность из общего пересечения бывает неверной (проверено на OCCT 7.9).
         // Одинаковые грани версий делаются общими (share.h) — пересекается
-        // только изменённое. «Было» копируется без геометрии: копию дополняют.
-        TopoDS_Shape was = BRepBuilderAPI_Copy(before->shape, Standard_False).Shape();
-        TopoDS_Shape now;
-        if (!nonius::share_faces(was, after->shape, &now)) {
-            was = before->shape;
-            now = after->shape;
-        }
+        // только изменённое.
+        TopoDS_Shape was, now;
+        nonius::share_faces(before->shape, after->shape, &was, &now);
         TopTools_ListOfShape args;
         args.Append(was);
         args.Append(now);

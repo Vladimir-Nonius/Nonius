@@ -86,12 +86,11 @@ impl Shape {
     /// содержимого берётся из кэша (см. `cache.rs`) — в сотни раз быстрее.
     pub fn read_step(path: &Path) -> Result<Self, OcctError> {
         let entry = cache::entry(path, &version());
-        if let Some((entry, shape)) = entry
-            .as_deref()
-            .and_then(|e| Some((e, Self::read_brep(e)?)))
-        {
-            cache::touch(entry);
-            return Ok(shape);
+        if let Some(entry) = &entry {
+            if let Some(shape) = Self::read_brep(entry) {
+                cache::touch(entry);
+                return Ok(shape);
+            }
         }
         let shape = Self::read_step_file(path)?;
         if let Some(entry) = &entry {
