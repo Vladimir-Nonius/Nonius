@@ -10,10 +10,17 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+/// Файлы C++-прослойки.
+const SOURCES: &[&str] = &[
+    "cpp/nonius_occt.cpp",
+    "cpp/props.cpp",
+    "cpp/same.cpp",
+    "cpp/share.cpp",
+];
+
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(nonius_occt)");
-    println!("cargo::rerun-if-changed=cpp/nonius_occt.cpp");
-    println!("cargo::rerun-if-changed=cpp/nonius_occt.h");
+    println!("cargo::rerun-if-changed=cpp");
     for var in [
         "NONIUS_OCCT_INCLUDE",
         "NONIUS_OCCT_LIB",
@@ -40,7 +47,7 @@ fn main() {
     build
         .cpp(true)
         .std("c++17")
-        .file("cpp/nonius_occt.cpp")
+        .files(SOURCES)
         .include(&include)
         .warnings(false);
     if msvc {

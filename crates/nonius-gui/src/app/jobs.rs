@@ -103,7 +103,9 @@ mod tests {
         jobs.spawn(&ctx, |_| panic!("сбой"));
         assert!(jobs.busy());
         let mut got = Vec::new();
-        for _ in 0..200 {
+        // Паника с трассировкой стека в отладочной сборке печатается долго.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
             got.extend(jobs.finished());
             if got.len() == 2 {
                 break;

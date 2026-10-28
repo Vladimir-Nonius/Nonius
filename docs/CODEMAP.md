@@ -23,7 +23,7 @@
 | Сравнение паспортов (числа, материал, свойства) | `nonius-core/src/compare/meta.rs`, формат отчёта — `compare/mod.rs` |
 | Чтение заголовка STEP | `nonius-step/src/header.rs` |
 | Геометрия OpenCascade (объём, габариты) | `nonius-occt/src/modules/source.rs`, `shape.rs` |
-| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs` |
+| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/share.cpp`, `src/cache.rs` |
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
 | Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
 | 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
@@ -84,10 +84,15 @@
 | Файл | Что внутри |
 |---|---|
 | `build.rs` | поиск OpenCascade, сборка C++-прослойки |
-| `cpp/nonius_occt.h`, `.cpp` | C-прослойка над OpenCascade |
+| `cpp/nonius_occt.h`, `.cpp` | C-прослойка над OpenCascade: STEP, BRep, булевы операции, разность версий, сетка |
+| `cpp/props.cpp` | контрольные числа: объём, площадь, центр масс, габариты (грани параллельно) |
+| `cpp/share.h`, `.cpp` | общие грани двух версий — сравнение пересекает только изменённое |
+| `cpp/same.h`, `.cpp` | совпадение рёбер и граней двух версий |
+| `cpp/internal.h` | общее для файлов прослойки |
 | `src/lib.rs` | `register`, `available`, `occt_version`, `preview_png`, запись PNG |
 | `src/ffi.rs` | объявления функций прослойки |
 | `src/shape.rs` | безопасная обёртка `Shape`: чтение, свойства, булевы операции, сетка |
+| `src/cache.rs` | кэш прочитанных STEP (BRep в папке временных файлов) |
 | `src/modules/mod.rs` | общие помощники модулей, `preview` |
 | `src/modules/source.rs` | `step-occt`: контрольные числа из STEP |
 | `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал |
@@ -179,6 +184,7 @@
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
 | `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
+| `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, кэш STEP |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 

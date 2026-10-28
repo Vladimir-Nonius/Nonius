@@ -72,7 +72,7 @@ const ANGULAR: f64 = 0.3;
 /// Нарисовать превью одной детали из STEP.
 pub fn preview(step: &Path, view: &View) -> std::result::Result<Image, OcctError> {
     let shape = Shape::read_step(step)?;
-    let mesh = shape.mesh(deflection(shape.props().bbox), ANGULAR);
+    let mesh = shape.mesh(deflection(shape.rough_bbox()), ANGULAR);
     Ok(render(
         &[Layer {
             mesh: &mesh,

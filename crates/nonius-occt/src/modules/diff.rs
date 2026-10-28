@@ -47,31 +47,39 @@ impl GeometryDiff {
         after: Shape,
         tolerance_mm: f64,
     ) -> std::result::Result<Self, OcctError> {
-        let (vb, va) = (before.props().volume, after.props().volume);
+        let (vb, va) = (before.volume(), after.volume());
         let scale = vb.max(va);
         let threshold = (scale * 1e-6).max(tolerance_mm.powi(3));
 
         // Быстрый путь: одно общее пересечение. Проверяем баланс
         // «было + добавлено − убрано = стало»; если не сходится — медленный,
         // но надёжный путь из двух отдельных вычитаний с допуском.
-        let fast = before.diff(&after).ok().filter(|(added, removed)| {
-            let (a, r) = (added.props().volume, removed.props().volume);
-            let mismatch = (vb + a - r - va).abs();
-            a >= -threshold && r >= -threshold && mismatch <= (scale * 1e-4).max(threshold * 10.0)
-        });
-        let (added, removed) = match fast {
-            Some(pair) => pair,
+        let measured = |(added, removed): (Shape, Shape)| {
+            let (a, r) = (added.volume(), removed.volume());
+            (added, a, removed, r)
+        };
+        let fast = before
+            .diff(&after)
+            .ok()
+            .map(measured)
+            .filter(|&(_, a, _, r)| {
+                let mismatch = (vb + a - r - va).abs();
+                a >= -threshold
+                    && r >= -threshold
+                    && mismatch <= (scale * 1e-4).max(threshold * 10.0)
+            });
+        let (added, a, removed, r) = match fast {
+            Some(found) => found,
             None => {
                 let fuzzy = tolerance_mm.max(0.0);
-                (after.cut(&before, fuzzy)?, before.cut(&after, fuzzy)?)
+                measured((after.cut(&before, fuzzy)?, before.cut(&after, fuzzy)?))
             }
         };
-        let (a, r) = (added.props(), removed.props());
         Ok(Self {
-            added_volume: a.volume,
-            removed_volume: r.volume,
-            added_pieces: a.solids,
-            removed_pieces: r.solids,
+            added_volume: a,
+            removed_volume: r,
+            added_pieces: added.solid_count(),
+            removed_pieces: removed.solid_count(),
             threshold,
             before,
             after,
@@ -100,7 +108,7 @@ impl GeometryDiff {
     /// Фон — новая версия целиком: добавленное лежит внутри неё и на совпадающих
     /// гранях выигрывает у серого, убранное — снаружи и видно сквозь серое.
     pub fn render(&self, view: &View) -> std::result::Result<Image, OcctError> {
-        let defl = deflection(self.after.props().bbox.or(self.before.props().bbox));
+        let defl = deflection(self.after.rough_bbox().or_else(|| self.before.rough_bbox()));
         let common_mesh = self.after.mesh(defl, ANGULAR);
         let empty = Mesh::default();
         let added_mesh = if self.has_added() {
