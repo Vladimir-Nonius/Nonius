@@ -47,7 +47,7 @@ impl Jobs {
     pub fn spawn(
         &mut self,
         ctx: &egui::Context,
-        work: impl FnOnce(&dyn Fn(&str)) -> Done + Send + 'static,
+        work: impl FnOnce(&(dyn Fn(&str) + Sync)) -> Done + Send + 'static,
     ) {
         self.running += 1;
         let (tx, ctx, progress) = (self.tx.clone(), ctx.clone(), self.progress.clone());

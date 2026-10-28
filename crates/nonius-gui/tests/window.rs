@@ -69,7 +69,7 @@ impl ProjectSource for Fake {
         _part: &str,
         before: Pick,
         after: Pick,
-        progress: &dyn Fn(&str),
+        progress: &(dyn Fn(&str) + Sync),
     ) -> anyhow::Result<Comparison> {
         progress("Сравниваю…");
         assert_eq!((before, after), (Pick::Version(1), Pick::Version(2)));

@@ -6,6 +6,7 @@ members = [
     "crates/nonius-step",
     "crates/nonius-scene",
     "crates/nonius-occt",
+    "crates/nonius-app",
     "crates/nonius-gui",
     "crates/nonius-cli",
 ]
@@ -24,6 +25,7 @@ nonius-store = { path = "crates/nonius-store" }
 nonius-step = { path = "crates/nonius-step" }
 nonius-scene = { path = "crates/nonius-scene" }
 nonius-occt = { path = "crates/nonius-occt" }
+nonius-app = { path = "crates/nonius-app" }
 nonius-gui = { path = "crates/nonius-gui" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
@@ -32,6 +34,7 @@ thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 tempfile = "3"
+sha2 = "0.10"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

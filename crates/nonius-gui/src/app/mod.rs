@@ -181,7 +181,12 @@ impl App {
                     };
                     self.versions = v;
                     self.picks = wanted.or(defaults).unwrap_or(self.picks);
-                    self.compare(ctx);
+                    if self.versions.is_empty() {
+                        self.viewport.set_model(None, false);
+                        self.shown = None;
+                    } else {
+                        self.compare(ctx);
+                    }
                 }
                 Done::Compared(name, picks, Ok(c))
                     if self.part.as_deref() == Some(&name) && self.picks == picks =>

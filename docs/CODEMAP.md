@@ -8,9 +8,13 @@
 
 | Задача | Файлы |
 |---|---|
-| Новая команда `nonius …` | `nonius-cli/src/args.rs` (команда и справка), `main.rs` (вызов), новый файл в `commands/` |
+| Новое действие программы (для CLI, окна, MCP) | `nonius-app/src/lib.rs`, файл темы в `nonius-app/src/` |
+| Новая команда `nonius …` | действие в `nonius-app`, затем `nonius-cli/src/args.rs` (команда и справка), `main.rs` (вызов), печать в `commands/` |
 | Изменить вывод команды | `nonius-cli/src/commands/<группа>.rs`, общие мелочи — `format.rs` |
-| Импорт файла модели | `nonius-cli/src/commands/import.rs` |
+| Импорт файла модели | `nonius-app/src/import.rs` |
+| Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
+| Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
+| Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Формат сообщения коммита | `nonius-store/src/message.rs` |
@@ -23,7 +27,7 @@
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
 | Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
 | 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
-| Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window.rs` (реализация на хранилище) |
+| Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window.rs` (реализация на `nonius-app`) |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
 | Новая функция OpenCascade | `nonius-occt/cpp/nonius_occt.h` и `.cpp`, `src/ffi.rs`, `src/shape.rs` |
 | Сборка с OpenCascade / без него | `nonius-occt/build.rs`, `nonius-occt/src/lib.rs` |
@@ -63,6 +67,7 @@
 | `message.rs` | сообщение коммита и строки `Nonius-Item` / `Nonius-Version` |
 | `version.rs` | `VersionInfo`, `FileChange` |
 | `git.rs` | запуск системного `git` |
+| `workdir.rs` | служебная папка `.git/nonius`, запись в неё целыми папками (временная папка → переименование) |
 | `error.rs` | ошибки хранилища |
 
 ### `nonius-step` — заголовок STEP
@@ -125,20 +130,42 @@
 | `view/gpu/mod.rs` | отрисовка wgpu: порядок кусков, рентген, рёбра |
 | `view/gpu/pipelines.rs`, `shader.wgsl` | конвейеры и шейдер |
 | `view/gpu/target.rs`, `readback.rs` | картинка кадра и чтение её в PNG |
+| `src/modules/preview.rs` | `preview-occt`: экспорт `preview` — превью `preview.png` |
+| `src/render/mod.rs` | сетка, слои, цвета, вид, картинка |
+| `src/render/raster.rs` | отрисовка: камера, z-буфер, свет, «рентген» |
+
+### `nonius-app` — действия программы
+
+Общие для командной строки, окна и MCP. Ничего не печатает, возвращает данные. Модули не знает: реестр передаёт вызывающий.
+
+| Файл | Что внутри |
+|---|---|
+| `lib.rs` | `App` (проект + реестр + хранилище), `create_project` |
+| `items.rs` | новая деталь, список, `ItemStatus` и `ItemState` |
+| `history.rs` | версии, `save_version`, `restore`, `export` |
+| `import.rs` | `import`: файл модели в деталь, паспорт, превью |
+| `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
+| `materials.rs` | справочник материалов с плотностью |
+| `compare.rs` | `compare`, `Comparison`, `CompareOptions`, `Progress` (ход и отмена) |
+| `cache.rs` | кэш сравнений `.git/nonius/cache/<ключ>/cache.yaml` (`schema: 1`) |
+| `error.rs` | ошибки действий |
 
 ### `nonius-cli` — команда `nonius`
+
+Тонкая обёртка над `nonius-app`: разбор команды и печать.
 
 | Файл | Что внутри |
 |---|---|
 | `main.rs` | запуск, выбор команды, набор модулей (`registry`) |
 | `args.rs` | команды и параметры, текст справки |
-| `window.rs` | окно: `nonius` без команды, `nonius view`, мост от хранилища к окну |
+| `window.rs` | окно: `nonius` без команды, `nonius view`, мост от `nonius-app` к окну (`AppSource`) |
 | `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `modules` |
 | `commands/import.rs` | `import` |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `export` |
 | `commands/compare.rs` | `diff`, `render` |
+| `commands/passport.rs` | `material`, `materials` |
 
 ## Тесты
 
@@ -152,6 +179,7 @@
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
 | `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
+| `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 
 Карту обновляет тот, кто добавляет, переносит или удаляет файл, — в том же pull request.

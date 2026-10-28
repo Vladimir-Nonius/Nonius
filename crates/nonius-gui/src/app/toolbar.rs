@@ -95,7 +95,10 @@ fn versions(app: &mut App, ui: &mut egui::Ui) {
             .width(70.0)
             .show_ui(ui, |ui| {
                 for (p, text) in &choices {
-                    ui.selectable_value(pick, *p, text);
+                    // «Было» — только сохранённая версия.
+                    if id == "after" || *p != Pick::Current {
+                        ui.selectable_value(pick, *p, text);
+                    }
                 }
             });
     }

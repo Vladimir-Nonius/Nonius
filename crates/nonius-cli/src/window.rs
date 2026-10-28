@@ -1,121 +1,83 @@
 //! Окно программы: `nonius` без команды (двойной щелчок) и `nonius view`.
 //!
-//! Здесь — временный мост от хранилища к окну (`StoreSource`). Когда общий
-//! слой `nonius-app` попадёт в main, окно будет брать проект оттуда.
+//! Здесь — мост от общего слоя `nonius-app` к окну (`AppSource`): окно
+//! не знает про git и OpenCascade, а сравнения берёт из того же кэша, что
+//! и команды.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
-use nonius_core::compare::{ChangeReport, CompareContext};
-use nonius_core::extension::{Registry, Snapshot};
+use anyhow::{bail, Context, Result};
+use nonius_app::{App, CompareOptions, Progress};
 use nonius_core::meta::ItemKind;
-use nonius_core::{PartName, Project, VersionNumber};
+use nonius_core::VersionNumber;
 use nonius_gui::source::{Comparison, PartEntry, Pick, ProjectSource, VersionEntry};
 use nonius_scene::Scene;
-use nonius_store::{GitOptions, Store};
 
 use crate::format::{parse_version, short_date};
-use crate::{registry, welcome};
+use crate::{welcome, window_registry};
 
-/// Проект для окна поверх хранилища git.
-struct StoreSource {
-    store: Store,
+/// Проект для окна поверх `nonius-app`.
+struct AppSource {
+    app: App,
     /// Одно сравнение за раз: OpenCascade падает при параллельном чтении STEP,
     /// а человек может быстро переключить версии, пока идёт прошлое сравнение.
     busy: Mutex<()>,
 }
 
-impl StoreSource {
+impl AppSource {
     fn open(path: &Path) -> Result<Box<dyn ProjectSource>> {
-        let project = Project::discover(path)?;
-        let store = Store::open(project, &GitOptions::default())?;
         Ok(Box::new(Self {
-            store,
+            app: App::open(path, window_registry())?,
             busy: Mutex::new(()),
         }))
     }
+}
 
-    fn snapshot(&self, part: &str, pick: Pick) -> Result<Snapshot> {
-        let item = self.store.item(part)?;
-        Ok(match pick {
-            Pick::Current => self.store.working_snapshot(&item)?,
-            Pick::Version(n) => {
-                let info = self.store.version(&item, VersionNumber::new(n)?)?;
-                self.store.snapshot(&item, &info)?
-            }
-        })
-    }
+/// Ход сравнения → строка состояния окна.
+struct Steps<'a>(&'a (dyn Fn(&str) + Sync));
 
-    /// Сцена изменений от модуля `scene-occt`; `None` — модуля нет или нет STEP.
-    /// Сравнение двух сохранённых версий не меняется — берётся из `out`, если уже есть.
-    fn scene(
-        &self,
-        before: &Snapshot,
-        after: &Snapshot,
-        out: &Path,
-        cached: bool,
-    ) -> Result<Option<Scene>> {
-        let saved = out.join(nonius_occt::CHANGES_GLB);
-        if cached {
-            if let Some(scene) = std::fs::read(&saved)
-                .ok()
-                .and_then(|b| Scene::from_glb(&b).ok())
-            {
-                return Ok(Some(scene));
-            }
-        }
-        let reg = registry();
-        let Some(renderer) = reg
-            .renderers()
-            .find(|r| r.manifest().id == nonius_occt::SCENE_RENDERER)
-        else {
-            return Ok(None);
-        };
-        let files = renderer.render(before, after, &ChangeReport::empty(""), out)?;
-        let Some(glb) = files.iter().find(|f| f.ends_with(nonius_occt::CHANGES_GLB)) else {
-            return Ok(None);
-        };
-        let bytes = std::fs::read(glb)?;
-        Ok(Some(Scene::from_glb(&bytes)?))
+impl Progress for Steps<'_> {
+    fn step(&self, what: &str) {
+        (self.0)(&format!("{what}…"));
     }
 }
 
-fn label(p: Pick) -> String {
-    match p {
-        Pick::Version(n) => format!("v{n}"),
-        Pick::Current => "current".into(),
-    }
+fn version(p: Pick) -> Result<Option<VersionNumber>> {
+    Ok(match p {
+        Pick::Version(n) => Some(VersionNumber::new(n)?),
+        Pick::Current => None,
+    })
 }
 
-impl ProjectSource for StoreSource {
+impl ProjectSource for AppSource {
     fn title(&self) -> String {
-        self.store.project().config().name.clone()
+        self.app.project().config().name.clone()
     }
 
     fn root(&self) -> &Path {
-        self.store.project().root()
+        self.app.project().root()
     }
 
     fn parts(&self) -> Result<Vec<PartEntry>> {
-        let mut out = Vec::new();
-        for item in self.store.project().items()? {
-            out.push(PartEntry {
-                name: item.name.to_string(),
-                assembly: item.kind == ItemKind::Assembly,
-                latest: self.store.latest(&item)?.map(|v| v.version.to_string()),
-                dirty: !self.store.changes(&item)?.is_empty(),
-            });
-        }
-        Ok(out)
+        Ok(self
+            .app
+            .items()?
+            .into_iter()
+            .map(|s| PartEntry {
+                name: s.item.name.to_string(),
+                assembly: s.item.kind == ItemKind::Assembly,
+                latest: s.latest.as_ref().map(|v| v.version.to_string()),
+                dirty: s.latest.is_some() && !s.changes.is_empty(),
+            })
+            .collect())
     }
 
     fn versions(&self, part: &str) -> Result<Vec<VersionEntry>> {
-        let item = self.store.item(part)?;
         let mut list: Vec<VersionEntry> = self
-            .store
-            .versions(&item)?
+            .app
+            .versions(part)?
             .iter()
             .map(|v| VersionEntry {
                 number: v.version.get(),
@@ -133,37 +95,50 @@ impl ProjectSource for StoreSource {
         part: &str,
         before: Pick,
         after: Pick,
-        progress: &dyn Fn(&str),
+        progress: &(dyn Fn(&str) + Sync),
     ) -> Result<Comparison> {
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
-        progress("Читаю версии…");
-        let a = self.snapshot(part, before)?;
-        let b = self.snapshot(part, after)?;
-        // Числа из паспортов (быстро). Форму сравнивает сцена ниже.
-        let ctx = CompareContext {
-            tolerance_mm: self.store.project().config().compare.tolerance_mm,
-            ..CompareContext::default()
+        let Some(from) = version(before)? else {
+            bail!("«Было» — это сохранённая версия: сравнивать можно с ней");
         };
-        let reports = Registry::with_builtins().compare_all(&a, &b, &ctx)?;
-        progress("Сравниваю форму — у больших деталей до минуты…");
-        let name = PartName::new(part)?;
-        let out = self
-            .root()
-            .join(".git")
-            .join("nonius")
-            .join("window")
-            .join(name.as_str())
-            .join(format!("{}-{}", label(before), label(after)));
-        let both_saved = matches!((before, after), (Pick::Version(_), Pick::Version(_)));
-        // Без 3D числа всё равно полезны: ошибку сцены показываем словами.
-        let (scene, scene_problem) = match self.scene(&a, &b, &out, both_saved) {
-            Ok(scene) => (scene, None),
-            Err(e) => (None, Some(format!("{e:#}"))),
+        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let options = CompareOptions {
+            reports: true,
+            render: true,
+        };
+        let steps = Steps(progress);
+        let to = version(after)?;
+        let c = match self.app.compare(part, Some(from), to, &options, &steps) {
+            Ok(c) => c,
+            // 3D не получилось (нет OpenCascade, в STEP нет геометрии) —
+            // числа всё равно покажем, а причину скажем словами.
+            Err(e) => {
+                let problem = match e {
+                    nonius_app::Error::NoRenderer => None,
+                    e => Some(format!("{e:#}")),
+                };
+                let numbers = CompareOptions::default();
+                let c = self.app.compare(part, Some(from), to, &numbers, &steps)?;
+                return Ok(Comparison {
+                    scene: None,
+                    scene_problem: problem,
+                    reports: c.reports,
+                });
+            }
+        };
+        let (scene, scene_problem) = match c.file(nonius_occt::CHANGES_GLB) {
+            None => (None, None),
+            Some(glb) => match std::fs::read(glb)
+                .map_err(anyhow::Error::from)
+                .and_then(|b| Ok(Scene::from_glb(&b)?))
+            {
+                Ok(s) => (Some(s), None),
+                Err(e) => (None, Some(format!("{e:#}"))),
+            },
         };
         Ok(Comparison {
             scene,
             scene_problem,
-            reports,
+            reports: c.reports,
         })
     }
 }
@@ -212,7 +187,7 @@ pub fn open(
         None => std::env::current_dir().context("не удалось узнать текущую папку")?,
     };
     // Не в папке проекта — окно откроет последний проект или начальный экран.
-    let source = StoreSource::open(&start).ok();
+    let source = AppSource::open(&start).ok();
     let pick = |v: Option<&str>| -> Result<Option<Pick>> {
         v.map(|v| Ok(Pick::Version(parse_version(v)?.get())))
             .transpose()
@@ -223,7 +198,7 @@ pub fn open(
     };
     nonius_gui::run(nonius_gui::Options {
         project: source,
-        opener: Arc::new(|p: &Path| StoreSource::open(&PathBuf::from(p))),
+        opener: Arc::new(|p: &Path| AppSource::open(p)),
         part: part.map(str::to_string),
         picks,
     })
@@ -232,7 +207,7 @@ pub fn open(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{history, import, project};
+    use crate::registry;
 
     const STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('кронштейн','2026-10-26',('Владимир'),(''),'SwSTEP 2.0','SolidWorks 2020','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
@@ -248,19 +223,19 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path();
-        project::init(Some(&d.to_path_buf()), Some(&"Станок".to_string())).unwrap();
+        nonius_app::create_project(d, Some("Станок")).unwrap();
         let step = d.join("кронштейн.step");
         std::fs::write(&step, STEP).unwrap();
-        import::import(&Project::discover(d).unwrap(), &step, None).unwrap();
-        let store = || Store::open(Project::discover(d).unwrap(), &GitOptions::default()).unwrap();
-        history::commit(&store(), "кронштейн", "Первая").unwrap();
+        let app = App::open(d, registry()).unwrap();
+        app.import(&step, None).unwrap();
+        app.save_version("кронштейн", "Первая").unwrap();
         let meta = d.join("parts").join("кронштейн").join("meta.yaml");
         let text = std::fs::read_to_string(&meta).unwrap() + "material: Ст3\n";
         std::fs::write(&meta, text).unwrap();
-        history::commit(&store(), "кронштейн", "Материал").unwrap();
+        app.save_version("кронштейн", "Материал").unwrap();
 
         // Из подпапки проекта — тоже находится.
-        let src = StoreSource::open(&d.join("parts")).unwrap();
+        let src = AppSource::open(&d.join("parts")).unwrap();
         assert_eq!(src.title(), "Станок");
         let parts = src.parts().unwrap();
         assert_eq!(parts.len(), 1);
@@ -297,7 +272,10 @@ mod tests {
         }
         assert!(!said.lock().unwrap().is_empty(), "окно видит ход работы");
         assert!(src
-            .compare("нет такой", Pick::Current, Pick::Current, &|_| {})
+            .compare("нет такой", Pick::Version(1), Pick::Current, &|_| {})
+            .is_err());
+        assert!(src
+            .compare("кронштейн", Pick::Current, Pick::Version(1), &|_| {})
             .is_err());
     }
 }

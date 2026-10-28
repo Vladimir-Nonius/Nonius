@@ -65,14 +65,15 @@ pub trait ProjectSource: Send + Sync {
     fn parts(&self) -> anyhow::Result<Vec<PartEntry>>;
     /// Версии детали, новые первыми.
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>>;
-    /// Сравнить две версии. `before == after` — показать одну версию без сравнения.
+    /// Сравнить две версии. `before` — всегда сохранённая версия;
+    /// `before == after` — показать одну версию без сравнения.
     /// `progress` получает короткие сообщения о ходе работы.
     fn compare(
         &self,
         part: &str,
         before: Pick,
         after: Pick,
-        progress: &dyn Fn(&str),
+        progress: &(dyn Fn(&str) + Sync),
     ) -> anyhow::Result<Comparison>;
 }
 
@@ -80,7 +81,8 @@ pub trait ProjectSource: Send + Sync {
 pub type Opener = Arc<dyn Fn(&Path) -> anyhow::Result<Box<dyn ProjectSource>> + Send + Sync>;
 
 /// Что сравнить по умолчанию: изменённое — с последней версией; иначе —
-/// последнюю с предпоследней; одна версия — её саму; версий нет — текущее.
+/// последнюю с предпоследней; одна версия — её саму. Версий нет — сравнивать
+/// не с чем, окно просит сохранить первую.
 pub fn default_picks(part: &PartEntry, versions: &[VersionEntry]) -> (Pick, Pick) {
     match versions {
         [] => (Pick::Current, Pick::Current),

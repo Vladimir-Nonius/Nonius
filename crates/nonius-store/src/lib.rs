@@ -18,7 +18,8 @@
 //!
 //! Файлы: здесь — открытие хранилища, `history.rs` — версии, фиксация и
 //! откат, `files.rs` — файлы версии и снимки, `message.rs` — сообщение
-//! коммита, `version.rs` — типы версий, `git.rs` — запуск git.
+//! коммита, `version.rs` — типы версий, `git.rs` — запуск git, `workdir.rs` —
+//! служебная папка `.git/nonius` и запись в неё целыми папками.
 
 mod error;
 mod files;
@@ -26,6 +27,7 @@ mod git;
 mod history;
 mod message;
 mod version;
+pub mod workdir;
 
 use nonius_core::project::Item;
 use nonius_core::{PartName, Project};

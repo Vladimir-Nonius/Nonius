@@ -211,6 +211,8 @@ pub fn overlay(app: &App, ui: &mut egui::Ui) {
         Some(t.gpu_missing)
     } else if app.part.is_none() {
         Some(t.choose_part)
+    } else if app.versions.is_empty() && !app.jobs.busy() {
+        Some(t.save_first_version)
     } else if app.jobs.busy() && app.viewport.model().is_none() {
         Some(t.comparing_hint)
     } else if let Some(c) = app.comparison.as_ref().filter(|c| c.scene.is_none()) {

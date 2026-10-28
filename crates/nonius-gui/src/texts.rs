@@ -19,6 +19,7 @@ pub struct Texts {
     pub no_parts: &'static str,
     pub unsaved_changes: &'static str,
     pub no_versions: &'static str,
+    pub save_first_version: &'static str,
     // Выбор версий
     pub before: &'static str,
     pub after: &'static str,
@@ -78,6 +79,7 @@ pub const RU: Texts = Texts {
     no_parts: "В проекте пока нет деталей. Добавьте модель командой nonius import.",
     unsaved_changes: "есть несохранённые изменения",
     no_versions: "версий ещё нет",
+    save_first_version: "У детали ещё нет версий — сравнивать не с чем.\nСохраните первую: nonius commit <деталь> -m \"описание\"",
     before: "Было",
     after: "Стало",
     current: "текущее",
