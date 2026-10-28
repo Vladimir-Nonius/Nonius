@@ -6,16 +6,26 @@
 #include <cmath>
 
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBndLib.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
-#include <Bnd_Box.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <Geom_BezierSurface.hxx>
+#include <Geom_Conic.hxx>
 #include <Geom_Curve.hxx>
+#include <Geom_Line.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
+#include <Geom_Surface.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
 #include <TopExp.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
 
 namespace nonius {
 namespace {
@@ -27,24 +37,162 @@ bool same_param(double a, double b, double span) {
     return std::fabs(a - b) <= 1e-9 * std::max(1.0, span);
 }
 
-}  // namespace
-
-EdgeBox edge_box(const TopoDS_Shape& e) {
-    Bnd_Box b;
-    BRepBndLib::Add(e, b);
-    EdgeBox r{};
-    if (!b.IsVoid()) {
-        b.Get(r.lo[0], r.lo[1], r.lo[2], r.hi[0], r.hi[1], r.hi[2]);
+bool same_reals(const TColStd_Array1OfReal& a, const TColStd_Array1OfReal& b) {
+    if (a.Length() != b.Length()) {
+        return false;
     }
-    return r;
-}
-
-bool boxes_close(const EdgeBox& a, const EdgeBox& b) {
-    for (int k = 0; k < 3; ++k) {
-        if (std::fabs(a.lo[k] - b.lo[k]) > 1e-4 || std::fabs(a.hi[k] - b.hi[k]) > 1e-4) {
+    for (int i = 0; i < a.Length(); ++i) {
+        const double x = a(a.Lower() + i);
+        const double y = b(b.Lower() + i);
+        if (!same_param(x, y, std::fabs(x))) {
             return false;
         }
     }
+    return true;
+}
+
+bool same_ints(const TColStd_Array1OfInteger& a, const TColStd_Array1OfInteger& b) {
+    if (a.Length() != b.Length()) {
+        return false;
+    }
+    for (int i = 0; i < a.Length(); ++i) {
+        if (a(a.Lower() + i) != b(b.Lower() + i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool same_pnt(const gp_Pnt& a, const gp_Trsf& ta, const gp_Pnt& b, const gp_Trsf& tb) {
+    return a.Transformed(ta).Distance(b.Transformed(tb)) <= kTol;
+}
+
+// Кривая без обрезки: обрезка задаётся параметрами ребра, они сверяются отдельно.
+Handle(Geom_Curve) basis(Handle(Geom_Curve) c) {
+    while (!c.IsNull() && c->IsKind(STANDARD_TYPE(Geom_TrimmedCurve))) {
+        c = Handle(Geom_TrimmedCurve)::DownCast(c)->BasisCurve();
+    }
+    return c;
+}
+
+Handle(Geom_Surface) basis(Handle(Geom_Surface) s) {
+    while (!s.IsNull() && s->IsKind(STANDARD_TYPE(Geom_RectangularTrimmedSurface))) {
+        s = Handle(Geom_RectangularTrimmedSurface)::DownCast(s)->BasisSurface();
+    }
+    return s;
+}
+
+// Определение кривой: у прямых и конических сечений его задают точки, которые
+// сверяет same_edge; у сплайнов — полюса, веса и узлы. Прочие виды кривых не
+// сверяются — такие рёбра остаются своими (медленнее, но верно).
+bool same_curve_definition(const Handle(Geom_Curve)& ca, const gp_Trsf& ta,
+                           const Handle(Geom_Curve)& cb, const gp_Trsf& tb) {
+    if (ca->DynamicType() != cb->DynamicType()) {
+        return false;
+    }
+    if (ca->IsKind(STANDARD_TYPE(Geom_Line)) || ca->IsKind(STANDARD_TYPE(Geom_Conic))) {
+        return true;
+    }
+    if (auto a = Handle(Geom_BSplineCurve)::DownCast(ca)) {
+        auto b = Handle(Geom_BSplineCurve)::DownCast(cb);
+        if (a->Degree() != b->Degree() || a->NbPoles() != b->NbPoles() ||
+            a->IsPeriodic() != b->IsPeriodic() || !same_reals(a->Knots(), b->Knots()) ||
+            !same_ints(a->Multiplicities(), b->Multiplicities())) {
+            return false;
+        }
+        for (int i = 1; i <= a->NbPoles(); ++i) {
+            if (!same_pnt(a->Pole(i), ta, b->Pole(i), tb) ||
+                !same_param(a->Weight(i), b->Weight(i), 1.0)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (auto a = Handle(Geom_BezierCurve)::DownCast(ca)) {
+        auto b = Handle(Geom_BezierCurve)::DownCast(cb);
+        if (a->NbPoles() != b->NbPoles()) {
+            return false;
+        }
+        for (int i = 1; i <= a->NbPoles(); ++i) {
+            if (!same_pnt(a->Pole(i), ta, b->Pole(i), tb) ||
+                !same_param(a->Weight(i), b->Weight(i), 1.0)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+// Полюса и веса сплайновой поверхности.
+template <class S>
+bool same_poles(const S& a, const gp_Trsf& ta, const S& b, const gp_Trsf& tb) {
+    if (a.NbUPoles() != b.NbUPoles() || a.NbVPoles() != b.NbVPoles()) {
+        return false;
+    }
+    for (int i = 1; i <= a.NbUPoles(); ++i) {
+        for (int j = 1; j <= a.NbVPoles(); ++j) {
+            if (!same_pnt(a.Pole(i, j), ta, b.Pole(i, j), tb) ||
+                !same_param(a.Weight(i, j), b.Weight(i, j), 1.0)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// То же для поверхностей: плоскость, цилиндр, конус, сфера и тор заданы точками
+// из same_surface, сплайновые поверхности — полюсами, весами и узлами.
+bool same_surface_definition(const TopoDS_Face& fa, const TopoDS_Face& fb, GeomAbs_SurfaceType t) {
+    switch (t) {
+        case GeomAbs_Plane:
+        case GeomAbs_Cylinder:
+        case GeomAbs_Cone:
+        case GeomAbs_Sphere:
+        case GeomAbs_Torus:
+            return true;
+        case GeomAbs_BSplineSurface:
+        case GeomAbs_BezierSurface:
+            break;
+        default:
+            return false;
+    }
+    TopLoc_Location la, lb;
+    Handle(Geom_Surface) sa = basis(BRep_Tool::Surface(fa, la));
+    Handle(Geom_Surface) sb = basis(BRep_Tool::Surface(fb, lb));
+    if (sa.IsNull() || sb.IsNull() || sa->DynamicType() != sb->DynamicType()) {
+        return false;
+    }
+    const gp_Trsf ta = la.Transformation();
+    const gp_Trsf tb = lb.Transformation();
+    if (auto a = Handle(Geom_BSplineSurface)::DownCast(sa)) {
+        auto b = Handle(Geom_BSplineSurface)::DownCast(sb);
+        return a->UDegree() == b->UDegree() && a->VDegree() == b->VDegree() &&
+               a->IsUPeriodic() == b->IsUPeriodic() && a->IsVPeriodic() == b->IsVPeriodic() &&
+               same_reals(a->UKnots(), b->UKnots()) && same_reals(a->VKnots(), b->VKnots()) &&
+               same_ints(a->UMultiplicities(), b->UMultiplicities()) &&
+               same_ints(a->VMultiplicities(), b->VMultiplicities()) &&
+               same_poles(*a, ta, *b, tb);
+    }
+    if (auto a = Handle(Geom_BezierSurface)::DownCast(sa)) {
+        return same_poles(*a, ta, *Handle(Geom_BezierSurface)::DownCast(sb), tb);
+    }
+    return false;
+}
+
+}  // namespace
+
+bool edge_key(const TopoDS_Edge& e, gp_Pnt* mid) {
+    if (BRep_Tool::Degenerated(e)) {
+        return false;
+    }
+    TopLoc_Location loc;
+    double f, l;
+    Handle(Geom_Curve) c = BRep_Tool::Curve(e, loc, f, l);
+    if (c.IsNull()) {
+        return false;
+    }
+    *mid = c->Value(0.5 * (f + l)).Transformed(loc.Transformation());
     return true;
 }
 
@@ -63,15 +211,15 @@ bool same_edge(const TopoDS_Edge& a, const TopoDS_Edge& b) {
     if (!same_param(fa, fb, span) || !same_param(ea, eb, span)) {
         return false;
     }
+    const gp_Trsf ta = la.Transformation();
+    const gp_Trsf tb = lb.Transformation();
     for (int k = 0; k <= 4; ++k) {
         const double t = fa + (ea - fa) * k / 4.0;
-        gp_Pnt pa = ca->Value(t).Transformed(la.Transformation());
-        gp_Pnt pb = cb->Value(t).Transformed(lb.Transformation());
-        if (pa.Distance(pb) > kTol) {
+        if (!same_pnt(ca->Value(t), ta, cb->Value(t), tb)) {
             return false;
         }
     }
-    return true;
+    return same_curve_definition(basis(ca), ta, basis(cb), tb);
 }
 
 bool same_surface(const TopoDS_Face& a, const TopoDS_Face& b) {
@@ -101,7 +249,7 @@ bool same_surface(const TopoDS_Face& a, const TopoDS_Face& b) {
             }
         }
     }
-    return true;
+    return same_surface_definition(a, b, sa.GetType());
 }
 
 std::vector<TopoDS_Shape> real_edges(const TopoDS_Face& f) {

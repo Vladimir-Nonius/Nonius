@@ -133,8 +133,15 @@ uint32_t nonius_shape_solid_count(const NoniusShape* shape) {
 
 int32_t nonius_shape_rough_bbox(const NoniusShape* shape, double min[3], double max[3]) {
     try {
+        // По рёбрам: кривые считаются быстро и точно, а грани между рёбрами
+        // выпирают редко и немного — для допуска сетки этого хватает.
         Bnd_Box box;
-        BRepBndLib::Add(shape->shape, box);
+        for (TopExp_Explorer ex(shape->shape, TopAbs_EDGE); ex.More(); ex.Next()) {
+            BRepBndLib::AddOptimal(ex.Current(), box, Standard_False, Standard_False);
+        }
+        if (box.IsVoid()) {
+            BRepBndLib::Add(shape->shape, box);
+        }
         if (box.IsVoid()) {
             return 0;
         }

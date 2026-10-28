@@ -191,7 +191,11 @@ int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusS
         // Одинаковые грани версий делаются общими (share.h) — пересекается
         // только изменённое. «Было» копируется без геометрии: копию дополняют.
         TopoDS_Shape was = BRepBuilderAPI_Copy(before->shape, Standard_False).Shape();
-        TopoDS_Shape now = nonius::share_faces(was, after->shape);
+        TopoDS_Shape now;
+        if (!nonius::share_faces(was, after->shape, &now)) {
+            was = before->shape;
+            now = after->shape;
+        }
         TopTools_ListOfShape args;
         args.Append(was);
         args.Append(now);

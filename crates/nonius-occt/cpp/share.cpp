@@ -14,6 +14,7 @@
 #include "share.h"
 #include "same.h"
 
+#include <algorithm>
 #include <vector>
 
 #include <BRepCheck_Analyzer.hxx>
@@ -32,6 +33,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <gp_Pnt.hxx>
 
 namespace nonius {
 namespace {
@@ -53,18 +55,28 @@ bool map_vertex(const TopoDS_Shape& vb, const TopoDS_Shape& va,
     return vmap[j] == i && vback[i] == j;
 }
 
-TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
+bool share(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* result) {
     TopTools_IndexedMapOfShape EA, EB, VA, VB;
     TopExp::MapShapes(before, TopAbs_EDGE, EA);
     TopExp::MapShapes(after, TopAbs_EDGE, EB);
     TopExp::MapShapes(before, TopAbs_VERTEX, VA);
     TopExp::MapShapes(after, TopAbs_VERTEX, VB);
 
-    // Рёбра: сначала по габаритам (дёшево), потом по кривой.
-    std::vector<EdgeBox> boxA(EA.Extent() + 1);
+    // Рёбра: сначала по середине (отбор по x за log n), потом по кривой.
+    struct Key {
+        gp_Pnt mid;
+        int index;
+    };
+    std::vector<Key> keys;
     for (int i = 1; i <= EA.Extent(); ++i) {
-        boxA[i] = edge_box(EA(i));
+        gp_Pnt mid;
+        if (edge_key(TopoDS::Edge(EA(i)), &mid)) {
+            keys.push_back({mid, i});
+        }
     }
+    std::sort(keys.begin(), keys.end(),
+              [](const Key& a, const Key& b) { return a.mid.X() < b.mid.X(); });
+    constexpr double kNear = 1e-4;
     std::vector<int> emap(EB.Extent() + 1, 0);
     std::vector<bool> taken(EA.Extent() + 1, false);
     std::vector<int> vmap(VB.Extent() + 1, 0);
@@ -72,9 +84,16 @@ TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
     int shared_edges = 0;
     for (int j = 1; j <= EB.Extent(); ++j) {
         const TopoDS_Edge& eb = TopoDS::Edge(EB(j));
-        const EdgeBox bb = edge_box(eb);
-        for (int i = 1; i <= EA.Extent(); ++i) {
-            if (taken[i] || !boxes_close(bb, boxA[i])) {
+        gp_Pnt mid;
+        if (!edge_key(eb, &mid)) {
+            continue;
+        }
+        auto it = std::lower_bound(
+            keys.begin(), keys.end(), mid.X() - kNear,
+            [](const Key& k, double x) { return k.mid.X() < x; });
+        for (; it != keys.end() && it->mid.X() <= mid.X() + kNear; ++it) {
+            const int i = it->index;
+            if (taken[i] || it->mid.Distance(mid) > kNear) {
                 continue;
             }
             const TopoDS_Edge& ea = TopoDS::Edge(EA(i));
@@ -89,7 +108,7 @@ TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
             }
             if (!map_vertex(bf, af, VA, VB, vmap, vback) ||
                 !map_vertex(bl, al, VA, VB, vmap, vback)) {
-                return after;  // вершины не сходятся — тела устроены по-разному
+                return false;  // вершины не сходятся — тела устроены по-разному
             }
             emap[j] = i;
             taken[i] = true;
@@ -98,7 +117,7 @@ TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
         }
     }
     if (shared_edges == 0) {
-        return after;
+        return false;
     }
 
     // Грани: та же поверхность и те же рёбра.
@@ -170,7 +189,8 @@ TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
             if (i == 0) {
                 continue;
             }
-            TopoDS_Edge ea = TopoDS::Edge(EA(i));
+            // Кривые шва (c1 — для прямого ребра) кладутся на ребро в прямой ориентации.
+            TopoDS_Edge ea = TopoDS::Edge(EA(i).Oriented(TopAbs_FORWARD));
             const double tol = std::max(BRep_Tool::Tolerance(ea), BRep_Tool::Tolerance(eb));
             double f, l;
             if (BRep_Tool::IsClosed(eb, g)) {
@@ -179,13 +199,13 @@ TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
                 Handle(Geom2d_Curve) c2 =
                     BRep_Tool::CurveOnSurface(TopoDS::Edge(eb.Oriented(TopAbs_REVERSED)), g, f, l);
                 if (c1.IsNull() || c2.IsNull()) {
-                    return after;
+                    return false;
                 }
                 builder.UpdateEdge(ea, c1, c2, surf, loc, tol);
             } else {
                 Handle(Geom2d_Curve) c = BRep_Tool::CurveOnSurface(eb, g, f, l);
                 if (c.IsNull()) {
-                    return after;
+                    return false;
                 }
                 builder.UpdateEdge(ea, c, surf, loc, tol);
             }
@@ -219,28 +239,25 @@ TopoDS_Shape share(const TopoDS_Shape& before, const TopoDS_Shape& after) {
             reshape.Replace(FB(j).Oriented(TopAbs_FORWARD), twin[j].Oriented(TopAbs_FORWARD));
         }
     }
-    TopoDS_Shape result = reshape.Apply(after);
+    TopoDS_Shape shared = reshape.Apply(after);
 
     // Проверка: столько же граней, и изменённые грани собраны правильно.
     TopTools_IndexedMapOfShape FR;
-    TopExp::MapShapes(result, TopAbs_FACE, FR);
-    if (FR.Extent() != FB.Extent()) {
-        return after;
+    TopExp::MapShapes(shared, TopAbs_FACE, FR);
+    if (FR.Extent() != FB.Extent() || !BRepCheck_Analyzer(shared).IsValid()) {
+        return false;
     }
-    BRepCheck_Analyzer check(result);
-    if (!check.IsValid()) {
-        return after;
-    }
-    return result;
+    *result = shared;
+    return true;
 }
 
 }  // namespace
 
-TopoDS_Shape share_faces(const TopoDS_Shape& before, const TopoDS_Shape& after) {
+bool share_faces(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* result) {
     try {
-        return share(before, after);
+        return share(before, after, result);
     } catch (...) {
-        return after;
+        return false;
     }
 }
 

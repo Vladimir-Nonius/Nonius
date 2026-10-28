@@ -54,7 +54,7 @@ int32_t nonius_shape_props(const NoniusShape* shape, NoniusProps* out);
 double nonius_shape_volume(const NoniusShape* shape);
 /* Число твёрдых тел. */
 uint32_t nonius_shape_solid_count(const NoniusShape* shape);
-/* Грубые габариты (с запасом) — для допуска сетки. 1 — есть, 0 — пусто. */
+/* Примерные габариты по рёбрам — быстро, для допуска сетки. 1 — есть, 0 — пусто. */
 int32_t nonius_shape_rough_bbox(const NoniusShape* shape, double min[3], double max[3]);
 
 /* op: 0 — a минус b, 1 — общее a и b, 2 — объединение. fuzzy — допуск, мм. */

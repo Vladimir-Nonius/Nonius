@@ -96,10 +96,20 @@ fn nothing_in_common_still_compares() {
 fn cached_step_follows_file_content() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("деталь.step");
-    plate_with_hole(15.0).write_step(&path).unwrap();
+    // Размер из времени запуска — такого тела в кэше ещё нет, первое чтение
+    // идёт из STEP, второе — из кэша, и они должны совпасть.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let width = 20.0 + f64::from(nanos % 1_000_000) * 1e-6;
+    let plate = Shape::make_box([0.0; 3], [width, 30.0, 8.0]).unwrap();
+    let hole = Shape::make_cylinder([10.0, 15.0, -1.0], 4.0, 10.0).unwrap();
+    plate.cut(&hole, 0.0).unwrap().write_step(&path).unwrap();
     let first = Shape::read_step(&path).unwrap().props();
     let again = Shape::read_step(&path).unwrap().props();
     assert_eq!(first, again);
+    assert!(close(first.volume, width * 240.0 - HOLE, 1e-3), "{first:?}");
 
     // Тот же путь, другое содержимое — кэш не должен подсунуть старое тело.
     Shape::make_box([0.0; 3], [5.0, 5.0, 5.0])
@@ -125,7 +135,7 @@ fn volume_and_rough_bbox_agree_with_props() {
     let (rlo, rhi) = s.rough_bbox().unwrap();
     for k in 0..3 {
         assert!(
-            rlo[k] <= lo[k] + 1e-6 && rhi[k] >= hi[k] - 1e-6,
+            close(rlo[k], lo[k], 1e-6) && close(rhi[k], hi[k], 1e-6),
             "{rlo:?} {rhi:?}"
         );
     }

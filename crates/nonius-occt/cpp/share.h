@@ -12,10 +12,11 @@ namespace nonius {
 // не нужно заново пересекать одинаковые грани — сравнение версий, где изменилась
 // малая часть, идёт в разы быстрее.
 //
-// `before` дополняется (рёбрам добавляются кривые на гранях `after`), поэтому
-// передавайте копию. Если совпадений нет или результат не прошёл проверку,
-// возвращается `after` без изменений.
-TopoDS_Shape share_faces(const TopoDS_Shape& before, const TopoDS_Shape& after);
+// true — результат в `result`. `before` при этом дополняется (рёбрам добавляются
+// кривые на гранях `after`), поэтому передавайте копию. false — совпадений нет
+// или результат не прошёл проверку; копия `before` могла измениться, сравнивайте
+// исходные тела.
+bool share_faces(const TopoDS_Shape& before, const TopoDS_Shape& after, TopoDS_Shape* result);
 
 }  // namespace nonius
 

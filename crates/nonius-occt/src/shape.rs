@@ -86,7 +86,11 @@ impl Shape {
     /// содержимого берётся из кэша (см. `cache.rs`) — в сотни раз быстрее.
     pub fn read_step(path: &Path) -> Result<Self, OcctError> {
         let entry = cache::entry(path, &version());
-        if let Some(shape) = entry.as_deref().and_then(Self::read_brep) {
+        if let Some((entry, shape)) = entry
+            .as_deref()
+            .and_then(|e| Some((e, Self::read_brep(e)?)))
+        {
+            cache::touch(entry);
             return Ok(shape);
         }
         let shape = Self::read_step_file(path)?;
@@ -170,8 +174,8 @@ impl Shape {
         unsafe { ffi::nonius_shape_solid_count(self.ptr.as_ptr()) }
     }
 
-    /// Габариты с запасом — мгновенно, в отличие от точных в [`Shape::props`].
-    /// Годятся для допуска сетки и вида, но не для паспорта детали.
+    /// Примерные габариты по рёбрам — доли секунды, в отличие от точных в
+    /// [`Shape::props`]. Годятся для допуска сетки, но не для паспорта детали.
     pub fn rough_bbox(&self) -> Option<([f64; 3], [f64; 3])> {
         let (mut lo, mut hi) = ([0.0; 3], [0.0; 3]);
         // SAFETY: тело живое, массивы по три числа.
