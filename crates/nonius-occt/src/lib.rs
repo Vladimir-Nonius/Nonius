@@ -4,6 +4,7 @@
 //! - [`GeometryComparator`] — сравнивает форму: сколько материала добавлено и убрано;
 //! - [`HighlightRenderer`] — рисует изменения цветом: неизменённое серым
 //!   «рентгеном», добавленное зелёным, убранное красным;
+//! - [`PreviewExporter`] — превью детали `preview.png` (экспорт `preview`);
 //! - [`render`] — свой растровый рендер, без видеокарты и графических библиотек.
 //!
 //! OpenCascade подключается через тонкую C-прослойку (`cpp/`). Если при сборке
@@ -29,8 +30,8 @@ use nonius_core::extension::Registry;
 
 #[cfg(nonius_occt)]
 pub use modules::{
-    preview, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource, CHANGES_PNG,
-    MODEL_STEP,
+    preview, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource, PreviewExporter,
+    CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
 };
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
@@ -72,6 +73,7 @@ pub fn register(registry: &mut Registry) -> nonius_core::Result<()> {
         registry.add_geometry_source(Box::new(OcctStepSource::new()))?;
         registry.add_comparator(Box::new(GeometryComparator::new()))?;
         registry.add_renderer(Box::new(HighlightRenderer::new()))?;
+        registry.add_exporter(Box::new(PreviewExporter::new()))?;
     }
     #[cfg(not(nonius_occt))]
     {

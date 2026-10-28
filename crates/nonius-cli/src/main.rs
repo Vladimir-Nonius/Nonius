@@ -1,9 +1,10 @@
 //! `nonius` — командная строка Nonius.
 //!
-//! Тот же набор действий потом будет в веб-интерфейсе и в MCP для ИИ.
+//! Тонкая обёртка: разбирает команду, вызывает действие из `nonius-app` и
+//! печатает итог. Те же действия вызывают окно и (позже) MCP для ИИ.
 //!
-//! Файлы: здесь — запуск и выбор команды, `args.rs` — команды и справка,
-//! `commands/` — выполнение команд, `format.rs` — мелочи вывода,
+//! Файлы: здесь — запуск и выбор команды, набор модулей; `args.rs` — команды
+//! и справка, `commands/` — печать итогов, `format.rs` — мелочи вывода,
 //! `welcome.rs` — подсказка при двойном щелчке.
 
 mod args;
@@ -15,13 +16,12 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use nonius_app::App;
 use nonius_core::extension::Registry;
-use nonius_core::Project;
 use nonius_step::StepHeaderSource;
-use nonius_store::{GitOptions, Store};
 
 use args::{Cli, Command, PartCommand};
-use commands::{compare, history, import, project};
+use commands::{compare, history, import, passport, project};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике.
@@ -50,31 +50,30 @@ fn registry() -> Registry {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let open = || -> Result<Project> {
+    let app = || -> Result<App> {
         let start = match &cli.project {
             Some(p) => p.clone(),
             None => std::env::current_dir().context("не удалось узнать текущую папку")?,
         };
-        Ok(Project::discover(&start)?)
+        Ok(App::open(&start, registry())?)
     };
-    let store = || -> Result<Store> { Ok(Store::open(open()?, &GitOptions::default())?) };
 
     match &cli.command {
         Command::Init { path, name } => {
-            project::init(path.as_ref().or(cli.project.as_ref()), name.as_ref())?
+            project::init(path.as_ref().or(cli.project.as_ref()), name.as_deref())?
         }
         Command::Part(PartCommand::New { name, assembly }) => {
-            project::part_new(&open()?, name, *assembly)?
+            project::part_new(&app()?, name, *assembly)?
         }
-        Command::List => project::list(&open()?)?,
-        Command::Info => project::info(&open()?)?,
-        Command::Modules => project::modules(),
-        Command::Import { file, part } => import::import(&open()?, file, part.as_deref())?,
-        Command::Status { part } => history::status(&store()?, part.as_deref())?,
-        Command::Commit { part, message } => history::commit(&store()?, part, message)?,
-        Command::Log { part } => history::log(&store()?, part)?,
+        Command::List => project::list(&app()?)?,
+        Command::Info => project::info(&app()?)?,
+        Command::Modules => project::modules(&registry()),
+        Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
+        Command::Status { part } => history::status(&app()?, part.as_deref())?,
+        Command::Commit { part, message } => history::commit(&app()?, part, message)?,
+        Command::Log { part } => history::log(&app()?, part)?,
         Command::Diff { part, from, to } => {
-            compare::diff(&store()?, part, from.as_deref(), to.as_deref())?
+            compare::diff(&app()?, part, from.as_deref(), to.as_deref())?
         }
         Command::Render {
             part,
@@ -82,7 +81,7 @@ fn run(cli: Cli) -> Result<()> {
             to,
             output,
         } => compare::render_changes(
-            &store()?,
+            &app()?,
             part,
             from.as_deref(),
             to.as_deref(),
@@ -92,12 +91,19 @@ fn run(cli: Cli) -> Result<()> {
             part,
             version,
             message,
-        } => history::restore(&store()?, part, version, message.as_deref())?,
+        } => history::restore(&app()?, part, version, message.as_deref())?,
         Command::Export {
             part,
             version,
             dest,
-        } => history::export(&store()?, part, version, dest)?,
+        } => history::export(&app()?, part, version, dest)?,
+        Command::Material {
+            part,
+            material,
+            density,
+            remove,
+        } => passport::material(&app()?, part, material.as_deref(), *density, *remove)?,
+        Command::Materials => passport::materials(),
     }
     Ok(())
 }
