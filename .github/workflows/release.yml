@@ -116,7 +116,10 @@ jobs:
           # Только то, что есть в любой Windows 10/11.
           $system = "kernel32.dll", "ntdll.dll", "advapi32.dll", "user32.dll", "gdi32.dll", "shell32.dll",
             "ws2_32.dll", "wsock32.dll", "psapi.dll", "bcrypt.dll", "bcryptprimitives.dll", "ole32.dll",
-            "oleaut32.dll", "userenv.dll", "secur32.dll", "crypt32.dll", "shlwapi.dll", "comdlg32.dll"
+            "oleaut32.dll", "userenv.dll", "secur32.dll", "crypt32.dll", "shlwapi.dll", "comdlg32.dll",
+            # окно: ввод текста, оформление, специальные возможности, видеокарта (DirectX 12 / OpenGL)
+            "imm32.dll", "dwmapi.dll", "uxtheme.dll", "uiautomationcore.dll", "comctl32.dll",
+            "opengl32.dll", "d3d12.dll", "dxgi.dll", "d3dcompiler_47.dll"
           $foreign = $dlls | Where-Object { $_ -notin $system -and $_ -notlike "api-ms-win-core-*" }
           if (-not $dlls) { Write-Error "не удалось прочитать список DLL"; exit 1 }
           if ($foreign) { Write-Error "nonius.exe требует сторонние DLL: $($foreign -join ', ')"; exit 1 }
