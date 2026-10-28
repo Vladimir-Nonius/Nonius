@@ -1,0 +1,34 @@
+[package]
+name = "nonius-gui"
+description = "Nonius window: parts, versions and 3D view with colored changes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nonius-core.workspace = true
+nonius-scene.workspace = true
+anyhow.workspace = true
+# egui 0.32 — последняя версия, которая собирается на Rust 1.85.
+eframe = { version = "0.32", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "x11", "wayland"] }
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
+# Та же версия, что у egui-wgpu; набор по умолчанию — DirectX 12, Vulkan, Metal, OpenGL.
+wgpu = "25"
+png = "0.17"
+pollster = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+# Окна выбора папки и файла Windows.
+rfd = { version = "0.15", default-features = false }
+
+[dev-dependencies]
+egui_kittest = { version = "0.32", features = ["eframe"] }
+tempfile.workspace = true
+glam = "0.30"
+
+[lints]
+workspace = true

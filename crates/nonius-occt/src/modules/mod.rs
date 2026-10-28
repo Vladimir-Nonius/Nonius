@@ -9,6 +9,7 @@ mod compare;
 mod diff;
 mod highlight;
 mod preview;
+mod scene;
 mod source;
 
 use std::path::{Path, PathBuf};
@@ -24,6 +25,7 @@ pub use compare::GeometryComparator;
 pub use diff::GeometryDiff;
 pub use highlight::HighlightRenderer;
 pub use preview::{PreviewExporter, PREVIEW_PNG};
+pub use scene::{shape_scene, SceneRenderer};
 pub use source::OcctStepSource;
 
 /// Имя модели в папке детали.

@@ -1,16 +1,18 @@
-//! `nonius` — командная строка Nonius.
+//! `nonius` — командная строка и окно Nonius.
 //!
 //! Тонкая обёртка: разбирает команду, вызывает действие из `nonius-app` и
 //! печатает итог. Те же действия вызывают окно и (позже) MCP для ИИ.
 //!
 //! Файлы: здесь — запуск и выбор команды, набор модулей; `args.rs` — команды
 //! и справка, `commands/` — печать итогов, `format.rs` — мелочи вывода,
-//! `welcome.rs` — подсказка при двойном щелчке.
+//! `window.rs` — окно (`nonius` без команды и `nonius view`),
+//! `welcome.rs` — подсказка, если окно не открылось.
 
 mod args;
 mod commands;
 mod format;
 mod welcome;
+mod window;
 
 use std::process::ExitCode;
 
@@ -24,15 +26,20 @@ use args::{Cli, Command, PartCommand};
 use commands::{compare, history, import, passport, project};
 
 fn main() -> ExitCode {
-    // Без команды — скорее всего, двойной щелчок в Проводнике.
+    // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
     if std::env::args_os().len() <= 1 {
-        welcome::welcome();
-        return ExitCode::SUCCESS;
+        return window::double_click();
     }
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let in_window = matches!(cli.command, Command::View { .. });
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("ошибка: {e:#}");
+            if in_window {
+                // У окна, запущенного двойным щелчком, консоли нет.
+                nonius_gui::show_error(&format!("{e:#}"));
+            }
             ExitCode::FAILURE
         }
     }
@@ -40,10 +47,19 @@ fn main() -> ExitCode {
 
 /// Все модули, которые идут вместе с программой.
 fn registry() -> Registry {
+    registry_with(nonius_occt::register)
+}
+
+/// Модули для окна: без картинки `changes.png`, окну нужна только 3D-сцена.
+fn window_registry() -> Registry {
+    registry_with(nonius_occt::register_for_window)
+}
+
+fn registry_with(occt: fn(&mut Registry) -> nonius_core::Result<()>) -> Registry {
     let mut r = Registry::with_builtins();
     // Геометрия OpenCascade (если программа собрана с ним) встаёт первой,
     // заголовок STEP — запасной вариант.
-    nonius_occt::register(&mut r).expect("встроенный модуль должен проходить проверку");
+    occt(&mut r).expect("встроенный модуль должен проходить проверку");
     r.add_geometry_source(Box::new(StepHeaderSource::new()))
         .expect("встроенный модуль должен проходить проверку");
     r
@@ -97,6 +113,12 @@ fn run(cli: Cli) -> Result<()> {
             version,
             dest,
         } => history::export(&app()?, part, version, dest)?,
+        Command::View { part, from, to } => window::open(
+            cli.project.as_deref(),
+            part.as_deref(),
+            from.as_deref(),
+            to.as_deref(),
+        )?,
         Command::Material {
             part,
             material,

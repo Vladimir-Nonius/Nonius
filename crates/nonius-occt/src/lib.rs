@@ -4,6 +4,7 @@
 //! - [`GeometryComparator`] — сравнивает форму: сколько материала добавлено и убрано;
 //! - [`HighlightRenderer`] — рисует изменения цветом: неизменённое серым
 //!   «рентгеном», добавленное зелёным, убранное красным;
+//! - [`SceneRenderer`] — сцена изменений `changes.glb` для окна (формат `nonius-scene`);
 //! - [`PreviewExporter`] — превью детали `preview.png` (экспорт `preview`);
 //! - [`render`] — свой растровый рендер, без видеокарты и графических библиотек.
 //!
@@ -30,11 +31,18 @@ use nonius_core::extension::Registry;
 
 #[cfg(nonius_occt)]
 pub use modules::{
-    preview, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource, PreviewExporter,
-    CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
+    preview, shape_scene, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource,
+    PreviewExporter, SceneRenderer, CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
 };
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
+
+/// Идентификатор модуля сцены изменений (`SceneRenderer`). Объявлен и
+/// без OpenCascade, чтобы программа могла спросить реестр, подключён ли он.
+pub const SCENE_RENDERER: &str = "scene-occt";
+
+/// Имя файла сцены, которую пишет `SceneRenderer`.
+pub const CHANGES_GLB: &str = "changes.glb";
 
 /// Ошибка OpenCascade или прослойки.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,18 +74,32 @@ pub fn occt_version() -> Option<String> {
 }
 
 /// Подключить модули геометрии к реестру. Источник STEP встаёт первым,
-/// чтобы заменить чтение одного заголовка.
+/// чтобы заменить чтение одного заголовка. Картинка изменений — первой среди
+/// отрисовок, объёмная модель — после неё.
 pub fn register(registry: &mut Registry) -> nonius_core::Result<()> {
+    add_modules(registry, true)
+}
+
+/// Как [`register`], но без картинки `changes.png`: окну нужна только сцена,
+/// а лишняя отрисовка удлиняет первое сравнение.
+pub fn register_for_window(registry: &mut Registry) -> nonius_core::Result<()> {
+    add_modules(registry, false)
+}
+
+fn add_modules(registry: &mut Registry, picture: bool) -> nonius_core::Result<()> {
     #[cfg(nonius_occt)]
     {
         registry.add_geometry_source(Box::new(OcctStepSource::new()))?;
         registry.add_comparator(Box::new(GeometryComparator::new()))?;
-        registry.add_renderer(Box::new(HighlightRenderer::new()))?;
+        if picture {
+            registry.add_renderer(Box::new(HighlightRenderer::new()))?;
+        }
+        registry.add_renderer(Box::new(SceneRenderer::new()))?;
         registry.add_exporter(Box::new(PreviewExporter::new()))?;
     }
     #[cfg(not(nonius_occt))]
     {
-        let _ = registry;
+        let _ = (registry, picture);
     }
     Ok(())
 }

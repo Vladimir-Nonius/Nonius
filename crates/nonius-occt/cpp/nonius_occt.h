@@ -42,6 +42,8 @@ NoniusShape* nonius_read_step(const char* path, char* err, size_t err_len);
 int32_t nonius_write_step(const NoniusShape* shape, const char* path, char* err, size_t err_len);
 void nonius_shape_free(NoniusShape* shape);
 
+/* Твёрдое тело номер index (с 0) внутри формы; NULL — нет такого. */
+NoniusShape* nonius_shape_solid(const NoniusShape* shape, uint32_t index);
 /* Тело в двоичном формате OpenCascade (BRep) — для кэша прочитанных STEP:
  * читается в сотни раз быстрее STEP и без потерь. 1 — записано. */
 int32_t nonius_write_brep(const NoniusShape* shape, const char* path);

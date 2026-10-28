@@ -13,6 +13,7 @@ build = "build.rs"
 nonius-core.workspace = true
 nonius-step.workspace = true
 png = "0.17"
+nonius-scene.workspace = true
 sha2.workspace = true
 
 [build-dependencies]

@@ -42,6 +42,7 @@ unsafe extern "C" {
         err_len: usize,
     ) -> i32;
     pub(crate) fn nonius_shape_free(shape: *mut NoniusShape);
+    pub(crate) fn nonius_shape_solid(shape: *const NoniusShape, index: u32) -> *mut NoniusShape;
     pub(crate) fn nonius_write_brep(shape: *const NoniusShape, path: *const c_char) -> i32;
     pub(crate) fn nonius_read_brep(path: *const c_char) -> *mut NoniusShape;
     pub(crate) fn nonius_shape_props(shape: *const NoniusShape, out: *mut NoniusProps) -> i32;

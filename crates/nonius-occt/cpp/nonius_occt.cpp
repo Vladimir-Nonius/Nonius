@@ -117,6 +117,19 @@ int32_t nonius_write_step(const NoniusShape* shape, const char* path, char* err,
 
 void nonius_shape_free(NoniusShape* shape) { delete shape; }
 
+NoniusShape* nonius_shape_solid(const NoniusShape* shape, uint32_t index) {
+    try {
+        uint32_t n = 0;
+        for (TopExp_Explorer ex(shape->shape, TopAbs_SOLID); ex.More(); ex.Next(), ++n) {
+            if (n == index) {
+                return wrap(ex.Current());
+            }
+        }
+    } catch (...) {
+    }
+    return nullptr;
+}
+
 int32_t nonius_write_brep(const NoniusShape* shape, const char* path) {
     try {
         return BinTools::Write(shape->shape, path) ? 1 : 0;
