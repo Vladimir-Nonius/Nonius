@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use nonius_core::compare::{ChangeReport, CompareContext};
@@ -22,13 +22,19 @@ use crate::{registry, welcome};
 /// Проект для окна поверх хранилища git.
 struct StoreSource {
     store: Store,
+    /// Одно сравнение за раз: OpenCascade падает при параллельном чтении STEP,
+    /// а человек может быстро переключить версии, пока идёт прошлое сравнение.
+    busy: Mutex<()>,
 }
 
 impl StoreSource {
     fn open(path: &Path) -> Result<Box<dyn ProjectSource>> {
         let project = Project::discover(path)?;
         let store = Store::open(project, &GitOptions::default())?;
-        Ok(Box::new(Self { store }))
+        Ok(Box::new(Self {
+            store,
+            busy: Mutex::new(()),
+        }))
     }
 
     fn snapshot(&self, part: &str, pick: Pick) -> Result<Snapshot> {
@@ -129,6 +135,7 @@ impl ProjectSource for StoreSource {
         after: Pick,
         progress: &dyn Fn(&str),
     ) -> Result<Comparison> {
+        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         progress("Читаю версии…");
         let a = self.snapshot(part, before)?;
         let b = self.snapshot(part, after)?;
