@@ -3,11 +3,12 @@
 //!
 //! Файлы: здесь — общие помощники и превью, `source.rs` — чтение STEP,
 //! `diff.rs` — разница двух тел, `compare.rs` — сравнение формы,
-//! `highlight.rs` — картинка изменений.
+//! `highlight.rs` — картинка изменений, `preview.rs` — превью детали.
 
 mod compare;
 mod diff;
 mod highlight;
+mod preview;
 mod source;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use crate::OcctError;
 pub use compare::GeometryComparator;
 pub use diff::GeometryDiff;
 pub use highlight::HighlightRenderer;
+pub use preview::{PreviewExporter, PREVIEW_PNG};
 pub use source::OcctStepSource;
 
 /// Имя модели в папке детали.

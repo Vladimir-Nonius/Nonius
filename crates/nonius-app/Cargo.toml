@@ -1,0 +1,22 @@
+[package]
+name = "nonius-app"
+description = "Nonius actions shared by the command line, the window and MCP"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nonius-core.workspace = true
+nonius-store.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -114,6 +114,11 @@ pub struct PartMeta {
     /// Материал.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// Плотность материала, кг/м³. По ней считается масса; без материала
+    /// не задаётся — плотность «по умолчанию» молча не подставляется.
+    /// Поле добавлено без смены схемы: старые файлы читаются как есть.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_kg_m3: Option<f64>,
     /// Контрольные числа геометрии.
     #[serde(default)]
     pub geometry: GeometrySummary,
@@ -131,6 +136,7 @@ impl PartMeta {
             kind,
             source: SourceInfo::default(),
             material: None,
+            density_kg_m3: None,
             geometry: GeometrySummary::default(),
             properties: BTreeMap::new(),
         }
@@ -170,6 +176,17 @@ mod tests {
             "запись должна быть стабильной"
         );
         assert!(a.starts_with("schema: 1\n"));
+    }
+
+    #[test]
+    fn file_without_density_still_reads() {
+        // meta.yaml, записанный до появления плотности.
+        let old = "schema: 1\nkind: part\nmaterial: Ст3\ngeometry:\n  volume_mm3: 1000.0\n";
+        let m: PartMeta = schema::from_str(old, Path::new("meta.yaml")).unwrap();
+        assert_eq!(m.material.as_deref(), Some("Ст3"));
+        assert_eq!(m.density_kg_m3, None);
+        let text = schema::to_string(&m, Path::new("meta.yaml")).unwrap();
+        assert!(!text.contains("density"), "пустое поле не пишется: {text}");
     }
 
     #[test]

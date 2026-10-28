@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 nonius-core.workspace = true
-nonius-store.workspace = true
+nonius-app.workspace = true
 nonius-step.workspace = true
 nonius-occt.workspace = true
 clap.workspace = true

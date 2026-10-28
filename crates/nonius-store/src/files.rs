@@ -10,7 +10,7 @@ use nonius_core::schema;
 use nonius_core::tree::FeatureTree;
 
 use crate::git::literal;
-use crate::{Result, Store, StoreError, VersionInfo};
+use crate::{workdir, Result, Store, StoreError, VersionInfo};
 
 impl Store {
     /// Прочитать файл детали из версии. Файлы LFS возвращаются целиком.
@@ -84,42 +84,29 @@ impl Store {
     /// `.git/nonius/versions/<коммит>` и дальше переиспользуются: версия не
     /// меняется, а `.git` не попадает в историю.
     pub fn version_dir(&self, item: &Item, version: &VersionInfo) -> Result<PathBuf> {
-        let cache = self
-            .project
-            .root()
-            .join(".git")
-            .join("nonius")
-            .join("versions");
-        let dir = cache.join(&version.commit);
-        let done = dir.join(".complete");
-        if done.is_file() {
+        let dir = workdir::work_dir(self.project.root())
+            .join("versions")
+            .join(&version.commit);
+        let ready = |d: &Path| d.join(".complete").is_file();
+        if ready(&dir) {
             return Ok(dir);
         }
-        let tmp = cache.join(format!("{}.tmp", version.commit));
-        if tmp.exists() {
-            fs::remove_dir_all(&tmp).map_err(|e| StoreError::Io {
-                path: tmp.clone(),
-                source: e,
-            })?;
-        }
-        fs::create_dir_all(&tmp).map_err(|e| StoreError::Io {
-            path: tmp.clone(),
-            source: e,
-        })?;
-        self.export(item, version, &tmp)?;
-        fs::write(tmp.join(".complete"), b"").map_err(|e| StoreError::Io {
-            path: tmp.clone(),
-            source: e,
-        })?;
-        if dir.exists() {
-            // Другой процесс успел раньше — его копия такая же.
-            let _ = fs::remove_dir_all(&tmp);
-            return Ok(dir);
-        }
-        fs::rename(&tmp, &dir).map_err(|e| StoreError::Io {
+        let io = |e| StoreError::Io {
             path: dir.clone(),
             source: e,
-        })?;
+        };
+        let tmp = workdir::tmp_dir_for(&dir).map_err(io)?;
+        let filled = self.export(item, version, &tmp).and_then(|_| {
+            fs::write(tmp.join(".complete"), b"").map_err(|e| StoreError::Io {
+                path: tmp.clone(),
+                source: e,
+            })
+        });
+        if let Err(e) = filled {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+        workdir::publish_dir(&tmp, &dir, ready).map_err(io)?;
         Ok(dir)
     }
 
@@ -136,18 +123,6 @@ impl Store {
 
     /// Текущее (ещё не зафиксированное) состояние детали.
     pub fn working_snapshot(&self, item: &Item) -> Result<Snapshot> {
-        let tree_path = item.dir.join(TREE_FILE);
-        let tree = if tree_path.is_file() {
-            Some(schema::load(&tree_path)?)
-        } else {
-            None
-        };
-        Ok(Snapshot {
-            item: item.name.clone(),
-            version: None,
-            dir: item.dir.clone(),
-            meta: self.project.load_meta(item)?,
-            tree,
-        })
+        Ok(self.project.working_snapshot(item)?)
     }
 }

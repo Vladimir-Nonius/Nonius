@@ -3,57 +3,50 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use nonius_app::{create_project, App, History};
+use nonius_core::extension::Registry;
 use nonius_core::meta::ItemKind;
-use nonius_core::{PartName, Project};
-use nonius_store::{GitOptions, Store};
 
 use crate::format::kind_word;
-use crate::registry;
 
 /// `nonius init`: папка — `path`, иначе `-C`, иначе текущая.
-pub fn init(path: Option<&PathBuf>, name: Option<&String>) -> Result<()> {
+pub fn init(path: Option<&PathBuf>, name: Option<&str>) -> Result<()> {
     let root = match path {
         Some(p) => p.clone(),
         None => std::env::current_dir()?,
     };
-    let name = name.cloned().unwrap_or_else(|| {
-        root.canonicalize()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "Проект".into())
-    });
-    let p = Project::init(&root, &name)?;
+    let created = create_project(&root, name)?;
     println!(
         "Создан проект «{}» в {}",
-        p.config().name,
-        p.root().display()
+        created.name,
+        created.root.display()
     );
-    match Store::open(p, &GitOptions::default()) {
-        Ok(s) if !s.lfs_enabled() => println!(
+    match created.history {
+        History::Lfs => println!("История версий включена (git + LFS)."),
+        History::NoLfs => println!(
             "предупреждение: Git LFS не найден — модели будут храниться прямо в git. \
              Установите Git LFS (https://git-lfs.com)."
         ),
-        Ok(_) => println!("История версий включена (git + LFS)."),
-        Err(e) => println!("предупреждение: история версий не включена: {e}"),
+        History::Off(e) => println!("предупреждение: история версий не включена: {e}"),
     }
     Ok(())
 }
 
 /// `nonius part new`.
-pub fn part_new(p: &Project, name: &str, assembly: bool) -> Result<()> {
+pub fn part_new(app: &App, name: &str, assembly: bool) -> Result<()> {
     let kind = if assembly {
         ItemKind::Assembly
     } else {
         ItemKind::Part
     };
-    let item = p.create_item(kind, &PartName::new(name)?)?;
+    let item = app.new_item(name, kind)?;
     println!("Добавлено: {} ({})", item.name, kind_word(kind));
     Ok(())
 }
 
 /// `nonius list`.
-pub fn list(p: &Project) -> Result<()> {
-    let items = p.items()?;
+pub fn list(app: &App) -> Result<()> {
+    let items = app.item_list()?;
     if items.is_empty() {
         println!("Пока пусто. Добавьте деталь: nonius part new <имя>");
     }
@@ -64,9 +57,10 @@ pub fn list(p: &Project) -> Result<()> {
 }
 
 /// `nonius info`.
-pub fn info(p: &Project) -> Result<()> {
+pub fn info(app: &App) -> Result<()> {
+    let p = app.project();
     let c = p.config();
-    let items = p.items()?;
+    let items = app.item_list()?;
     let parts = items.iter().filter(|i| i.kind == ItemKind::Part).count();
     println!("Проект:    {}", c.name);
     println!("Папка:     {}", p.root().display());
@@ -80,8 +74,8 @@ pub fn info(p: &Project) -> Result<()> {
 }
 
 /// `nonius modules`.
-pub fn modules() {
-    for m in registry().manifests() {
+pub fn modules(registry: &Registry) {
+    for m in registry.manifests() {
         println!("{:<16} {} {} — {:?}", m.id, m.version, m.name, m.points);
     }
     match nonius_occt::occt_version() {
