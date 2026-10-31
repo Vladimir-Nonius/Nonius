@@ -145,6 +145,7 @@ impl Jobs {
         flag.store(true, Ordering::Relaxed);
         let was = self.running.contains(&id);
         self.running.retain(|&r| r != id);
+        // Шаги сообщает только отменяемая работа: её строка больше не нужна.
         self.clear_progress();
         was
     }
@@ -236,9 +237,14 @@ mod tests {
         assert!(!jobs.can_cancel());
         assert!(jobs.progress().is_empty());
         go.send(()).unwrap();
-        // Поток узнал об отмене, а его результат окну не пришёл.
+        // Поток узнал об отмене.
         assert!(seen.recv().unwrap());
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Его результат дошёл до очереди, но окну не отдаётся.
+        let late = jobs
+            .rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        jobs.tx.send(late).unwrap();
         assert!(jobs.finished().is_empty());
         assert!(!jobs.cancel(), "второй раз отменять нечего");
     }

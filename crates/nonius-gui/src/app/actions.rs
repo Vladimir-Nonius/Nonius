@@ -8,7 +8,7 @@ use eframe::egui;
 
 use super::jobs::Done;
 use super::App;
-use crate::source::{Pick, ProjectSource};
+use crate::source::{MassEntry, Pick, ProjectSource};
 use crate::texts::texts;
 
 impl App {
@@ -104,7 +104,16 @@ impl App {
         };
         let picks = self.picks;
         self.jobs.spawn(ctx, move |_| {
-            let mass = |pick| project.mass(&part, pick);
+            // Одну и ту же версию не читать дважды: «Стало» часто — «сейчас».
+            let mut read: Vec<(Pick, MassEntry)> = Vec::new();
+            let mut mass = |pick: Pick| -> anyhow::Result<MassEntry> {
+                if let Some((_, m)) = read.iter().find(|(p, _)| *p == pick) {
+                    return Ok(m.clone());
+                }
+                let m = project.mass(&part, pick)?;
+                read.push((pick, m.clone()));
+                Ok(m)
+            };
             let result = (|| Ok([mass(picks.0)?, mass(picks.1)?, mass(Pick::Current)?]))();
             Done::Masses(part, picks, result)
         });
@@ -112,7 +121,7 @@ impl App {
 
     /// «Отменить» в строке состояния: бросить сравнение и вернуть пару
     /// версий, которая сейчас на экране.
-    pub(super) fn cancel_compare(&mut self) {
+    pub(super) fn cancel_compare(&mut self, ctx: &egui::Context) {
         if !self.jobs.cancel() {
             return;
         }
@@ -120,6 +129,10 @@ impl App {
             if self.part.as_ref() == Some(name) {
                 self.picks = *picks;
             }
+        }
+        // Масса читалась для брошенной пары — перечитать для показанной.
+        if self.masses.as_ref().is_none_or(|m| m.0 != self.picks) {
+            self.load_masses(ctx);
         }
         self.notice = Some(texts().compare_cancelled.to_string());
     }
@@ -156,6 +169,8 @@ impl App {
         dialog.saving = true;
         dialog.error = None;
         let (part, message) = (dialog.part.clone(), dialog.message.clone());
+        // После сохранения всё перечитается; идущее сравнение не нужно.
+        self.jobs.cancel();
         self.jobs.spawn(ctx, move |_| {
             let saved = project.save_version(&part, &message);
             Done::Saved(part, saved)
@@ -171,6 +186,10 @@ impl App {
         let (Some(project), Some(part)) = (self.project.clone(), self.part.clone()) else {
             return;
         };
+        // Следующий выбор — только когда этот записан: иначе неизвестно,
+        // какой материал окажется в паспорте.
+        self.material_busy = true;
+        self.jobs.cancel();
         self.jobs.spawn(ctx, move |_| {
             let set = match &material {
                 Some((name, density)) => project.set_material(&part, Some(name), *density),

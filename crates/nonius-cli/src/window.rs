@@ -6,7 +6,7 @@
 
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use anyhow::{bail, Context, Result};
 use nonius_app::{App, CompareOptions, FileChangeKind, Mass, MaterialChoice, MATERIALS};
@@ -26,6 +26,10 @@ struct AppSource {
     /// Одно сравнение за раз: OpenCascade падает при параллельном чтении STEP,
     /// а человек может быстро переключить версии, пока идёт прошлое сравнение.
     busy: Mutex<()>,
+    /// Запись (сохранить версию, назначить материал) — когда никто не читает
+    /// папку детали и git: иначе git спотыкается о свой index.lock, а
+    /// сравнение видит полусохранённое.
+    files: RwLock<()>,
 }
 
 impl AppSource {
@@ -33,7 +37,16 @@ impl AppSource {
         Ok(Box::new(Self {
             app: App::open(path, window_registry())?,
             busy: Mutex::new(()),
+            files: RwLock::new(()),
         }))
+    }
+
+    fn reading(&self) -> RwLockReadGuard<'_, ()> {
+        self.files.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn writing(&self) -> RwLockWriteGuard<'_, ()> {
+        self.files.write().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -85,6 +98,7 @@ impl ProjectSource for AppSource {
     }
 
     fn parts(&self) -> Result<Vec<PartEntry>> {
+        let _files = self.reading();
         Ok(self
             .app
             .items()?
@@ -99,6 +113,7 @@ impl ProjectSource for AppSource {
     }
 
     fn versions(&self, part: &str) -> Result<Vec<VersionEntry>> {
+        let _files = self.reading();
         let mut list: Vec<VersionEntry> = self
             .app
             .versions(part)?
@@ -133,6 +148,7 @@ impl ProjectSource for AppSource {
                 self.busy.lock().unwrap_or_else(|e| e.into_inner())
             }
         };
+        let _files = self.reading();
         let options = CompareOptions {
             reports: true,
             render: true,
@@ -176,6 +192,7 @@ impl ProjectSource for AppSource {
     }
 
     fn changed_files(&self, part: &str) -> Result<Vec<String>> {
+        let _files = self.reading();
         let item = self.app.item(part)?;
         Ok(self
             .app
@@ -193,10 +210,12 @@ impl ProjectSource for AppSource {
     }
 
     fn save_version(&self, part: &str, message: &str) -> Result<u32> {
+        let _files = self.writing();
         Ok(self.app.save_version(part, message)?.version.get())
     }
 
     fn mass(&self, part: &str, pick: Pick) -> Result<MassEntry> {
+        let _files = self.reading();
         Ok(mass_entry(self.app.passport(part, version(pick)?)?))
     }
 
@@ -220,6 +239,7 @@ impl ProjectSource for AppSource {
             name: name.to_string(),
             density_kg_m3,
         });
+        let _files = self.writing();
         Ok(mass_entry(self.app.set_material(part, choice)?))
     }
 }

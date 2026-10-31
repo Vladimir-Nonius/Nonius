@@ -67,7 +67,8 @@ fn tidy(text: &str) -> String {
 /// Масса: до килограмма — в граммах («126 г»), дальше — в кг («1,26 кг»).
 pub fn mass_text(kg: f64) -> String {
     let t = texts();
-    let (value, unit) = if kg.abs() < 1.0 {
+    // 999,6 г округлились бы до «1 000 г» — это уже «1 кг».
+    let (value, unit) = if kg.abs() < 0.9995 {
         (kg * 1000.0, t.grams)
     } else {
         (kg, t.kilograms)
@@ -126,6 +127,8 @@ mod tests {
         assert_eq!(mass_text(0.01234), "12,3 г");
         assert_eq!(mass_text(0.0005), "0,5 г");
         assert_eq!(mass_text(1.26), "1,26 кг");
+        assert_eq!(mass_text(0.9996), "1 кг");
+        assert_eq!(mass_text(0.9994), "999 г");
         assert_eq!(mass_text(1234.4), "1\u{a0}234 кг");
         assert_eq!(density_text(7850.0), "7\u{a0}850 кг/м³");
     }

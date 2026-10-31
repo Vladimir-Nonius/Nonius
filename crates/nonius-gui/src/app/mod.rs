@@ -70,6 +70,8 @@ pub struct App {
     save: Option<save::SaveDialog>,
     /// Ввод своего материала.
     custom: material::Custom,
+    /// Материал записывается — список выбора ждёт.
+    material_busy: bool,
 }
 
 impl App {
@@ -107,6 +109,7 @@ impl App {
             masses: None,
             save: None,
             custom: material::Custom::default(),
+            material_busy: false,
             settings,
         };
         match options.project {

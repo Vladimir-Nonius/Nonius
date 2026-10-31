@@ -40,36 +40,39 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     };
     let catalog = catalog_entry(&app.materials, &now);
     let mut choice = None;
+    let busy = app.material_busy;
     egui::Grid::new("material").num_columns(2).show(ui, |ui| {
         ui.label(RichText::new(t.material).weak());
         let shown = now
             .material
             .clone()
             .unwrap_or_else(|| t.no_material.to_string());
-        egui::ComboBox::from_id_salt("material-choice")
-            .selected_text(shown)
-            .width(150.0)
-            .height(400.0)
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(now.material.is_none(), t.no_material)
-                    .clicked()
-                {
-                    choice = Some(Choice::Clear);
-                }
-                for m in &app.materials {
-                    let text = format!("{}   {}", m.name, density_text(m.density_kg_m3));
-                    let on = catalog.is_some_and(|c| c.name == m.name);
-                    if ui.selectable_label(on, text).clicked() {
-                        choice = Some(Choice::Catalog(m.name.clone()));
+        ui.add_enabled_ui(!busy, |ui| {
+            egui::ComboBox::from_id_salt("material-choice")
+                .selected_text(shown)
+                .width(150.0)
+                .height(400.0)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(now.material.is_none(), t.no_material)
+                        .clicked()
+                    {
+                        choice = Some(Choice::Clear);
                     }
-                }
-                ui.separator();
-                let custom = now.material.is_some() && catalog.is_none();
-                if ui.selectable_label(custom, t.custom_material).clicked() {
-                    choice = Some(Choice::Custom);
-                }
-            });
+                    for m in &app.materials {
+                        let text = format!("{}   {}", m.name, density_text(m.density_kg_m3));
+                        let on = catalog.is_some_and(|c| c.name == m.name);
+                        if ui.selectable_label(on, text).clicked() {
+                            choice = Some(Choice::Catalog(m.name.clone()));
+                        }
+                    }
+                    ui.separator();
+                    let custom = now.material.is_some() && catalog.is_none();
+                    if ui.selectable_label(custom, t.custom_material).clicked() {
+                        choice = Some(Choice::Custom);
+                    }
+                });
+        });
         ui.end_row();
         if let Some(d) = now.density_kg_m3 {
             ui.label(RichText::new(t.density).weak());

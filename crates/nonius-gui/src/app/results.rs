@@ -52,7 +52,7 @@ impl App {
                     self.comparison = Some(c);
                     self.selected = None;
                 }
-                Done::Masses(name, picks, Ok(m)) if current(&name) => {
+                Done::Masses(name, picks, Ok(m)) if current(&name) && self.picks == picks => {
                     self.masses = Some((picks, m));
                 }
                 Done::Files(name, files) => {
@@ -76,6 +76,7 @@ impl App {
                     None => self.message = Some(format!("{}: {e:#}", t.error)),
                 },
                 Done::MaterialSet(name, Ok(m)) => {
+                    self.material_busy = false;
                     let material = m.material.as_deref().unwrap_or(t.no_material);
                     self.notice = Some(format!(
                         "«{name}»: {} — {material}. {}",
@@ -89,11 +90,14 @@ impl App {
                         self.refresh(ctx);
                     }
                 }
-                Done::Parts(Err(e))
-                | Done::Versions(_, Err(e))
-                | Done::Compared(_, _, Err(e))
-                | Done::Masses(_, _, Err(e))
-                | Done::MaterialSet(_, Err(e)) => {
+                Done::MaterialSet(_, Err(e)) => {
+                    self.material_busy = false;
+                    self.message = Some(format!("{}: {e:#}", t.error));
+                }
+                Done::Masses(name, picks, Err(e)) if current(&name) && self.picks == picks => {
+                    self.message = Some(format!("{}: {e:#}", t.error))
+                }
+                Done::Parts(Err(e)) | Done::Versions(_, Err(e)) | Done::Compared(_, _, Err(e)) => {
                     self.message = Some(format!("{}: {e:#}", t.error))
                 }
                 Done::Crashed => self.message = Some(t.crashed.to_string()),

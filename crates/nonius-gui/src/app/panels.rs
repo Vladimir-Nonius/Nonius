@@ -37,7 +37,7 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
         });
     });
     if cancel {
-        app.cancel_compare();
+        app.cancel_compare(ctx);
     }
 }
 
