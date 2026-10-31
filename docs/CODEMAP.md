@@ -25,7 +25,8 @@
 | Геометрия OpenCascade (объём, габариты) | `nonius-occt/src/modules/source.rs`, `shape.rs` |
 | Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/share.cpp`, `src/cache.rs` |
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
-| Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
+| Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/actions.rs` и `results.rs` (действия и их итог), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
+| Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source.rs` и `nonius-cli/src/window.rs` |
 | 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
 | Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window.rs` (реализация на `nonius-app`) |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
@@ -117,15 +118,20 @@
 | Файл | Что внутри |
 |---|---|
 | `lib.rs` | `run` — открыть окно, `show_error` — сообщение без консоли |
-| `source.rs` | `ProjectSource`: детали, версии, сравнение — всё, что окно берёт у программы |
+| `source.rs` | `ProjectSource`: детали, версии, сравнение, сохранение, материал и масса — всё, что окно берёт у программы; `Progress` (ход и отмена) |
 | `texts.rs` | все надписи окна (русский) |
-| `app/mod.rs` | `App`: состояние окна, порядок работы, раскладка панелей |
-| `app/panels.rs` | детали слева, «Что изменилось» справа, строка состояния, надписи поверх 3D |
+| `app/mod.rs` | `App`: состояние окна, раскладка панелей |
+| `app/actions.rs` | действия: открыть проект, выбрать деталь и версии, сравнить, отменить, сохранить, назначить материал |
+| `app/results.rs` | что делать с готовыми результатами фоновой работы |
+| `app/panels.rs` | детали слева, «Что изменилось» справа, строка состояния с «Отменить», надписи поверх 3D |
+| `app/history.rs` | история детали слева: «Сейчас», версии, метки «было» и «стало», «Сохранить версию» |
+| `app/save.rs` | окошко «Сохранить версию»: что изменилось и описание |
+| `app/material.rs` | «Материал и масса»: справочник, свой материал, масса «было → стало» |
 | `app/toolbar.rs` | «Было» / «Стало», режимы, кнопки видов, сохранение картинки |
 | `app/start.rs` | начальный экран: открыть папку проекта |
-| `app/jobs.rs` | фоновая работа и ход выполнения |
+| `app/jobs.rs` | фоновая работа, ход выполнения, отмена сравнения |
 | `app/settings.rs` | что окно помнит между запусками (`window.txt`) |
-| `app/numbers.rs` | числа для человека: разряды, округление |
+| `app/numbers.rs` | числа для человека: разряды, округление, масса, плотность |
 | `view/widget.rs` | 3D-вид в окне: ввод, кадр, оси в углу |
 | `view/controls.rs` | мышь и клавиши как в SolidWorks → движения камеры |
 | `view/camera.rs` | ортогональная камера, виды, вращение, масштаб к курсору |
@@ -182,7 +188,7 @@
 | `nonius-occt/tests/occt.rs`, `without_occt.rs` | геометрия с OpenCascade и сборка без него |
 | `nonius-occt/tests/scene.rs` | сцена изменений на настоящем OpenCascade |
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
-| `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений |
+| `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, кэш STEP |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |

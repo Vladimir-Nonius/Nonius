@@ -9,9 +9,11 @@ use super::App;
 use crate::texts::texts;
 use crate::view::Model;
 
-/// Строка состояния: ход работы, ошибка или подсказка по мыши.
+/// Строка состояния: ход работы и «Отменить», ошибка, что получилось или
+/// подсказка по мыши.
 pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     let t = texts();
+    let mut cancel = false;
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
         ui.horizontal(|ui| {
             if app.jobs.busy() {
@@ -22,16 +24,24 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
                 } else {
                     p
                 });
+                if app.jobs.can_cancel() && ui.button(t.cancel_compare).clicked() {
+                    cancel = true;
+                }
             } else if let Some(m) = &app.message {
                 ui.label(RichText::new(m).color(ui.visuals().warn_fg_color));
+            } else if let Some(n) = &app.notice {
+                ui.label(n);
             } else {
                 ui.label(RichText::new(t.mouse_hint).weak());
             }
         });
     });
+    if cancel {
+        app.cancel_compare();
+    }
 }
 
-/// Список деталей слева.
+/// Детали слева, под ними — история выбранной детали.
 pub fn parts(app: &mut App, ctx: &egui::Context) {
     let t = texts();
     let mut clicked = None;
@@ -47,29 +57,33 @@ pub fn parts(app: &mut App, ctx: &egui::Context) {
             if app.parts.is_empty() && !app.jobs.busy() {
                 ui.label(RichText::new(t.no_parts).weak());
             }
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for p in &app.parts {
-                    let mut text = p.name.clone();
-                    if let Some(v) = &p.latest {
-                        text = format!("{text}   {v}");
+            egui::ScrollArea::vertical()
+                .id_salt("parts")
+                .max_height(ui.available_height() * 0.4)
+                .show(ui, |ui| {
+                    for p in &app.parts {
+                        let mut text = p.name.clone();
+                        if let Some(v) = &p.latest {
+                            text = format!("{text}   {v}");
+                        }
+                        if p.assembly {
+                            text = format!("{text}  ({})", t.assembly);
+                        }
+                        let mut rich = RichText::new(text);
+                        if p.dirty {
+                            rich = rich.color(Color32::from_rgb(200, 120, 0));
+                        }
+                        let selected = app.part.as_ref() == Some(&p.name);
+                        let mut r = ui.selectable_label(selected, rich);
+                        if p.dirty {
+                            r = r.on_hover_text(t.unsaved_changes);
+                        }
+                        if r.clicked() && !selected {
+                            clicked = Some(p.name.clone());
+                        }
                     }
-                    if p.assembly {
-                        text = format!("{text}  ({})", t.assembly);
-                    }
-                    let mut rich = RichText::new(text);
-                    if p.dirty {
-                        rich = rich.color(Color32::from_rgb(200, 120, 0));
-                    }
-                    let selected = app.part.as_ref() == Some(&p.name);
-                    let mut r = ui.selectable_label(selected, rich);
-                    if p.dirty {
-                        r = r.on_hover_text(t.unsaved_changes);
-                    }
-                    if r.clicked() && !selected {
-                        clicked = Some(p.name.clone());
-                    }
-                }
-            });
+                });
+            super::history::show(app, ui);
         });
     if let Some(name) = clicked {
         app.select_part(ctx, &name);
@@ -105,6 +119,7 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                         }
                     }
                 }
+                super::material::show(app, ui);
                 ui.add_space(8.0);
                 ui.separator();
                 ui.checkbox(&mut app.look.xray, t.xray);
@@ -233,7 +248,7 @@ pub fn overlay(app: &App, ui: &mut egui::Ui) {
     }
 }
 
-fn role_name(role: Role) -> &'static str {
+pub(super) fn role_name(role: Role) -> &'static str {
     let t = texts();
     match role {
         Role::After => t.role_after,

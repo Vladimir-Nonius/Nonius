@@ -1,11 +1,17 @@
 //! Окно целиком: состояние, порядок работы и раскладка панелей.
 //!
 //! Порядок: открыть проект → список деталей → выбрать деталь → её версии →
-//! сравнить выбранную пару → показать в 3D. Всё долгое — в фоне (`jobs.rs`).
+//! сравнить выбранную пару → показать в 3D. Действия — `actions.rs`, их
+//! результаты — `results.rs`, всё долгое — в фоне (`jobs.rs`).
 
+mod actions;
+mod history;
 mod jobs;
+mod material;
 mod numbers;
 mod panels;
+mod results;
+mod save;
 mod settings;
 mod start;
 mod toolbar;
@@ -16,11 +22,11 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::source::{
-    default_picks, Comparison, Opener, PartEntry, Pick, ProjectSource, VersionEntry,
+    Comparison, MassEntry, MaterialEntry, Opener, PartEntry, Pick, ProjectSource, VersionEntry,
 };
 use crate::texts::texts;
-use crate::view::{Look, Mode, Model, Viewport, ViewportEvent};
-use jobs::{Done, Jobs};
+use crate::view::{Look, Mode, Viewport, ViewportEvent};
+use jobs::Jobs;
 pub use settings::Settings;
 
 /// С чем открыть окно.
@@ -52,8 +58,18 @@ pub struct App {
     settings: Settings,
     selected: Option<usize>,
     jobs: Jobs,
+    /// Ошибка — показывается в строке состояния, пока не выбрали другое.
     message: Option<String>,
+    /// Что получилось: «Сохранена версия …», «Сравнение отменено».
+    notice: Option<String>,
     path_input: String,
+    materials: Vec<MaterialEntry>,
+    /// Материал и масса для пары версий: «Было», «Стало», сейчас.
+    masses: Option<((Pick, Pick), [MassEntry; 3])>,
+    /// Открытое окошко «Сохранить версию».
+    save: Option<save::SaveDialog>,
+    /// Ввод своего материала.
+    custom: material::Custom,
 }
 
 impl App {
@@ -85,7 +101,12 @@ impl App {
             selected: None,
             jobs: Jobs::default(),
             message: None,
+            notice: None,
             path_input: String::new(),
+            materials: Vec::new(),
+            masses: None,
+            save: None,
+            custom: material::Custom::default(),
             settings,
         };
         match options.project {
@@ -97,124 +118,6 @@ impl App {
             }
         }
         app
-    }
-
-    /// Открыть проект по папке (в фоне).
-    fn open(&mut self, ctx: &egui::Context, path: PathBuf) {
-        let opener = self.opener.clone();
-        self.message = None;
-        self.jobs.spawn(ctx, move |_| Done::Opened(opener(&path)));
-    }
-
-    fn set_project(&mut self, ctx: &egui::Context, project: Box<dyn ProjectSource>) {
-        self.settings.last_project = Some(project.root().to_path_buf());
-        self.settings.save();
-        let project: Arc<dyn ProjectSource> = Arc::from(project);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{} — {}",
-            project.title(),
-            texts().app_title
-        )));
-        self.project = Some(project.clone());
-        self.parts.clear();
-        self.select(None);
-        self.jobs.spawn(ctx, move |_| Done::Parts(project.parts()));
-    }
-
-    /// Выбрать деталь: прочитать её версии, потом сравнить.
-    fn select_part(&mut self, ctx: &egui::Context, name: &str) {
-        let Some(project) = self.project.clone() else {
-            return;
-        };
-        self.select(Some(name.to_string()));
-        let name = name.to_string();
-        self.jobs.spawn(ctx, move |_| {
-            let v = project.versions(&name);
-            Done::Versions(name, v)
-        });
-    }
-
-    fn select(&mut self, part: Option<String>) {
-        self.part = part;
-        self.versions.clear();
-        self.comparison = None;
-        self.selected = None;
-        self.message = None;
-    }
-
-    /// Сравнить выбранную пару версий.
-    fn compare(&mut self, ctx: &egui::Context) {
-        let (Some(project), Some(part)) = (self.project.clone(), self.part.clone()) else {
-            return;
-        };
-        let picks = self.picks;
-        self.jobs.spawn(ctx, move |progress| {
-            let result = project.compare(&part, picks.0, picks.1, progress);
-            Done::Compared(part, picks, result)
-        });
-    }
-
-    fn take_results(&mut self, ctx: &egui::Context) {
-        let t = texts();
-        for done in self.jobs.finished() {
-            match done {
-                Done::Opened(Ok(p)) => self.set_project(ctx, p),
-                Done::Opened(Err(e)) => {
-                    self.message = Some(format!("{}: {e:#}", t.project_open_failed))
-                }
-                Done::Parts(Ok(parts)) => {
-                    self.parts = parts;
-                    let want = self.want.as_ref().map(|w| w.0.clone());
-                    let only = (self.parts.len() == 1).then(|| self.parts[0].name.clone());
-                    if let Some(name) = want.or(only) {
-                        if self.parts.iter().any(|p| p.name == name) {
-                            self.select_part(ctx, &name);
-                        }
-                    }
-                }
-                Done::Versions(name, Ok(v)) if self.part.as_deref() == Some(&name) => {
-                    let entry = self.parts.iter().find(|p| p.name == name);
-                    let defaults = entry.map(|e| default_picks(e, &v));
-                    let wanted = match self.want.take() {
-                        Some((n, picks)) if n == name => picks,
-                        _ => None,
-                    };
-                    self.versions = v;
-                    self.picks = wanted.or(defaults).unwrap_or(self.picks);
-                    if self.versions.is_empty() {
-                        self.viewport.set_model(None, false);
-                        self.shown = None;
-                    } else {
-                        self.compare(ctx);
-                    }
-                }
-                Done::Compared(name, picks, Ok(c))
-                    if self.part.as_deref() == Some(&name) && self.picks == picks =>
-                {
-                    let same_part = self.shown.as_ref().is_some_and(|s| s.0 == name);
-                    let model = c.scene.as_ref().and_then(Model::new);
-                    self.viewport.set_model(model, same_part);
-                    self.shown = Some((name, picks));
-                    self.comparison = Some(c);
-                    self.selected = None;
-                }
-                Done::Parts(Err(e)) | Done::Versions(_, Err(e)) | Done::Compared(_, _, Err(e)) => {
-                    self.message = Some(format!("{}: {e:#}", t.error))
-                }
-                Done::Crashed => self.message = Some(t.crashed.to_string()),
-                Done::Versions(..) | Done::Compared(..) => {} // устарело: выбрали другое
-            }
-        }
-    }
-
-    /// Человек поменял переключатель — запомнить.
-    fn remember_look(&mut self) {
-        let s = &mut self.settings;
-        if (s.xray, s.edges) != (self.look.xray, self.look.edges) {
-            s.xray = self.look.xray;
-            s.edges = self.look.edges;
-            s.save();
-        }
     }
 }
 
@@ -232,6 +135,7 @@ impl eframe::App for App {
         panels::status_bar(self, ctx);
         panels::parts(self, ctx);
         panels::changes(self, ctx);
+        save::show(self, ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {

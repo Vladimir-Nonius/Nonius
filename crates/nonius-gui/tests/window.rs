@@ -2,18 +2,23 @@
 //! места изменений и числа в правой панели. Проект — поддельный.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use eframe::egui;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use nonius_core::compare::{Change, ChangeKind, ChangeReport};
-use nonius_gui::source::{Comparison, PartEntry, Pick, ProjectSource, VersionEntry};
+use nonius_gui::source::{
+    Comparison, MassEntry, MaterialEntry, PartEntry, Pick, Progress, ProjectSource, VersionEntry,
+};
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
 
 struct Fake {
     root: PathBuf,
+    /// Что сохранили из окна: деталь и описание.
+    saved: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -69,9 +74,9 @@ impl ProjectSource for Fake {
         _part: &str,
         before: Pick,
         after: Pick,
-        progress: &(dyn Fn(&str) + Sync),
+        progress: &dyn Progress,
     ) -> anyhow::Result<Comparison> {
-        progress("Сравниваю…");
+        progress.step("Сравниваю…");
         assert_eq!((before, after), (Pick::Version(1), Pick::Version(2)));
         let region = |role, at, volume_mm3| Region {
             role,
@@ -99,6 +104,45 @@ impl ProjectSource for Fake {
             }],
         })
     }
+    fn changed_files(&self, _part: &str) -> anyhow::Result<Vec<String>> {
+        Ok(vec!["+ корпус.step".into()])
+    }
+    fn save_version(&self, part: &str, message: &str) -> anyhow::Result<u32> {
+        self.saved
+            .lock()
+            .unwrap()
+            .push((part.to_string(), message.to_string()));
+        Ok(1)
+    }
+    fn mass(&self, part: &str, _pick: Pick) -> anyhow::Result<MassEntry> {
+        Ok(if part == "кронштейн" {
+            MassEntry {
+                material: Some("Ст3".into()),
+                density_kg_m3: Some(7850.0),
+                mass_kg: Some(0.1257),
+                no_mass: None,
+            }
+        } else {
+            MassEntry {
+                no_mass: Some("материал не задан".into()),
+                ..MassEntry::default()
+            }
+        })
+    }
+    fn materials(&self) -> Vec<MaterialEntry> {
+        vec![MaterialEntry {
+            name: "Ст3".into(),
+            density_kg_m3: 7850.0,
+        }]
+    }
+    fn set_material(
+        &self,
+        part: &str,
+        _material: Option<&str>,
+        _density_kg_m3: Option<f64>,
+    ) -> anyhow::Result<MassEntry> {
+        self.mass(part, Pick::Current)
+    }
 }
 
 /// Шагать окно, пока не появится надпись (работа идёт в фоне).
@@ -113,22 +157,32 @@ fn wait_for(h: &mut Harness<'_, App>, text: &str) {
     panic!("не дождались «{text}»");
 }
 
-#[test]
-fn choose_part_and_see_places() {
-    let dir = tempfile::tempdir().unwrap();
-    // Настройки окна — во временную папку, не в профиль того, кто запускает тесты.
-    std::env::set_var("NONIUS_CONFIG_DIR", dir.path());
+/// Окно с поддельным проектом; настройки — во временной папке, не в
+/// профиле того, кто запускает тесты.
+/// Папку настроек задаёт переменная окружения — окна по очереди.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+fn window(dir: &Path, saved: Arc<Mutex<Vec<(String, String)>>>) -> Harness<'static, App> {
+    std::env::set_var("NONIUS_CONFIG_DIR", dir);
     let options = Options {
         project: Some(Box::new(Fake {
-            root: dir.path().to_path_buf(),
+            root: dir.to_path_buf(),
+            saved,
         })),
         opener: Arc::new(|_| anyhow::bail!("не нужно")),
         part: None,
         picks: None,
     };
-    let mut h = Harness::builder()
-        .with_size([1200.0, 700.0])
-        .build_eframe(|cc| App::new(&cc.egui_ctx, None, options, Settings::default()));
+    Harness::builder()
+        .with_size([1200.0, 800.0])
+        .build_eframe(|cc| App::new(&cc.egui_ctx, None, options, Settings::default()))
+}
+
+#[test]
+fn choose_part_and_see_places() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(dir.path(), Arc::default());
 
     wait_for(&mut h, "кронштейн");
     assert!(h.query_by_label_contains("корпус").is_some());
@@ -143,8 +197,44 @@ fn choose_part_and_see_places() {
     assert!(h
         .query_by_label_contains("Масса, г: 12,25 → 13,46")
         .is_some());
+    // История: обе версии с описанием; материал и масса.
+    assert!(h.query_by_label_contains("История «кронштейн»").is_some());
+    assert!(h.query_by_label_contains("версия 1").is_some());
+    wait_for(&mut h, "126 г");
+    assert!(h.query_by_label_contains("из справочника").is_some());
 
     // Настройки запомнились во временной папке.
     let saved = std::fs::read_to_string(dir.path().join("window.txt")).unwrap();
     assert!(saved.contains("last_project="), "{saved}");
+}
+
+#[test]
+fn save_first_version_from_the_window() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let saved = Arc::new(Mutex::new(Vec::new()));
+    let mut h = window(dir.path(), saved.clone());
+    wait_for(&mut h, "корпус");
+    h.get_by_label_contains("корпус").click();
+    wait_for(&mut h, "Сохранить первую версию");
+    // Без материала масса не считается — окно так и говорит.
+    wait_for(&mut h, "материал не задан");
+    h.get_by_label_contains("Сохранить первую версию").click();
+    wait_for(&mut h, "корпус.step");
+    // Без описания сохранить нельзя.
+    h.get_by_label_contains("Сохранить как v1").click();
+    h.run();
+    assert!(saved.lock().unwrap().is_empty());
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+        .click();
+    h.run();
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+        .type_text("Первая версия корпуса");
+    h.run();
+    h.get_by_label_contains("Сохранить как v1").click();
+    wait_for(&mut h, "Сохранена версия «корпус» v1");
+    assert_eq!(
+        *saved.lock().unwrap(),
+        [("корпус".to_string(), "Первая версия корпуса".to_string())]
+    );
 }
