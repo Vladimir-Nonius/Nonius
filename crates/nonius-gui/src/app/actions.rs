@@ -58,6 +58,9 @@ impl App {
         self.message = None;
         self.notice = None;
         self.save = None;
+        self.files = None;
+        self.file = None;
+        self.file_text = None;
     }
 
     /// Перечитать детали и версии выбранной детали после сохранения или
@@ -95,6 +98,7 @@ impl App {
             Done::Compared(name, picks, result)
         });
         self.load_masses(ctx);
+        self.load_files(ctx);
     }
 
     /// Прочитать материал и массу для выбранной пары версий и сейчас.
@@ -133,6 +137,9 @@ impl App {
         // Масса читалась для брошенной пары — перечитать для показанной.
         if self.masses.as_ref().is_none_or(|m| m.0 != self.picks) {
             self.load_masses(ctx);
+        }
+        if self.files.as_ref().is_none_or(|f| f.0 != self.picks) {
+            self.load_files(ctx);
         }
         self.notice = Some(texts().compare_cancelled.to_string());
     }

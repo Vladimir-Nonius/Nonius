@@ -35,6 +35,7 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 tempfile = "3"
 sha2 = "0.10"
+opener = "0.8"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

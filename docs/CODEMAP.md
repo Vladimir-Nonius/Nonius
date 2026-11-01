@@ -17,6 +17,7 @@
 | Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
+| Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
 | Формат сообщения коммита | `nonius-store/src/message.rs` |
 | Новый модуль (крейт) | `nonius-core/src/extension/traits.rs`, `extension/manifest.rs`, `contract.rs`; пример — `nonius-step/src/lib.rs` |
 | Поле в `meta.yaml` / `tree.yaml` / `project.yaml` | `nonius-core/src/meta.rs` / `tree.rs` / `project/mod.rs` + `schema.rs` (миграция) |
@@ -27,6 +28,7 @@
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
 | Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/actions.rs` и `results.rs` (действия и их итог), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
 | Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source.rs` и `nonius-cli/src/window.rs` |
+| Окно: вкладки под 3D | `nonius-gui/src/app/tabs.rs` (панель, «Числа»), `app/files.rs` (`«Файлы»`) |
 | 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
 | Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window.rs` (реализация на `nonius-app`) |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
@@ -65,6 +67,7 @@
 | `lib.rs` | `Store`: открытие, первый коммит, поиск детали |
 | `history.rs` | список версий, изменения, `commit`, `restore` |
 | `files.rs` | файлы версии, `export`, кэш версий, `snapshot` |
+| `diff.rs` | разница между версиями: файлы, размеры, строки текста |
 | `message.rs` | сообщение коммита и строки `Nonius-Item` / `Nonius-Version` |
 | `version.rs` | `VersionInfo`, `FileChange` |
 | `git.rs` | запуск системного `git` |
@@ -126,6 +129,8 @@
 | `app/panels.rs` | детали слева, «Что изменилось» справа, строка состояния с «Отменить», надписи поверх 3D |
 | `app/history.rs` | история детали слева: «Сейчас», версии, метки «было» и «стало», «Сохранить версию» |
 | `app/save.rs` | окошко «Сохранить версию»: что изменилось и описание |
+| `app/tabs.rs` | вкладки под 3D, таблица «Числа» |
+| `app/files.rs` | вкладка «Файлы»: список, разница текста, «Открыть» |
 | `app/material.rs` | «Материал и масса»: справочник, свой материал, масса «было → стало» |
 | `app/toolbar.rs` | «Было» / «Стало», режимы, кнопки видов, сохранение картинки |
 | `app/start.rs` | начальный экран: открыть папку проекта |
@@ -154,6 +159,7 @@
 | `lib.rs` | `App` (проект + реестр + хранилище), `create_project` |
 | `items.rs` | новая деталь, список, `ItemStatus` и `ItemState` |
 | `history.rs` | версии, `save_version`, `restore`, `export` |
+| `files.rs` | файлы версии, разница, копия и открытие файла |
 | `import.rs` | `import`: файл модели в деталь, паспорт, превью |
 | `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
 | `materials.rs` | справочник материалов с плотностью |
@@ -175,6 +181,7 @@
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `modules` |
 | `commands/import.rs` | `import` |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `export` |
+| `commands/files.rs` | `files`, `open` |
 | `commands/compare.rs` | `diff`, `render` |
 | `commands/passport.rs` | `material`, `materials` |
 

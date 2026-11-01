@@ -10,7 +10,8 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use nonius_core::compare::{Change, ChangeKind, ChangeReport};
 use nonius_gui::source::{
-    Comparison, MassEntry, MaterialEntry, PartEntry, Pick, Progress, ProjectSource, VersionEntry,
+    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, PartEntry,
+    Pick, Progress, ProjectSource, VersionEntry,
 };
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
@@ -19,6 +20,8 @@ struct Fake {
     root: PathBuf,
     /// Что сохранили из окна: деталь и описание.
     saved: Arc<Mutex<Vec<(String, String)>>>,
+    /// Что открыли из окна.
+    opened: Arc<Mutex<Vec<String>>>,
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -143,6 +146,40 @@ impl ProjectSource for Fake {
     ) -> anyhow::Result<MassEntry> {
         self.mass(part, Pick::Current)
     }
+    fn files(&self, _part: &str, _before: Pick, _after: Pick) -> anyhow::Result<Vec<FileEntry>> {
+        Ok(vec![
+            FileEntry {
+                path: "model.step".into(),
+                state: FileState::Same,
+                before: Some(2048),
+                after: Some(2048),
+                text: false,
+            },
+            FileEntry {
+                path: "docs/заметка.md".into(),
+                state: FileState::Modified,
+                before: Some(10),
+                after: Some(20),
+                text: true,
+            },
+        ])
+    }
+    fn file_diff(
+        &self,
+        _part: &str,
+        _before: Pick,
+        _after: Pick,
+        _path: &str,
+    ) -> anyhow::Result<Vec<DiffEntry>> {
+        Ok(vec![DiffEntry {
+            kind: DiffKind::Added,
+            text: "сверлить Ø8".into(),
+        }])
+    }
+    fn open_file(&self, _part: &str, _pick: Pick, path: &str) -> anyhow::Result<PathBuf> {
+        self.opened.lock().unwrap().push(path.to_string());
+        Ok(self.root.join(path))
+    }
 }
 
 /// Шагать окно, пока не появится надпись (работа идёт в фоне).
@@ -163,11 +200,20 @@ fn wait_for(h: &mut Harness<'_, App>, text: &str) {
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 fn window(dir: &Path, saved: Arc<Mutex<Vec<(String, String)>>>) -> Harness<'static, App> {
+    window_with(dir, saved, Arc::default())
+}
+
+fn window_with(
+    dir: &Path,
+    saved: Arc<Mutex<Vec<(String, String)>>>,
+    opened: Arc<Mutex<Vec<String>>>,
+) -> Harness<'static, App> {
     std::env::set_var("NONIUS_CONFIG_DIR", dir);
     let options = Options {
         project: Some(Box::new(Fake {
             root: dir.to_path_buf(),
             saved,
+            opened,
         })),
         opener: Arc::new(|_| anyhow::bail!("не нужно")),
         part: None,
@@ -237,4 +283,47 @@ fn save_first_version_from_the_window() {
         *saved.lock().unwrap(),
         [("корпус".to_string(), "Первая версия корпуса".to_string())]
     );
+}
+
+#[test]
+fn files_and_numbers_tabs() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let mut h = window_with(dir.path(), Arc::default(), opened.clone());
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+
+    // Изменённый файл идёт первым, у него видно старый и новый размер.
+    wait_for(&mut h, "~ docs/заметка.md");
+    assert!(h.query_by_label_contains("10 байт → 20 байт").is_some());
+    assert!(h.query_by_label_contains("model.step   2,0 КБ").is_some());
+
+    h.get_by_label_contains("docs/заметка.md").click();
+    wait_for(&mut h, "сверлить Ø8");
+    assert!(h.query_by_label_contains("изменён").is_some());
+
+    h.get_by_label("Открыть v2").click();
+    wait_for(&mut h, "Открыт файл");
+    assert!(h.query_by_label_contains("копия").is_some());
+    assert_eq!(*opened.lock().unwrap(), ["docs/заметка.md"]);
+
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Числа")
+        .click();
+    wait_for(&mut h, "Параметр");
+    assert!(h.query_by_label_contains("Было (v1)").is_some());
+    assert!(
+        h.query_by_label("+1,21").is_some(),
+        "разница массы в граммах"
+    );
+    assert!(
+        h.query_all_by_label("Ст3").count() >= 2,
+        "материал в обеих колонках"
+    );
+
+    // Щелчок по открытой вкладке сворачивает панель.
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Числа")
+        .click();
+    h.run();
+    assert!(h.query_by_label_contains("Параметр").is_none());
 }

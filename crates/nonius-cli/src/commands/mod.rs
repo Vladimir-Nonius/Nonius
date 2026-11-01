@@ -2,6 +2,7 @@
 //! здесь только печать итогов.
 
 pub mod compare;
+pub mod files;
 pub mod history;
 pub mod import;
 pub mod passport;

@@ -22,7 +22,7 @@ pub fn change_line(c: &Change) -> String {
 /// Округлить дробные числа в тексте: большие — до десятых (16013.87614 →
 /// 16013,9), малые — до трёх значащих (0.04213 → 0,0421). Целые не трогаются:
 /// это может быть обозначение или год.
-fn tidy(text: &str) -> String {
+pub(super) fn tidy(text: &str) -> String {
     let mut out = String::new();
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
@@ -90,6 +90,20 @@ pub fn mass_text(kg: f64) -> String {
 }
 
 /// Плотность: «7 850 кг/м³».
+/// Размер файла: «840 байт», «12 КБ», «1,2 МБ».
+pub fn size_text(bytes: u64) -> String {
+    let t = texts();
+    let value = bytes as f64;
+    let (value, unit) = match bytes {
+        0..1024 => return format!("{bytes} {}", t.bytes),
+        1024..1_048_576 => (value / 1024.0, t.kilobytes),
+        1_048_576..1_073_741_824 => (value / 1_048_576.0, t.megabytes),
+        _ => (value / 1_073_741_824.0, t.gigabytes),
+    };
+    let places = if value < 10.0 { 1 } else { 0 };
+    format!("{value:.places$} {unit}").replace('.', ",")
+}
+
 pub fn density_text(kg_m3: f64) -> String {
     format!(
         "{} {}",

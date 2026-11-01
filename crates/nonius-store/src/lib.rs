@@ -21,6 +21,7 @@
 //! коммита, `version.rs` — типы версий, `git.rs` — запуск git, `workdir.rs` —
 //! служебная папка `.git/nonius` и запись в неё целыми папками.
 
+mod diff;
 mod error;
 mod files;
 mod git;
@@ -32,9 +33,10 @@ pub mod workdir;
 use nonius_core::project::Item;
 use nonius_core::{PartName, Project};
 
+pub use diff::is_text_file;
 pub use error::{Result, StoreError};
 use git::{git_path, Git};
-pub use version::{FileChange, FileChangeKind, VersionInfo};
+pub use version::{DiffLine, DiffLineKind, FileChange, FileChangeKind, VersionFile, VersionInfo};
 
 /// Настройки доступа к git.
 #[derive(Debug, Clone, Default)]

@@ -5,7 +5,7 @@ use eframe::egui;
 
 use super::jobs::Done;
 use super::App;
-use crate::source::{default_picks, VersionEntry};
+use crate::source::{default_picks, Pick, VersionEntry};
 use crate::texts::texts;
 use crate::view::Model;
 
@@ -55,6 +55,33 @@ impl App {
                 Done::Masses(name, picks, Ok(m)) if current(&name) && self.picks == picks => {
                     self.masses = Some((picks, m));
                 }
+                Done::VersionFiles(name, picks, Ok(f)) if current(&name) && self.picks == picks => {
+                    self.got_files(ctx, f);
+                }
+                Done::VersionFiles(name, picks, Err(e))
+                    if current(&name) && self.picks == picks =>
+                {
+                    self.message = Some(format!("{}: {e:#}", t.error))
+                }
+                Done::FileDiff(name, picks, path, lines)
+                    if current(&name)
+                        && self.picks == picks
+                        && self.file.as_deref() == Some(&path) =>
+                {
+                    match lines {
+                        Ok(l) => self.file_text = Some(l),
+                        Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
+                    }
+                }
+                Done::FileOpened(pick, Ok(path)) => {
+                    let copy = if matches!(pick, Pick::Version(_)) {
+                        t.opened_copy
+                    } else {
+                        ""
+                    };
+                    self.notice = Some(format!("{}: {}{copy}", t.file_opened, path.display()));
+                }
+                Done::FileOpened(_, Err(e)) => self.message = Some(format!("{}: {e:#}", t.error)),
                 Done::Files(name, files) => {
                     if let Some(d) = self.save.as_mut().filter(|d| d.part == name) {
                         match files {
@@ -102,7 +129,11 @@ impl App {
                 }
                 Done::Crashed => self.message = Some(t.crashed.to_string()),
                 // Устарело: выбрали другое.
-                Done::Versions(..) | Done::Compared(..) | Done::Masses(..) => {}
+                Done::Versions(..)
+                | Done::Compared(..)
+                | Done::Masses(..)
+                | Done::VersionFiles(..)
+                | Done::FileDiff(..) => {}
             }
         }
     }
@@ -123,6 +154,7 @@ impl App {
             self.shown = None;
             self.comparison = None;
             self.load_masses(ctx);
+            self.load_files(ctx);
         } else {
             self.show_picks(ctx, picks);
         }
