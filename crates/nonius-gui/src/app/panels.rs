@@ -2,11 +2,15 @@
 //! состояния внизу и надписи поверх вида.
 
 use eframe::egui::{self, Color32, RichText};
+use nonius_core::compare::{ChangeKind, ChangeReport};
 
 use super::legend::{legend, places};
 use super::numbers::change_line;
 use super::App;
 use crate::texts::texts;
+
+/// Модуль сравнения формы: его «добавлено» и «убрано» — те же цвета легенды.
+const GEOMETRY_MODULE: &str = "geometry-occt";
 
 /// Полоса ошибки над окном: не заметить её нельзя, закрывается крестиком.
 pub fn error_bar(app: &mut App, ctx: &egui::Context) {
@@ -105,7 +109,16 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                     if let Some(why) = c.scene_problem.as_ref().filter(|_| c.scene.is_some()) {
                         ui.label(RichText::new(format!("{}: {why}", t.no_colors)).color(warn));
                     }
-                    let lines: Vec<_> = c.reports.iter().flat_map(|r| &r.changes).collect();
+                    // Что добавлено и убрано, уже сказала легенда.
+                    let shape = |r: &&ChangeReport| r.comparator != GEOMETRY_MODULE;
+                    let parts = c.reports.iter().filter(shape).flat_map(|r| &r.changes);
+                    let form = c
+                        .reports
+                        .iter()
+                        .filter(|r| !shape(r))
+                        .flat_map(|r| &r.changes);
+                    let form = form.filter(|ch| ch.kind == ChangeKind::Modified);
+                    let lines: Vec<_> = form.chain(parts).collect();
                     if !lines.is_empty() {
                         ui.add_space(8.0);
                         ui.label(RichText::new(t.numbers).strong());

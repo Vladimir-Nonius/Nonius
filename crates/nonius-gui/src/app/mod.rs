@@ -235,8 +235,10 @@ impl eframe::App for App {
         new_part::show(self, ctx);
         add_model::show(self, ctx);
         part_dialogs::show(self, ctx);
+        // Заливка нужна: зазор между полосой и 3D иначе показывает чёрный фон.
+        let fill = ctx.style().visuals.panel_fill;
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(fill))
             .show(ctx, |ui| {
                 toolbar::show(self, ui);
                 let event = self.viewport.show(

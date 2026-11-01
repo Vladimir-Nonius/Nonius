@@ -42,22 +42,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     return;
                 }
                 ui.separator();
-                for (view, label, key) in [
-                    (StdView::Iso, t.view_iso, 7),
-                    (StdView::Front, t.view_front, 1),
-                    (StdView::Top, t.view_top, 5),
-                    (StdView::Right, t.view_right, 4),
-                ] {
-                    let hint = format!("Ctrl+{key}");
-                    if ui.button(label).on_hover_text(hint).clicked() {
-                        app.viewport.set_view(&ctx, Some(view));
-                    }
+                if ui.button(t.fit).clicked() {
+                    app.viewport.set_view(&ctx, None);
                 }
-                ui.menu_button("…", |ui| {
+                ui.menu_button(t.views, |ui| {
+                    ui.set_min_width(150.0);
                     for (view, label, key) in [
+                        (StdView::Iso, t.view_iso, 7),
+                        (StdView::Front, t.view_front, 1),
                         (StdView::Back, t.view_back, 2),
-                        (StdView::Left, t.view_left, 3),
+                        (StdView::Top, t.view_top, 5),
                         (StdView::Bottom, t.view_bottom, 6),
+                        (StdView::Left, t.view_left, 3),
+                        (StdView::Right, t.view_right, 4),
                     ] {
                         if ui.button(format!("{label}   Ctrl+{key}")).clicked() {
                             app.viewport.set_view(&ctx, Some(view));
@@ -65,9 +62,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         }
                     }
                 });
-                if ui.button(t.fit).clicked() {
-                    app.viewport.set_view(&ctx, None);
-                }
             });
         });
 }

@@ -171,9 +171,11 @@ fn list(
     asked: &mut Option<open_menu::Ask>,
 ) {
     let t = texts();
-    if ui.small_button(t.refresh).clicked() {
-        *ask = Some(Ask::Refresh);
-    }
+    ui.horizontal(|ui| {
+        if ui.small_button(t.refresh).clicked() {
+            *ask = Some(Ask::Refresh);
+        }
+    });
     if files.is_empty() {
         ui.label(RichText::new(t.no_files).weak());
     }

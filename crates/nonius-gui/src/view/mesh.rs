@@ -19,9 +19,6 @@ pub struct Vertex {
     pub normal: [f32; 3],
 }
 
-/// Угол между гранями, начиная с которого рисуется ребро.
-const EDGE_ANGLE_DEG: f32 = 25.0;
-
 /// Кусок сцены, готовый к отрисовке.
 #[derive(Debug, Clone)]
 pub struct Part {
@@ -111,10 +108,12 @@ fn vertices(m: &Mesh) -> Vec<Vertex> {
 /// Треугольник у отрезка: его нормаль и исходные точки отрезка.
 type Side = (Vec3, [u32; 2]);
 
-/// Рёбра детали: где грани сходятся под углом и где у поверхности край.
-/// Точки сшиваются по положению, потому что грани не делят вершины. Вершины
-/// общие только внутри одной грани, поэтому отрезок с общими вершинами — след
-/// разбиения кривой поверхности на треугольники, а не ребро.
+/// Рёбра детали: границы граней, как в SolidWorks, и края поверхности.
+/// Угол не смотрим: на литых деталях всё скруглено, и рёбра с изломом почти
+/// нет, а граница скругления — тоже ребро. Точки сшиваются по положению,
+/// потому что грани не делят вершины. Вершины общие только внутри одной
+/// грани, поэтому отрезок с общими вершинами — след разбиения поверхности на
+/// треугольники, а не ребро.
 fn edges(m: &Mesh, size: f32) -> Vec<[f32; 3]> {
     let step = (size * 1e-5).max(1e-6);
     let mut weld: HashMap<[i64; 3], u32> = HashMap::new();
@@ -146,14 +145,13 @@ fn edges(m: &Mesh, size: f32) -> Vec<[f32; 3]> {
         }
     }
 
-    let cos_limit = EDGE_ANGLE_DEG.to_radians().cos();
     let mut out = Vec::new();
     let mut keys: Vec<_> = sides.keys().copied().collect();
     keys.sort_unstable();
     for key in keys {
         let list = &sides[&key];
         let real = match list.as_slice() {
-            [(x, p), (y, q)] => p != q && x.dot(*y) < cos_limit,
+            [(_, p), (_, q)] => p != q,
             _ => true,
         };
         if real {
@@ -210,6 +208,34 @@ pub(crate) mod tests {
             assert!((axis - 1.0).abs() < 1e-5, "нормаль вдоль оси: {n}");
         }
         assert_eq!(p.triangles().count(), 12);
+    }
+
+    /// Литая деталь: плоскость переходит в скругление без излома.
+    #[test]
+    fn border_of_a_fillet_is_an_edge() {
+        let plate = |base: u32, x: f32| {
+            let corners = [
+                [x, 0.0, 0.0],
+                [x + 1.0, 0.0, 0.0],
+                [x + 1.0, 1.0, 0.0],
+                [x, 1.0, 0.0],
+            ];
+            (
+                corners,
+                [[base, base + 1, base + 2], [base, base + 2, base + 3]],
+            )
+        };
+        let (a, ta) = plate(0, 0.0);
+        let (b, tb) = plate(4, 1.0);
+        let m = Mesh {
+            positions: a.into_iter().chain(b).collect(),
+            triangles: ta.into_iter().chain(tb).collect(),
+        };
+        let found = edges(&m, 2.0);
+        let middle = found
+            .chunks_exact(2)
+            .any(|s| s[0][0] == 1.0 && s[1][0] == 1.0);
+        assert!(middle, "граница двух граней видна: {found:?}");
     }
 
     #[test]
