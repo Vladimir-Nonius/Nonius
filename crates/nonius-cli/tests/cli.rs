@@ -184,3 +184,40 @@ fn density_needs_material() {
     let (ok, _) = nonius(d, &["material", "вал", "--density", "7800"]);
     assert!(!ok, "плотность без материала не принимается");
 }
+
+#[test]
+fn files_between_versions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init", "--name", "Станок"]).0);
+    assert!(nonius(d, &["part", "new", "кронштейн"]).0);
+    let docs = d.join("parts").join("кронштейн").join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("заметка.md"), "сверлить Ø6\n").unwrap();
+    assert!(nonius(d, &["commit", "кронштейн", "-m", "Первая"]).0);
+    std::fs::write(docs.join("заметка.md"), "сверлить Ø8\n").unwrap();
+    std::fs::write(docs.join("чертёж.pdf"), b"%PDF").unwrap();
+
+    let (ok, out) = nonius(d, &["files", "кронштейн"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("изменён") && out.contains("docs/заметка.md"),
+        "{out}"
+    );
+    assert!(
+        out.contains("новый") && out.contains("docs/чертёж.pdf"),
+        "{out}"
+    );
+
+    let (ok, out) = nonius(d, &["files", "кронштейн", "--text", "docs/заметка.md"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("- сверлить Ø6") && out.contains("+ сверлить Ø8"),
+        "{out}"
+    );
+
+    // Файла нет — программа не запускается, а говорит словами.
+    let (ok, out) = nonius(d, &["open", "кронштейн", "нет.pdf"]);
+    assert!(!ok);
+    assert!(out.contains("нет файла"), "{out}");
+}

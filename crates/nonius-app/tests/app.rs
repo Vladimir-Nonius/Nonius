@@ -433,3 +433,45 @@ fn import_refuses_unknown_files() {
     let err = f.app.import(&bad, None).unwrap_err();
     assert!(err.to_string().contains("--part"), "{err}");
 }
+
+#[test]
+fn file_of_a_version_opens_as_a_copy() {
+    let f = fixture(false);
+    import(&f, 1000.0);
+    let item = f.app.item("пластина").unwrap();
+    let docs = item.dir.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("чертёж.pdf"), b"%PDF-1").unwrap();
+    f.app.save_version("пластина", "Первая").unwrap();
+    std::fs::write(docs.join("чертёж.pdf"), b"%PDF-2").unwrap();
+
+    let copy = f
+        .app
+        .file_path("пластина", Some(v(1)), "docs/чертёж.pdf")
+        .unwrap();
+    assert!(!copy.starts_with(&f.root), "{copy:?}");
+    assert_eq!(std::fs::read(&copy).unwrap(), b"%PDF-1");
+    assert!(std::fs::metadata(&copy).unwrap().permissions().readonly());
+    // Второй раз — та же копия, даже если она занята другой программой.
+    let again = f
+        .app
+        .file_path("пластина", Some(v(1)), "docs/чертёж.pdf")
+        .unwrap();
+    assert_eq!(again, copy);
+
+    let real = f
+        .app
+        .file_path("пластина", None, "docs/чертёж.pdf")
+        .unwrap();
+    assert_eq!(real, docs.join("чертёж.pdf"));
+
+    let changed = f.app.version_files("пластина", Some(v(1)), None).unwrap();
+    assert!(changed
+        .iter()
+        .any(|c| c.path == "docs/чертёж.pdf" && c.change.is_some()));
+
+    for bad in ["../../секрет.txt", "нет-такого.pdf"] {
+        let e = f.app.file_path("пластина", None, bad).unwrap_err();
+        assert!(matches!(e, Error::UnknownFile { .. }), "{e}");
+    }
+}

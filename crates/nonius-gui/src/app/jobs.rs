@@ -3,6 +3,7 @@
 //! Сравнение можно отменить: окно сразу свободно, а поток бросает расчёт на
 //! ближайшем шаге, и его результат никуда не попадает.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -10,7 +11,8 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 
 use crate::source::{
-    Comparison, MassEntry, PartEntry, Pick, Progress, ProjectSource, VersionEntry,
+    Comparison, DiffEntry, FileEntry, MassEntry, PartEntry, Pick, Progress, ProjectSource,
+    VersionEntry,
 };
 
 /// Готовый результат.
@@ -33,6 +35,12 @@ pub enum Done {
     MaterialSet(String, anyhow::Result<MassEntry>),
     /// Изменённые файлы детали — для окошка «Сохранить версию».
     Files(String, anyhow::Result<Vec<String>>),
+    /// Файлы детали для пары версий.
+    VersionFiles(String, (Pick, Pick), anyhow::Result<Vec<FileEntry>>),
+    /// Строки текстового файла: деталь, пара версий, файл.
+    FileDiff(String, (Pick, Pick), String, anyhow::Result<Vec<DiffEntry>>),
+    /// Файл открыт в своей программе.
+    FileOpened(Pick, anyhow::Result<PathBuf>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

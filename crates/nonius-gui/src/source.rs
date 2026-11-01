@@ -3,7 +3,7 @@
 //! Окно не знает про git и OpenCascade: всё приходит через [`ProjectSource`].
 //! Реализацию даёт программа: `nonius-cli` поверх `nonius-app`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use nonius_core::compare::ChangeReport;
@@ -78,6 +78,56 @@ pub struct MaterialEntry {
     pub density_kg_m3: f64,
 }
 
+/// Что случилось с файлом между двумя версиями.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileState {
+    /// Не менялся.
+    Same,
+    /// Новый.
+    Added,
+    /// Изменён.
+    Modified,
+    /// Удалён.
+    Deleted,
+}
+
+/// Файл детали на вкладке «Файлы».
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileEntry {
+    /// Путь внутри папки детали.
+    pub path: String,
+    /// Что с ним случилось.
+    pub state: FileState,
+    /// Размер в «Было», байт; `None` — файла там нет.
+    pub before: Option<u64>,
+    /// Размер в «Стало», байт; `None` — файла там нет.
+    pub after: Option<u64>,
+    /// Текстовый: можно показать разницу строк.
+    pub text: bool,
+}
+
+/// Вид строки в разнице текста.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffKind {
+    /// Без изменений.
+    Same,
+    /// Добавлена.
+    Added,
+    /// Убрана.
+    Removed,
+    /// Здесь пропущены строки без изменений.
+    Gap,
+}
+
+/// Строка в разнице текста.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffEntry {
+    /// Вид строки.
+    pub kind: DiffKind,
+    /// Текст.
+    pub text: String,
+}
+
 /// Ход долгой работы и её отмена.
 pub trait Progress: Sync {
     /// Начался шаг: «Сравниваю…».
@@ -125,6 +175,20 @@ pub trait ProjectSource: Send + Sync {
         material: Option<&str>,
         density_kg_m3: Option<f64>,
     ) -> anyhow::Result<MassEntry>;
+    /// Файлы «Стало» и что изменилось после «Было». `before == after` —
+    /// только список файлов, без изменений.
+    fn files(&self, part: &str, before: Pick, after: Pick) -> anyhow::Result<Vec<FileEntry>>;
+    /// Строки текстового файла. `before == after` — весь файл.
+    fn file_diff(
+        &self,
+        part: &str,
+        before: Pick,
+        after: Pick,
+        path: &str,
+    ) -> anyhow::Result<Vec<DiffEntry>>;
+    /// Открыть файл в его программе. Файл версии открывается копией.
+    /// Возвращает, что именно открыто.
+    fn open_file(&self, part: &str, pick: Pick, path: &str) -> anyhow::Result<PathBuf>;
 }
 
 /// Открывает проект по папке (для «Открыть папку проекта…» и перетаскивания).

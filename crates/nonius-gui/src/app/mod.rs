@@ -5,6 +5,7 @@
 //! результаты — `results.rs`, всё долгое — в фоне (`jobs.rs`).
 
 mod actions;
+mod files;
 mod history;
 mod jobs;
 mod material;
@@ -14,6 +15,7 @@ mod results;
 mod save;
 mod settings;
 mod start;
+mod tabs;
 mod toolbar;
 
 use std::path::{Path, PathBuf};
@@ -22,7 +24,8 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::source::{
-    Comparison, MassEntry, MaterialEntry, Opener, PartEntry, Pick, ProjectSource, VersionEntry,
+    Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, Opener, PartEntry, Pick,
+    ProjectSource, VersionEntry,
 };
 use crate::texts::texts;
 use crate::view::{Look, Mode, Viewport, ViewportEvent};
@@ -72,6 +75,14 @@ pub struct App {
     custom: material::Custom,
     /// Материал записывается — список выбора ждёт.
     material_busy: bool,
+    /// Открытая вкладка под 3D; `None` — панель свёрнута.
+    tab: Option<tabs::Tab>,
+    /// Файлы для пары версий.
+    files: Option<((Pick, Pick), Vec<FileEntry>)>,
+    /// Выбранный файл на вкладке «Файлы».
+    file: Option<String>,
+    /// Строки выбранного текстового файла.
+    file_text: Option<Vec<DiffEntry>>,
 }
 
 impl App {
@@ -110,6 +121,10 @@ impl App {
             save: None,
             custom: material::Custom::default(),
             material_busy: false,
+            tab: Some(tabs::Tab::Files),
+            files: None,
+            file: None,
+            file_text: None,
             settings,
         };
         match options.project {
@@ -138,6 +153,7 @@ impl eframe::App for App {
         panels::status_bar(self, ctx);
         panels::parts(self, ctx);
         panels::changes(self, ctx);
+        tabs::show(self, ctx);
         save::show(self, ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)

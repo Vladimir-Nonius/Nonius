@@ -9,13 +9,15 @@
 //! вызывающий и передаёт в [`App::open`].
 //!
 //! Файлы: здесь — [`App`] и создание проекта, `items.rs` — детали и статус,
-//! `history.rs` — версии, `import.rs` — импорт модели, `passport.rs` —
-//! паспорт и масса, `materials.rs` — справочник плотностей, `compare.rs` —
-//! сравнение, `cache.rs` — кэш сравнений, `error.rs` — ошибки.
+//! `history.rs` — версии, `files.rs` — файлы версии и их открытие,
+//! `import.rs` — импорт модели, `passport.rs` — паспорт и масса,
+//! `materials.rs` — справочник плотностей, `compare.rs` — сравнение,
+//! `cache.rs` — кэш сравнений, `error.rs` — ошибки.
 
 mod cache;
 mod compare;
 mod error;
+mod files;
 mod history;
 mod import;
 mod items;
@@ -38,7 +40,10 @@ pub use materials::{find_material, Material, MATERIALS};
 pub use passport::{Mass, MaterialChoice, Passport};
 
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.
-pub use nonius_store::{FileChange, FileChangeKind, GitOptions, VersionInfo};
+pub use nonius_store::{
+    is_text_file, DiffLine, DiffLineKind, FileChange, FileChangeKind, GitOptions, VersionFile,
+    VersionInfo,
+};
 
 /// Открытый проект и подключённые модули.
 ///

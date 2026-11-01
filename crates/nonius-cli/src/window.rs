@@ -4,16 +4,20 @@
 //! не знает про git и OpenCascade, а сравнения берёт из того же кэша, что
 //! и команды.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use anyhow::{bail, Context, Result};
-use nonius_app::{App, CompareOptions, FileChangeKind, Mass, MaterialChoice, MATERIALS};
+use nonius_app::{
+    is_text_file, App, CompareOptions, DiffLineKind, FileChangeKind, Mass, MaterialChoice,
+    MATERIALS,
+};
 use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
-    Comparison, MassEntry, MaterialEntry, PartEntry, Pick, Progress, ProjectSource, VersionEntry,
+    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, PartEntry,
+    Pick, Progress, ProjectSource, VersionEntry,
 };
 use nonius_scene::Scene;
 
@@ -86,6 +90,17 @@ fn version(p: Pick) -> Result<Option<VersionNumber>> {
         Pick::Version(n) => Some(VersionNumber::new(n)?),
         Pick::Current => None,
     })
+}
+
+/// Пара версий для вкладки «Файлы»: одна и та же версия — без сравнения.
+fn pair(before: Pick, after: Pick) -> Result<(Option<VersionNumber>, Option<VersionNumber>)> {
+    let to = version(after)?;
+    let from = if before == after {
+        None
+    } else {
+        version(before)?
+    };
+    Ok((from, to))
 }
 
 impl ProjectSource for AppSource {
@@ -241,6 +256,58 @@ impl ProjectSource for AppSource {
         });
         let _files = self.writing();
         Ok(mass_entry(self.app.set_material(part, choice)?))
+    }
+
+    fn files(&self, part: &str, before: Pick, after: Pick) -> Result<Vec<FileEntry>> {
+        let _files = self.reading();
+        let (from, to) = pair(before, after)?;
+        Ok(self
+            .app
+            .version_files(part, from, to)?
+            .into_iter()
+            .map(|f| FileEntry {
+                text: is_text_file(&f.path),
+                state: match f.change {
+                    None => FileState::Same,
+                    Some(FileChangeKind::Added) => FileState::Added,
+                    Some(FileChangeKind::Modified) => FileState::Modified,
+                    Some(FileChangeKind::Deleted) => FileState::Deleted,
+                },
+                before: f.before,
+                after: f.after,
+                path: f.path,
+            })
+            .collect())
+    }
+
+    fn file_diff(
+        &self,
+        part: &str,
+        before: Pick,
+        after: Pick,
+        path: &str,
+    ) -> Result<Vec<DiffEntry>> {
+        let _files = self.reading();
+        let (from, to) = pair(before, after)?;
+        Ok(self
+            .app
+            .file_diff(part, from, to, path)?
+            .into_iter()
+            .map(|l| DiffEntry {
+                kind: match l.kind {
+                    DiffLineKind::Same => DiffKind::Same,
+                    DiffLineKind::Added => DiffKind::Added,
+                    DiffLineKind::Removed => DiffKind::Removed,
+                    DiffLineKind::Gap => DiffKind::Gap,
+                },
+                text: l.text,
+            })
+            .collect())
+    }
+
+    fn open_file(&self, part: &str, pick: Pick, path: &str) -> Result<PathBuf> {
+        let _files = self.reading();
+        Ok(self.app.open_file(part, version(pick)?, path)?)
     }
 }
 

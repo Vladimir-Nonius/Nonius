@@ -50,3 +50,38 @@ pub struct FileChange {
     /// Путь внутри папки детали: `model.step`, `docs/чертёж.pdf`.
     pub path: String,
 }
+
+/// Файл детали при сравнении двух версий.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionFile {
+    /// Путь внутри папки детали.
+    pub path: String,
+    /// Что с ним случилось; `None` — не менялся.
+    pub change: Option<FileChangeKind>,
+    /// Размер в первой версии, байт; `None` — файла там нет.
+    pub before: Option<u64>,
+    /// Размер во второй версии, байт; `None` — файла там нет.
+    pub after: Option<u64>,
+}
+
+/// Вид строки в разнице текста.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffLineKind {
+    /// Без изменений.
+    Same,
+    /// Добавлена.
+    Added,
+    /// Убрана.
+    Removed,
+    /// Здесь пропущены строки без изменений.
+    Gap,
+}
+
+/// Строка в разнице текста.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffLine {
+    /// Вид строки.
+    pub kind: DiffLineKind,
+    /// Текст без значка.
+    pub text: String,
+}

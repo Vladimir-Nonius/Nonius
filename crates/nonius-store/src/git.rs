@@ -6,8 +6,13 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::error::{Result, StoreError};
+
+/// Сколько раз повторить команду после сбоя фильтра LFS.
+const FILTER_RETRIES: u32 = 3;
+const FILTER_RETRY_DELAY: Duration = Duration::from_millis(200);
 
 /// Обёртка над `git -C <корень проекта>`.
 #[derive(Debug, Clone)]
@@ -49,8 +54,22 @@ impl Git {
     }
 
     /// Выполнить команду и вернуть stdout.
+    ///
+    /// Два git подряд могут класть один новый файл в LFS: в Windows второй
+    /// получает отказ на переименовании. Файл к этому моменту уже на месте,
+    /// поэтому команда просто повторяется.
     pub(crate) fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
-        self.run_with_input(args, None)
+        let mut result = self.run_with_input(args, None);
+        for _ in 0..FILTER_RETRIES {
+            match &result {
+                Err(StoreError::Git { stderr, .. }) if stderr.contains("clean filter") => {
+                    std::thread::sleep(FILTER_RETRY_DELAY);
+                    result = self.run_with_input(args, None);
+                }
+                _ => break,
+            }
+        }
+        result
     }
 
     /// Выполнить команду, передав `input` на stdin.

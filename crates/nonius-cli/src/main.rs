@@ -23,7 +23,7 @@ use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
 use args::{Cli, Command, PartCommand};
-use commands::{compare, history, import, passport, project};
+use commands::{compare, files, history, import, passport, project};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
@@ -113,6 +113,23 @@ fn run(cli: Cli) -> Result<()> {
             version,
             dest,
         } => history::export(&app()?, part, version, dest)?,
+        Command::Files {
+            part,
+            from,
+            to,
+            text,
+        } => files::files(
+            &app()?,
+            part,
+            from.as_deref(),
+            to.as_deref(),
+            text.as_deref(),
+        )?,
+        Command::Open {
+            part,
+            file,
+            version,
+        } => files::open(&app()?, part, file, version.as_deref())?,
         Command::View { part, from, to } => window::open(
             cli.project.as_deref(),
             part.as_deref(),

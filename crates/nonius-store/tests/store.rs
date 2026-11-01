@@ -5,7 +5,7 @@ use std::fs;
 use nonius_core::meta::ItemKind;
 use nonius_core::project::META_FILE;
 use nonius_core::{schema, PartName, Project, VersionNumber};
-use nonius_store::{FileChangeKind, GitOptions, Store, StoreError};
+use nonius_store::{DiffLineKind, FileChangeKind, GitOptions, Store, StoreError};
 
 fn options() -> GitOptions {
     GitOptions {
@@ -185,4 +185,86 @@ fn snapshot_points_to_files_of_that_version() {
     assert_eq!(store.snapshot(&item, &v1).unwrap().dir, snap.dir);
     // кэш не попадает в изменения детали
     assert!(store.changes(&item).unwrap().is_empty());
+}
+
+#[test]
+fn files_between_versions() {
+    let (_tmp, store, item) = setup("кронштейн");
+    let docs = item.dir.join("docs");
+    fs::create_dir_all(&docs).unwrap();
+    fs::write(docs.join("чертёж.pdf"), b"%PDF-1.4").unwrap();
+    fs::write(docs.join("заметка.md"), "строка 1\nстрока 2\n").unwrap();
+    fs::write(docs.join("старый.txt"), "уйдёт\n").unwrap();
+    let big = vec![b'x'; 5000];
+    fs::write(item.dir.join("model.step"), &big).unwrap();
+    let v1 = store.commit(&item, "первая").unwrap();
+
+    fs::write(docs.join("чертёж.pdf"), b"%PDF-1.5 second").unwrap();
+    fs::write(docs.join("заметка.md"), "строка 1\nстрока 3\n").unwrap();
+    fs::remove_file(docs.join("старый.txt")).unwrap();
+    fs::write(docs.join("новый.dxf"), b"0\nEOF\n").unwrap();
+    let v2 = store.commit(&item, "вторая").unwrap();
+
+    let list = store.files_between(&item, Some(&v1), Some(&v2)).unwrap();
+    let find = |list: &[nonius_store::VersionFile], p: &str| {
+        list.iter().find(|f| f.path == p).unwrap().clone()
+    };
+    let pdf = find(&list, "docs/чертёж.pdf");
+    assert_eq!(pdf.change, Some(FileChangeKind::Modified));
+    assert_eq!(
+        (pdf.before, pdf.after),
+        (Some(8), Some(15)),
+        "настоящий размер, не указатель LFS"
+    );
+    assert_eq!(
+        find(&list, "docs/новый.dxf").change,
+        Some(FileChangeKind::Added)
+    );
+    let gone = find(&list, "docs/старый.txt");
+    assert_eq!(gone.change, Some(FileChangeKind::Deleted));
+    assert_eq!(gone.after, None);
+    let model = find(&list, "model.step");
+    assert_eq!(model.change, None);
+    assert_eq!(model.after, Some(5000));
+
+    // Без «было» — просто файлы версии.
+    let plain = store.files_between(&item, None, Some(&v1)).unwrap();
+    assert!(plain.iter().all(|f| f.change.is_none()));
+    assert!(plain.iter().any(|f| f.path == "docs/старый.txt"));
+
+    // Разница текста.
+    let lines = store
+        .text_diff(&item, Some(&v1), Some(&v2), "docs/заметка.md")
+        .unwrap();
+    let got: Vec<_> = lines.iter().map(|l| (l.kind, l.text.as_str())).collect();
+    assert!(
+        got.contains(&(DiffLineKind::Removed, "строка 2")),
+        "{got:?}"
+    );
+    assert!(got.contains(&(DiffLineKind::Added, "строка 3")), "{got:?}");
+    let whole = store
+        .text_diff(&item, None, Some(&v1), "docs/заметка.md")
+        .unwrap();
+    assert_eq!(whole.len(), 2);
+
+    // Сейчас: новый файл, который git ещё не видел, изменённый и удалённый.
+    fs::write(docs.join("свежая.md"), "первая строка\n").unwrap();
+    fs::write(docs.join("заметка.md"), "строка 1\nстрока 4\n").unwrap();
+    fs::remove_file(docs.join("новый.dxf")).unwrap();
+    let now = store.files_between(&item, Some(&v2), None).unwrap();
+    let fresh = find(&now, "docs/свежая.md");
+    assert_eq!(fresh.change, Some(FileChangeKind::Added));
+    assert_eq!(fresh.before, None);
+    assert_eq!(
+        find(&now, "docs/заметка.md").change,
+        Some(FileChangeKind::Modified)
+    );
+    let removed = find(&now, "docs/новый.dxf");
+    assert_eq!(removed.change, Some(FileChangeKind::Deleted));
+    assert_eq!(removed.after, None);
+    let added = store
+        .text_diff(&item, Some(&v2), None, "docs/свежая.md")
+        .unwrap();
+    assert_eq!(added[0].kind, DiffLineKind::Added);
+    assert_eq!(added[0].text, "первая строка");
 }
