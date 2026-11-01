@@ -24,6 +24,7 @@ pub const COMMANDS: &[&str] = &[
     "list",
     "info",
     "overview",
+    "agents",
     "modules",
     "import",
     "status",
@@ -107,6 +108,7 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
         }
         Command::Info => info(&app()?)?,
         Command::Overview { changed } => overview(&app()?, *changed)?,
+        Command::Agents => json!({ "updated": app()?.update_agents()? }),
         Command::Modules => modules(),
         Command::Import { file, part } => {
             let done = app()?.import(file, part.as_deref())?;
@@ -226,6 +228,7 @@ fn overview(app: &App, changed: bool) -> Result<Value> {
         "saved": count(ItemState::Saved),
         "changed": count(ItemState::Changed),
         "new": count(ItemState::New),
+        "agents_outdated": app.project().agents_outdated(),
         "items": shown.map(item).collect::<Vec<_>>(),
     }))
 }

@@ -116,6 +116,20 @@ impl Store {
         self.version(item, next)
     }
 
+    /// Зафиксировать файл проекта вне деталей: это не версия детали.
+    pub fn commit_project_file(&self, file: &str, message: &str) -> Result<()> {
+        let path = literal(file);
+        self.git.run(&["add", "--", &path])?;
+        let author = self.ai.as_ref().map(AiActor::git_author);
+        let mut args = vec!["commit", "-q", "-F", "-"];
+        if let Some(author) = &author {
+            args.extend(["--author", author]);
+        }
+        args.extend(["--", &path]);
+        self.git.run_with_input(&args, Some(message.as_bytes()))?;
+        Ok(())
+    }
+
     /// Вернуть деталь к версии `version`. Создаёт новую версию с содержимым
     /// старой; история не меняется.
     pub fn restore(

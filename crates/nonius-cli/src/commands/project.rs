@@ -1,4 +1,5 @@
-//! Проект целиком: `init`, `part new`, `list`, `info`, `overview`, `modules`.
+//! Проект целиком: `init`, `part new`, `list`, `info`, `overview`, `agents`,
+//! `modules`.
 
 use std::path::PathBuf;
 
@@ -101,6 +102,19 @@ pub fn overview(app: &App, changed: bool) -> Result<()> {
         if !changed || s.state() != ItemState::Saved {
             println!("{}", overview_line(s));
         }
+    }
+    if app.project().agents_outdated() {
+        println!("Правила для ИИ в AGENTS.md устарели: nonius agents");
+    }
+    Ok(())
+}
+
+/// `nonius agents`.
+pub fn agents(app: &App) -> Result<()> {
+    if app.update_agents()? {
+        println!("AGENTS.md обновлён и зафиксирован.");
+    } else {
+        println!("AGENTS.md уже свежий.");
     }
     Ok(())
 }

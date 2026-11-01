@@ -132,6 +132,35 @@ fn diff_between_versions_lists_files() {
     assert!(!out.contains("изменений нет"), "{out}");
 }
 
+#[test]
+fn agents_update_old_project_and_keep_people_text() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    let (ok, out) = nonius(d, &["agents"]);
+    assert!(ok && out.contains("уже свежий"), "{out}");
+
+    let file = d.join("AGENTS.md");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("nonius overview") && text.contains("model.*"),
+        "{text}"
+    );
+    std::fs::write(&file, "# Свой файл\n\nНаш допуск 0,1 мм.\n").unwrap();
+    let (ok, out) = nonius(d, &["overview"]);
+    assert!(ok && out.contains("nonius agents"), "{out}");
+
+    let (ok, out) = nonius(d, &["agents", "--ai", "Claude"]);
+    assert!(ok && out.contains("обновлён"), "{out}");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("Наш допуск") && text.contains("nonius overview"),
+        "{text}"
+    );
+    let (ok, out) = nonius(d, &["overview"]);
+    assert!(ok && !out.contains("nonius agents"), "{out}");
+}
+
 fn json(dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
     let (_, out) = nonius(dir, args);
     serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{e}: {out}"))

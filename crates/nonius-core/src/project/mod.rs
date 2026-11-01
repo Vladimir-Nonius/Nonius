@@ -12,6 +12,7 @@
 //!
 //! Шаблоны `.gitattributes` и `AGENTS.md` нового проекта — в `templates.rs`.
 
+mod agents;
 mod templates;
 
 use std::fs;
@@ -24,7 +25,9 @@ use crate::extension::Snapshot;
 use crate::meta::{ItemKind, PartMeta};
 use crate::names::PartName;
 use crate::schema::{self, Versioned};
-use templates::{agents_md, gitattributes};
+use agents::agents_md;
+pub use agents::AGENTS_FILE;
+use templates::gitattributes;
 
 /// Имя файла настроек проекта.
 pub const PROJECT_FILE: &str = "project.yaml";
@@ -151,7 +154,7 @@ impl Project {
         };
         schema::save(&config, &config_path)?;
         write_if_missing(&root.join(".gitattributes"), &gitattributes())?;
-        write_if_missing(&root.join("AGENTS.md"), &agents_md(&name))?;
+        write_if_missing(&root.join(AGENTS_FILE), &agents_md(&name))?;
         Ok(Self { root, config })
     }
 
