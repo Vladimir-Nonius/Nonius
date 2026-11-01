@@ -10,9 +10,10 @@ use std::time::Duration;
 
 use crate::error::{Result, StoreError};
 
-/// Сколько раз повторить команду после сбоя фильтра LFS.
+/// Сколько раз повторить команду, которой помешал другой git.
 const FILTER_RETRIES: u32 = 3;
-const FILTER_RETRY_DELAY: Duration = Duration::from_millis(200);
+const LOCK_RETRIES: u32 = 25;
+const RETRY_DELAY: Duration = Duration::from_millis(200);
 
 /// Обёртка над `git -C <корень проекта>`.
 #[derive(Debug, Clone)]
@@ -46,7 +47,9 @@ impl Git {
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // Чтение не берёт замок индекса: окно не мешает работать ИИ.
+            .env("GIT_OPTIONAL_LOCKS", "0");
         for (k, v) in &self.env {
             c.env(k, v);
         }
@@ -54,26 +57,38 @@ impl Git {
     }
 
     /// Выполнить команду и вернуть stdout.
-    ///
-    /// Два git подряд могут класть один новый файл в LFS: в Windows второй
-    /// получает отказ на переименовании. Файл к этому моменту уже на месте,
-    /// поэтому команда просто повторяется.
     pub(crate) fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
-        let mut result = self.run_with_input(args, None);
-        for _ in 0..FILTER_RETRIES {
-            match &result {
-                Err(StoreError::Git { stderr, .. }) if stderr.contains("clean filter") => {
-                    std::thread::sleep(FILTER_RETRY_DELAY);
-                    result = self.run_with_input(args, None);
-                }
-                _ => break,
-            }
-        }
-        result
+        self.run_with_input(args, None)
     }
 
     /// Выполнить команду, передав `input` на stdin.
+    ///
+    /// Окно и ИИ работают с проектом одновременно, поэтому команда может
+    /// застать замок индекса другого git: её можно просто повторить. То же с
+    /// LFS: два git подряд могут класть один новый файл, и в Windows второй
+    /// получает отказ на переименовании, хотя файл уже на месте.
     pub(crate) fn run_with_input(&self, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+        let (mut filter, mut lock) = (0, 0);
+        loop {
+            let result = self.run_once(args, input);
+            match &result {
+                Err(StoreError::Git { stderr, .. })
+                    if stderr.contains("clean filter") && filter < FILTER_RETRIES =>
+                {
+                    filter += 1;
+                }
+                Err(StoreError::Git { stderr, .. })
+                    if stderr.contains("index.lock") && lock < LOCK_RETRIES =>
+                {
+                    lock += 1;
+                }
+                _ => return result,
+            }
+            std::thread::sleep(RETRY_DELAY);
+        }
+    }
+
+    fn run_once(&self, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
         let mut cmd = self.command(args);
         if input.is_some() {
             cmd.stdin(Stdio::piped());
@@ -101,7 +116,11 @@ impl Git {
         if out.status.success() {
             return Ok(out.stdout);
         }
-        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let mut stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if stderr.is_empty() {
+            // `git commit` говорит «нечего сохранять» в stdout.
+            stderr = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        }
         if stderr.contains("Please tell me who you are")
             || stderr.contains("unable to auto-detect email address")
         {

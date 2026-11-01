@@ -1,4 +1,5 @@
-//! Меню «Файл»: открыть и создать проект, добавить модели, новая деталь.
+//! Меню окна: «Файл» (проект и модели), «Деталь» (что сделать с выбранной),
+//! «Вид» (как показывать).
 
 use std::path::{Path, PathBuf};
 
@@ -6,12 +7,12 @@ use eframe::egui;
 use nonius_core::project::PROJECT_FILE;
 
 use super::new_part::NewPart;
-use super::start::choose_folder;
 use super::App;
+use crate::source::{Other, Pick};
 use crate::texts::texts;
 
 /// Файлы моделей, которые принимает проект.
-const MODEL_FILES: [&str; 4] = ["step", "stp", "sldprt", "sldasm"];
+pub(super) const MODEL_FILES: [&str; 4] = ["step", "stp", "sldprt", "sldasm"];
 
 /// Насколько глубоко искать модели в перетащенной папке.
 const SEARCH_DEPTH: usize = 6;
@@ -25,11 +26,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 ui.set_min_width(220.0);
                 if ui.button(t.add_models).clicked() {
                     ui.close();
-                    app.start_adding(choose_models(), None);
+                    app.start_adding(app.chooser.models(), None);
                 }
                 if ui.button(t.add_folder).clicked() {
                     ui.close();
-                    if let Some(dir) = choose_folder(&app.path_input) {
+                    if let Some(dir) = app.chooser.folder(&app.path_input) {
                         app.start_adding(models_in(&dir), None);
                     }
                 }
@@ -37,21 +38,137 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     ui.close();
                     app.new_part = Some(NewPart::default());
                 }
+                if ui.button(t.deleted_parts).clicked() {
+                    ui.close();
+                    app.show_deleted(ctx);
+                }
                 ui.separator();
                 if ui.button(t.open_project).clicked() {
                     ui.close();
-                    if let Some(dir) = choose_folder(&app.path_input) {
+                    if let Some(dir) = app.chooser.folder(&app.path_input) {
                         app.open(ctx, dir);
                     }
                 }
                 if ui.button(t.create_project).clicked() {
                     ui.close();
-                    if let Some(dir) = choose_folder(&app.path_input) {
+                    if let Some(dir) = app.chooser.folder(&app.path_input) {
                         app.create(ctx, dir, Vec::new());
                     }
                 }
             });
+            ui.add_enabled_ui(app.part.is_some(), |ui| part_menu(app, ui));
+            view_menu(app, ui);
         });
+    });
+}
+
+/// Меню выбранной детали. Действия с версией — про показанную как «Стало».
+fn part_menu(app: &mut App, ui: &mut egui::Ui) {
+    let t = texts();
+    let ctx = ui.ctx().clone();
+    let version = match app.picks.1 {
+        Pick::Version(n) => Some(n),
+        Pick::Current => None,
+    };
+    let latest = app.versions.first().map(|v| v.number);
+    let others: Vec<String> = app
+        .parts
+        .iter()
+        .map(|p| p.name.clone())
+        .filter(|n| Some(n) != app.part.as_ref())
+        .collect();
+    ui.menu_button(t.menu_part, |ui| {
+        ui.set_min_width(240.0);
+        let Some(part) = app.part.clone() else {
+            return;
+        };
+        if ui
+            .add_enabled(app.part_dirty(), egui::Button::new(t.save_version))
+            .clicked()
+        {
+            ui.close();
+            app.start_save(&ctx);
+        }
+        let model = app.parts.iter().find(|p| p.name == part);
+        let replace = model.is_some_and(|p| p.model.is_some());
+        let label = if replace {
+            t.replace_model
+        } else {
+            t.add_model
+        };
+        if ui.button(label).clicked() {
+            ui.close();
+            app.start_adding(app.chooser.models(), Some(part.clone()));
+        }
+        ui.separator();
+        if ui.button(t.compare_file).clicked() {
+            ui.close();
+            if let Some(file) = app.chooser.step() {
+                app.compare_with(&ctx, Other::File(file));
+            }
+        }
+        ui.add_enabled_ui(!others.is_empty(), |ui| {
+            ui.menu_button(t.compare_part, |ui| {
+                for other in others {
+                    if ui.button(&other).clicked() {
+                        ui.close();
+                        app.compare_with(&ctx, Other::Part(other));
+                    }
+                }
+            });
+        });
+        ui.separator();
+        let old = version.filter(|n| Some(*n) != latest);
+        if ui
+            .add_enabled(old.is_some(), egui::Button::new(t.restore_version))
+            .clicked()
+        {
+            ui.close();
+            app.ask_restore(old);
+        }
+        if ui
+            .add_enabled(version.is_some(), egui::Button::new(t.export_version))
+            .clicked()
+        {
+            ui.close();
+            app.export_version(&ctx, version);
+        }
+        ui.separator();
+        if ui.button(t.rename_part).clicked() {
+            ui.close();
+            app.ask_rename(&part);
+        }
+        if ui.button(t.delete_part).clicked() {
+            ui.close();
+            app.ask_delete(&part);
+        }
+    });
+}
+
+/// Меню «Вид»: как показывать деталь.
+fn view_menu(app: &mut App, ui: &mut egui::Ui) {
+    let t = texts();
+    ui.menu_button(t.menu_view, |ui| {
+        ui.set_min_width(220.0);
+        ui.checkbox(&mut app.look.xray, t.xray);
+        ui.checkbox(&mut app.look.edges, t.edges);
+        if ui
+            .checkbox(&mut app.settings.wheel_reverse, t.wheel_reverse)
+            .changed()
+        {
+            app.settings.save();
+        }
+        ui.separator();
+        if ui
+            .add_enabled(
+                app.viewport.model().is_some(),
+                egui::Button::new(t.save_picture),
+            )
+            .clicked()
+        {
+            ui.close();
+            super::toolbar::save_picture(app);
+        }
     });
 }
 
@@ -96,20 +213,6 @@ pub fn models_in(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     walk(dir, SEARCH_DEPTH, &mut out);
     out
-}
-
-#[cfg(windows)]
-pub(super) fn choose_models() -> Vec<PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter(texts().model_files, &MODEL_FILES)
-        .pick_files()
-        .unwrap_or_default()
-}
-
-/// Без системного окна выбора файл не выбрать: модель можно перетащить.
-#[cfg(not(windows))]
-pub(super) fn choose_models() -> Vec<PathBuf> {
-    Vec::new()
 }
 
 #[cfg(test)]

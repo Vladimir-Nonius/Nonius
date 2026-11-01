@@ -20,9 +20,9 @@ use nonius_app::{
 use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
-    AddedModel, Comparison, DiffEntry, DiffKind, FileEntry, FileState, Machine, MassEntry,
-    MaterialEntry, OpenWay, PartEntry, Pick, ProgramEntry, Progress, ProjectSource, Readiness,
-    VersionEntry,
+    AddedModel, Comparison, DeletedEntry, DiffEntry, DiffKind, FileEntry, FileState, Machine,
+    MassEntry, MaterialEntry, OpenWay, Other, PartEntry, Pick, ProgramEntry, Progress,
+    ProjectSource, Readiness, VersionEntry,
 };
 use nonius_scene::Scene;
 
@@ -134,6 +134,12 @@ fn in_words(e: nonius_app::Error) -> anyhow::Error {
         Error::Core(Core::AlreadyExists(_)) => anyhow::anyhow!("такая деталь уже есть"),
         Error::Store(nonius_app::StoreError::Identity) => {
             anyhow::anyhow!("не задано имя автора версий: перезапустите Nonius, он спросит имя")
+        }
+        Error::Store(nonius_app::StoreError::Dirty(part)) => {
+            anyhow::anyhow!("у «{part}» есть несохранённые изменения: сначала сохраните версию")
+        }
+        Error::Store(nonius_app::StoreError::Core(Core::AlreadyExists(_))) => {
+            anyhow::anyhow!("такая деталь уже есть")
         }
         e => e.into(),
     }
@@ -466,6 +472,103 @@ impl ProjectSource for AppSource {
             warnings: imported.warnings,
         })
     }
+
+    fn rename_part(&self, part: &str, new: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app.rename_item(part, new).map_err(in_words)?;
+        Ok(())
+    }
+
+    fn delete_part(&self, part: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app.delete_item(part).map_err(in_words)
+    }
+
+    fn deleted_parts(&self) -> Result<Vec<DeletedEntry>> {
+        let _files = self.reading();
+        Ok(self
+            .app
+            .deleted_items()?
+            .into_iter()
+            .map(|d| DeletedEntry {
+                name: d.name.to_string(),
+                assembly: d.kind == ItemKind::Assembly,
+                date: short_date(&d.date),
+                author: d.author,
+            })
+            .collect())
+    }
+
+    fn recover_part(&self, part: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app.recover_item(part).map_err(in_words)?;
+        Ok(())
+    }
+
+    fn restore_version(&self, part: &str, version: u32) -> Result<u32> {
+        let number = VersionNumber::new(version)?;
+        let _files = self.writing();
+        let done = self.app.restore(part, number, None).map_err(in_words)?;
+        Ok(done.version.get())
+    }
+
+    fn export_version(&self, part: &str, version: u32, dest: &Path) -> Result<usize> {
+        let number = VersionNumber::new(version)?;
+        let _files = self.reading();
+        Ok(self.app.export(part, number, dest)?.1.len())
+    }
+
+    fn compare_outside(
+        &self,
+        part: &str,
+        pick: Pick,
+        other: &Other,
+        progress: &dyn Progress,
+    ) -> Result<Comparison> {
+        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _files = self.reading();
+        let steps = Steps(progress);
+        let (model, model_problem) = self.model_scene(part, pick, &steps);
+        if let Some(scene) = &model {
+            progress.model(scene.clone());
+        }
+        let other = match other {
+            Other::File(path) => nonius_app::Other::File(path),
+            Other::Part(name) => nonius_app::Other::Part(name),
+        };
+        let at = version(pick)?;
+        let options = CompareOptions {
+            reports: true,
+            render: true,
+        };
+        let compared = self.app.compare_outside(part, at, other, &options, &steps);
+        nonius_occt::forget_diff();
+        match compared {
+            Ok(done) => {
+                let (scene, scene_problem) = read_scene(&done.files);
+                Ok(Comparison {
+                    scene: scene.or(model),
+                    scene_problem,
+                    reports: done.reports,
+                    step_behind: false,
+                })
+            }
+            Err(nonius_app::Error::Cancelled) => bail!("сравнение отменено"),
+            Err(nonius_app::Error::NoRenderer) => {
+                let numbers = CompareOptions::default();
+                let done = self
+                    .app
+                    .compare_outside(part, at, other, &numbers, &steps)?;
+                Ok(Comparison {
+                    scene: model,
+                    scene_problem: model_problem,
+                    reports: done.reports,
+                    step_behind: false,
+                })
+            }
+            Err(e) => Err(in_words(e)),
+        }
+    }
 }
 
 /// Запуск без команды. В Windows окно запускается отдельным процессом без
@@ -526,10 +629,14 @@ pub fn open(
         opener: Arc::new(|p: &Path| AppSource::open(p).map_err(plainly)),
         creator: Arc::new(|p: &Path| AppSource::create(p).map_err(plainly)),
         machine: Arc::new(ThisMachine),
+        chooser: Arc::new(nonius_gui::SystemChooser),
         part: part.map(str::to_string),
         picks,
     })
 }
+
+#[cfg(test)]
+mod scenarios;
 
 #[cfg(test)]
 mod tests {

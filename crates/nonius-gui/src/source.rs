@@ -73,6 +73,41 @@ pub struct AddedModel {
     pub warnings: Vec<String>,
 }
 
+/// Удалённая деталь, которую можно вернуть.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedEntry {
+    /// Имя.
+    pub name: String,
+    /// Сборка, а не деталь.
+    pub assembly: bool,
+    /// Когда удалена, для показа.
+    pub date: String,
+    /// Кто удалил.
+    pub author: String,
+}
+
+/// С чем сравнить деталь, не сохраняя.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Other {
+    /// Файл STEP на диске.
+    File(PathBuf),
+    /// Другая деталь, как она есть сейчас.
+    Part(String),
+}
+
+/// Системные окна выбора. Окно спрашивает через этот трейт: на нём держатся
+/// проверки окна, где человека нет.
+pub trait Chooser: Send + Sync {
+    /// Выбрать папку. `typed` — путь из поля ввода, если окна выбора нет.
+    fn folder(&self, typed: &str) -> Option<PathBuf>;
+    /// Выбрать файлы моделей.
+    fn models(&self) -> Vec<PathBuf>;
+    /// Выбрать файл STEP.
+    fn step(&self) -> Option<PathBuf>;
+    /// Куда сохранить картинку с предложенным именем.
+    fn picture(&self, name: &str) -> Option<PathBuf>;
+}
+
 /// Что есть на компьютере для истории версий.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Readiness {
@@ -265,6 +300,26 @@ pub trait ProjectSource: Send + Sync {
     /// сохранить новую версию с описанием `message`. Файл, который не
     /// читается, ничего не меняет.
     fn add_model(&self, file: &Path, part: &str, message: &str) -> anyhow::Result<AddedModel>;
+    /// Переименовать деталь: версии остаются при ней.
+    fn rename_part(&self, part: &str, new: &str) -> anyhow::Result<()>;
+    /// Удалить деталь: она остаётся в истории, несохранённое становится версией.
+    fn delete_part(&self, part: &str) -> anyhow::Result<()>;
+    /// Удалённые детали, новые первыми.
+    fn deleted_parts(&self) -> anyhow::Result<Vec<DeletedEntry>>;
+    /// Вернуть удалённую деталь.
+    fn recover_part(&self, part: &str) -> anyhow::Result<()>;
+    /// Вернуть деталь к версии: появится новая версия. Возвращает её номер.
+    fn restore_version(&self, part: &str, version: u32) -> anyhow::Result<u32>;
+    /// Выгрузить файлы версии в папку. Возвращает, сколько файлов записано.
+    fn export_version(&self, part: &str, version: u32, dest: &Path) -> anyhow::Result<usize>;
+    /// Сравнить деталь с файлом или другой деталью, ничего не сохраняя.
+    fn compare_outside(
+        &self,
+        part: &str,
+        pick: Pick,
+        other: &Other,
+        progress: &dyn Progress,
+    ) -> anyhow::Result<Comparison>;
 }
 
 /// Открывает или создаёт проект по папке: «Открыть проект…», «Создать

@@ -32,7 +32,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         return;
     }
     ui.add_space(8.0);
-    ui.label(RichText::new(t.material_mass).strong());
+    ui.label(RichText::new(t.material_mass).strong())
+        .on_hover_text(t.material_hint);
     let Some((picks, [before, after, now])) = app.masses.clone().filter(|m| m.0 == app.picks)
     else {
         ui.spinner();
@@ -113,7 +114,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if app.custom.open {
         custom(app, ui);
     }
-    ui.label(RichText::new(t.material_hint).weak());
 }
 
 /// Материал детали — из справочника (то же название и та же плотность)?

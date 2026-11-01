@@ -10,9 +10,9 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use nonius_core::compare::{Change, ChangeKind, ChangeReport};
 use nonius_gui::source::{
-    AddedModel, Comparison, DiffEntry, DiffKind, FileEntry, FileState, Machine, MassEntry,
-    MaterialEntry, OpenWay, PartEntry, Pick, ProgramEntry, Progress, ProjectSource, Readiness,
-    VersionEntry,
+    AddedModel, Chooser, Comparison, DeletedEntry, DiffEntry, DiffKind, FileEntry, FileState,
+    Machine, MassEntry, MaterialEntry, OpenWay, Other, PartEntry, Pick, ProgramEntry, Progress,
+    ProjectSource, Readiness, VersionEntry,
 };
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
@@ -260,6 +260,52 @@ impl ProjectSource for Fake {
             warnings: vec!["превью не сделано".into()],
         })
     }
+    fn rename_part(&self, _part: &str, new: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(new != "корпус", "такая деталь уже есть");
+        Ok(())
+    }
+    fn delete_part(&self, _part: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn deleted_parts(&self) -> anyhow::Result<Vec<DeletedEntry>> {
+        Ok(Vec::new())
+    }
+    fn recover_part(&self, _part: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn restore_version(&self, _part: &str, _version: u32) -> anyhow::Result<u32> {
+        Ok(3)
+    }
+    fn export_version(&self, _part: &str, _version: u32, _dest: &Path) -> anyhow::Result<usize> {
+        Ok(2)
+    }
+    fn compare_outside(
+        &self,
+        part: &str,
+        pick: Pick,
+        _other: &Other,
+        progress: &dyn Progress,
+    ) -> anyhow::Result<Comparison> {
+        self.compare(part, pick, Pick::Current, progress)
+    }
+}
+
+/// Окна выбора в тестах: человека нет, отвечать нечем.
+struct NoDialogs;
+
+impl Chooser for NoDialogs {
+    fn folder(&self, _typed: &str) -> Option<PathBuf> {
+        None
+    }
+    fn models(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn step(&self) -> Option<PathBuf> {
+        None
+    }
+    fn picture(&self, _name: &str) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// Компьютер, на котором всё есть, или без имени автора.
@@ -326,6 +372,7 @@ fn window_with(
         opener: Arc::new(|_| anyhow::bail!("не нужно")),
         creator: Arc::new(|_| anyhow::bail!("не нужно")),
         machine: Arc::new(Pc::default()),
+        chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
     };
@@ -424,6 +471,12 @@ fn files_and_numbers_tabs() {
     let mut h = window_with(dir.path(), Arc::default(), opened.clone());
     wait_for(&mut h, "кронштейн");
     h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+
+    // Вкладки свёрнуты, пока их не попросят: 3D важнее.
+    assert!(h.query_by_label_contains("docs/заметка.md").is_none());
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Файлы")
+        .click();
 
     // Изменённый файл идёт первым, у него видно старый и новый размер.
     wait_for(&mut h, "~ docs/заметка.md");
@@ -470,6 +523,9 @@ fn right_click_menu() {
     let mut h = window_with(dir.path(), Arc::default(), opened.clone());
     wait_for(&mut h, "кронштейн");
     h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Файлы")
+        .click();
     wait_for(&mut h, "~ docs/заметка.md");
 
     // Файл версии: меню предупреждает про копию и показывает программы.
@@ -519,6 +575,7 @@ fn window_on(dir: &Path, project: Fake) -> Harness<'static, App> {
         opener: Arc::new(|p| Ok(Box::new(self::fake(p, "Второй")))),
         creator: Arc::new(|_| anyhow::bail!("не нужно")),
         machine: Arc::new(Pc::default()),
+        chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
     })
@@ -561,6 +618,7 @@ fn start_screen_opens_and_creates() {
         opener: Arc::new(|_| anyhow::bail!("не нужно")),
         creator: Arc::new(|p| Ok(Box::new(self::fake(p, "Новый")))),
         machine: Arc::new(Pc::default()),
+        chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
     });
@@ -822,6 +880,7 @@ fn first_start_asks_the_name() {
             no_author: true,
             authors: authors.clone(),
         }),
+        chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
     });

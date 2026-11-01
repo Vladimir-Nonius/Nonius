@@ -16,11 +16,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
+                let ctx = ui.ctx().clone();
                 if app.part.is_some() {
-                    versions(app, ui);
-                    ui.separator();
-                    let changes = app.viewport.model().is_some_and(|m| m.has_changes);
-                    ui.add_enabled_ui(changes, |ui| {
+                    match app.outside_title() {
+                        Some(title) => {
+                            ui.label(RichText::new(title).strong());
+                            if ui.button(t.close_compare).clicked() {
+                                app.close_outside(&ctx);
+                            }
+                        }
+                        None => versions(app, ui),
+                    }
+                    if app.viewport.model().is_some_and(|m| m.has_changes) {
+                        ui.separator();
                         for (mode, label) in [
                             (Mode::Before, t.mode_before),
                             (Mode::Changes, t.mode_changes),
@@ -28,10 +36,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         ] {
                             ui.selectable_value(&mut app.mode, mode, label);
                         }
-                    });
-                    ui.separator();
+                    }
                 }
-                let ctx = ui.ctx().clone();
+                if app.viewport.model().is_none() {
+                    return;
+                }
+                ui.separator();
                 for (view, label, key) in [
                     (StdView::Iso, t.view_iso, 7),
                     (StdView::Front, t.view_front, 1),
@@ -70,6 +80,11 @@ fn versions(app: &mut App, ui: &mut egui::Ui) {
         return;
     }
     let dirty = app.part_dirty();
+    // Одна версия: выбирать не из чего.
+    if let ([v], false) = (app.versions.as_slice(), dirty) {
+        ui.label(format!("v{} · {} · {}", v.number, v.date, v.author));
+        return;
+    }
     let mut choices: Vec<(Pick, String)> = Vec::new();
     if dirty {
         choices.push((Pick::Current, t.current.to_string()));
@@ -112,7 +127,7 @@ pub fn save_picture(app: &mut App) {
         return;
     };
     let name = picture_name(&part, app.picks);
-    let Some(path) = choose_path(&name) else {
+    let Some(path) = app.chooser.picture(&name) else {
         return;
     };
     let result = app
@@ -124,18 +139,4 @@ pub fn save_picture(app: &mut App) {
         Ok(()) => app.notice = Some(format!("{}: {}", t.picture_saved, path.display())),
         Err(e) => app.message = Some(format!("{}: {e:#}", t.error)),
     }
-}
-
-#[cfg(windows)]
-fn choose_path(name: &str) -> Option<std::path::PathBuf> {
-    rfd::FileDialog::new()
-        .set_file_name(name)
-        .add_filter("PNG", &["png"])
-        .save_file()
-}
-
-/// Без системного окна выбора — в текущую папку.
-#[cfg(not(windows))]
-fn choose_path(name: &str) -> Option<std::path::PathBuf> {
-    std::env::current_dir().ok().map(|d| d.join(name))
 }

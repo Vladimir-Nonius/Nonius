@@ -14,6 +14,9 @@ const GREEN: Color32 = Color32::from_rgb(60, 150, 80);
 const RED: Color32 = Color32::from_rgb(200, 70, 70);
 const YELLOW: Color32 = Color32::from_rgb(190, 140, 20);
 
+/// Файлы, которые ведёт сам Nonius: они под строкой «Служебные файлы».
+const SERVICE_FILES: [&str; 3] = ["meta.yaml", "tree.yaml", "preview.png"];
+
 /// Что человек попросил в этом кадре.
 enum Ask {
     Select(String),
@@ -174,31 +177,54 @@ fn list(
     if files.is_empty() {
         ui.label(RichText::new(t.no_files).weak());
     }
+    let (service, own): (Vec<&FileEntry>, Vec<&FileEntry>) = files
+        .iter()
+        .partition(|f| SERVICE_FILES.contains(&f.path.as_str()));
     egui::ScrollArea::vertical()
         .id_salt("file-list")
         .auto_shrink(false)
         .show(ui, |ui| {
-            for f in files {
-                let (mark, color) = look(f.state);
-                let text = format!("{mark} {}   {}", f.path, sizes(f));
-                let mut rich = RichText::new(text);
-                if let Some(c) = color {
-                    rich = rich.color(c);
-                }
-                let on = selected == Some(f.path.as_str());
-                let row = ui.selectable_label(on, rich);
-                if row.clicked() && !on {
-                    *ask = Some(Ask::Select(f.path.clone()));
-                }
-                // Удалённого файла в «Стало» нет: меню берёт его из «Было».
-                let pick = if f.after.is_some() {
-                    place.picks.1
-                } else {
-                    place.picks.0
-                };
-                place.attach(&row, pick, &f.path, asked);
+            for f in own {
+                file_row(ui, f, selected, ask, place, asked);
+            }
+            if !service.is_empty() {
+                egui::CollapsingHeader::new(format!("{} ({})", t.service_files, service.len()))
+                    .id_salt("service-files")
+                    .show(ui, |ui| {
+                        for f in service {
+                            file_row(ui, f, selected, ask, place, asked);
+                        }
+                    });
             }
         });
+}
+
+fn file_row(
+    ui: &mut egui::Ui,
+    f: &FileEntry,
+    selected: Option<&str>,
+    ask: &mut Option<Ask>,
+    place: &MenuPlace,
+    asked: &mut Option<open_menu::Ask>,
+) {
+    let (mark, color) = look(f.state);
+    let text = format!("{mark} {}   {}", f.path, sizes(f));
+    let mut rich = RichText::new(text);
+    if let Some(c) = color {
+        rich = rich.color(c);
+    }
+    let on = selected == Some(f.path.as_str());
+    let row = ui.selectable_label(on, rich);
+    if row.clicked() && !on {
+        *ask = Some(Ask::Select(f.path.clone()));
+    }
+    // Удалённого файла в «Стало» нет: меню берёт его из «Было».
+    let pick = if f.after.is_some() {
+        place.picks.1
+    } else {
+        place.picks.0
+    };
+    place.attach(&row, pick, &f.path, asked);
 }
 
 fn detail(

@@ -1,6 +1,6 @@
 //! Меню правого щелчка по файлу или детали: «Открыть», «Открыть в…»,
-//! «Показать в папке», у детали ещё «Заменить модель…». Список программ
-//! читается в фоне при первом показе.
+//! «Показать в папке», у детали ещё «Заменить модель…», «Переименовать…»,
+//! «Удалить…». Список программ читается в фоне при первом показе.
 
 use std::collections::HashMap;
 
@@ -37,6 +37,10 @@ pub enum Ask {
     Programs(String, String),
     /// Выбрать файл и положить его в деталь.
     ReplaceModel(String),
+    /// Спросить новое имя детали.
+    Rename(String),
+    /// Спросить, удалить ли деталь.
+    Delete(String),
 }
 
 /// Тип файла для списка программ: расширение маленькими буквами.
@@ -83,6 +87,15 @@ pub fn attach(
             };
             if ui.button(label).clicked() {
                 *ask = Some(Ask::ReplaceModel(target.part.clone()));
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(t.rename_part).clicked() {
+                *ask = Some(Ask::Rename(target.part.clone()));
+                ui.close();
+            }
+            if ui.button(t.delete_part).clicked() {
+                *ask = Some(Ask::Delete(target.part.clone()));
                 ui.close();
             }
         }
@@ -138,9 +151,11 @@ impl App {
                     .spawn(ctx, move |_| Done::Programs(kind, project.programs(&path)));
             }
             Some(Ask::ReplaceModel(part)) => {
-                let models = super::file_menu::choose_models();
+                let models = self.chooser.models();
                 self.start_adding(models, Some(part));
             }
+            Some(Ask::Rename(part)) => self.ask_rename(&part),
+            Some(Ask::Delete(part)) => self.ask_delete(&part),
             None => {}
         }
     }

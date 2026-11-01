@@ -63,18 +63,21 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// «Что изменилось» справа: легенда, места изменений, числа, настройки вида.
+/// «Что изменилось» справа: легенда, места изменений, числа. Пока деталь не
+/// выбрана, панели нет: 3D занимает её место.
 pub fn changes(app: &mut App, ctx: &egui::Context) {
     let t = texts();
+    if app.part.is_none() {
+        return;
+    }
     let mut zoom = None;
-    let mut save = false;
     egui::SidePanel::right("changes")
         .default_width(270.0)
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.add_space(6.0);
                 ui.heading(t.what_changed);
-                let single = app.picks.0 == app.picks.1;
+                let single = app.picks.0 == app.picks.1 && app.outside.is_none();
                 if app.jobs.can_cancel() {
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -83,10 +86,11 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                 } else if app.part.is_some() && single {
                     ui.label(RichText::new(t.nothing_to_compare).weak());
                 } else if let (Some(model), Some(_)) = (app.viewport.model(), &app.comparison) {
+                    legend(ui, model, &mut app.look);
                     if model.has_changes {
-                        legend(ui, model, &mut app.look);
                         zoom = places(ui, model, &mut app.selected);
                     } else {
+                        ui.add_space(4.0);
                         ui.label(t.no_shape_changes);
                     }
                 }
@@ -107,28 +111,13 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                         }
                     }
                 }
-                super::material::show(app, ui);
-                ui.add_space(8.0);
-                ui.separator();
-                ui.checkbox(&mut app.look.xray, t.xray);
-                ui.checkbox(&mut app.look.edges, t.edges);
-                if ui
-                    .checkbox(&mut app.settings.wheel_reverse, t.wheel_reverse)
-                    .changed()
-                {
-                    app.settings.save();
-                }
-                ui.add_space(8.0);
-                if ui.button(t.save_picture).clicked() {
-                    save = true;
+                if app.outside.is_none() {
+                    super::material::show(app, ui);
                 }
             });
         });
     if let Some(part) = zoom {
         app.viewport.zoom_to(ctx, part);
-    }
-    if save {
-        super::toolbar::save_picture(app);
     }
 }
 
@@ -139,8 +128,10 @@ fn swatch(ui: &mut egui::Ui, role: Role) {
         .rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
 }
 
-/// Цвета с объёмами; галочка прячет роль.
+/// Цвета видны всегда, даже когда такого изменения нет: иначе не понять, что
+/// значит цвет. С объёмами; галочка прячет роль.
 fn legend(ui: &mut egui::Ui, model: &Model, look: &mut crate::view::Look) {
+    let t = texts();
     for (role, flag) in [
         (Role::Added, &mut look.added),
         (Role::Removed, &mut look.removed),
@@ -152,14 +143,38 @@ fn legend(ui: &mut egui::Ui, model: &Model, look: &mut crate::view::Look) {
             .filter(|p| p.role == role)
             .map(|p| p.volume_mm3)
             .sum();
-        if !model.parts.iter().any(|p| p.role == role) {
-            continue;
-        }
+        let present = model.parts.iter().any(|p| p.role == role);
         ui.horizontal(|ui| {
-            ui.checkbox(flag, "");
+            ui.add_enabled(present, egui::Checkbox::without_text(flag));
             swatch(ui, role);
-            ui.label(format!("{}  {}", role_name(role), volume_text(volume)));
+            if present {
+                ui.label(format!("{}  {}", role_name(role), volume_text(volume)));
+            } else {
+                ui.label(RichText::new(role_name(role)).weak());
+            }
         });
+    }
+    ui.horizontal(|ui| {
+        ui.add_space(ui.spacing().icon_width + ui.spacing().item_spacing.x);
+        swatch(ui, Role::After);
+        ui.label(RichText::new(t.role_same).weak());
+    });
+}
+
+/// Сколько мест показывать по одному. Дальше мелочь сводится строкой.
+const PLACES_SHOWN: usize = 8;
+/// Мелкое место: меньше этой доли от всего изменённого объёма.
+const TINY_SHARE: f64 = 0.01;
+
+/// Какие места сводятся строкой «Мелкие места»: только когда их много.
+fn tiny_places(volumes: &[f64]) -> Vec<bool> {
+    let total: f64 = volumes.iter().sum();
+    let tiny: Vec<bool> = volumes.iter().map(|v| *v < total * TINY_SHARE).collect();
+    let count = tiny.iter().filter(|t| **t).count();
+    if volumes.len() > PLACES_SHOWN && count >= 2 {
+        tiny
+    } else {
+        vec![false; volumes.len()]
     }
 }
 
@@ -185,7 +200,9 @@ fn places(ui: &mut egui::Ui, model: &Model, selected: &mut Option<usize>) -> Opt
             zoom = Some(list[at.map_or(0, |a| (a + 1) % n)]);
         }
     });
-    for &i in &list {
+    let volumes: Vec<f64> = list.iter().map(|&i| model.parts[i].volume_mm3).collect();
+    let tiny = tiny_places(&volumes);
+    let mut row = |ui: &mut egui::Ui, i: usize| {
         let p = &model.parts[i];
         ui.horizontal(|ui| {
             swatch(ui, p.role);
@@ -199,6 +216,28 @@ fn places(ui: &mut egui::Ui, model: &Model, selected: &mut Option<usize>) -> Opt
                 zoom = Some(i);
             }
         });
+    };
+    for (k, &i) in list.iter().enumerate() {
+        if !tiny[k] {
+            row(ui, i);
+        }
+    }
+    let small: Vec<usize> = (0..list.len()).filter(|&k| tiny[k]).collect();
+    if !small.is_empty() {
+        let volume: f64 = small.iter().map(|&k| volumes[k]).sum();
+        let title = format!(
+            "{}: {}, {}",
+            t.tiny_places,
+            small.len(),
+            volume_text(volume)
+        );
+        egui::CollapsingHeader::new(title)
+            .id_salt("tiny-places")
+            .show(ui, |ui| {
+                for &k in &small {
+                    row(ui, list[k]);
+                }
+            });
     }
     if zoom.is_some() {
         *selected = zoom;
@@ -206,9 +245,47 @@ fn places(ui: &mut egui::Ui, model: &Model, selected: &mut Option<usize>) -> Opt
     zoom
 }
 
-/// Надписи поверх 3D: что выбрать, нечего показать, идёт расчёт.
-pub fn overlay(app: &App, ui: &mut egui::Ui) {
+/// Пустой проект или деталь без модели: сказать и дать кнопку.
+fn empty_state(app: &mut App, ui: &mut egui::Ui) -> bool {
     let t = texts();
+    let waiting = app.jobs.busy() || app.add.is_some();
+    let part = app
+        .part
+        .clone()
+        .filter(|p| app.parts.iter().any(|e| e.name == *p && e.model.is_none()));
+    let (text, label) = if app.parts.is_empty() {
+        (t.empty_project, t.add_models)
+    } else if part.is_some() {
+        (t.empty_part, t.add_model)
+    } else {
+        return false;
+    };
+    if waiting {
+        return true;
+    }
+    let rect = ui.max_rect();
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Center)),
+        |ui| {
+            ui.add_space(rect.height() * 0.4);
+            ui.label(RichText::new(text).size(16.0).weak());
+            ui.add_space(8.0);
+            if ui.button(RichText::new(label).size(15.0)).clicked() {
+                app.start_adding(app.chooser.models(), part);
+            }
+        },
+    );
+    true
+}
+
+/// Надписи поверх 3D: что выбрать, нечего показать, идёт расчёт.
+pub fn overlay(app: &mut App, ui: &mut egui::Ui) {
+    let t = texts();
+    if empty_state(app, ui) {
+        return;
+    }
     let problem;
     let text = if !app.viewport.has_gpu() {
         Some(t.gpu_missing)
@@ -231,6 +308,21 @@ pub fn overlay(app: &App, ui: &mut egui::Ui) {
                 .layout(layout),
             |ui| ui.add(egui::Label::new(RichText::new(text).size(16.0).weak()).selectable(false)),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiny_places_fold_only_when_there_are_many() {
+        assert_eq!(tiny_places(&[1000.0, 1.0, 1.0]), [false, false, false]);
+        let mut many = vec![1000.0; 7];
+        many.extend([1.0, 1.0, 1.0]);
+        let folded = tiny_places(&many);
+        assert_eq!(folded.iter().filter(|t| **t).count(), 3);
+        assert!(!folded[0]);
     }
 }
 
