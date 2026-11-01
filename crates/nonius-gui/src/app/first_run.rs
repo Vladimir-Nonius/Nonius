@@ -23,8 +23,7 @@ pub struct FirstRun {
 
 impl FirstRun {
     /// Окошко, если на компьютере чего-то не хватает.
-    pub fn check(machine: Arc<dyn Machine>) -> Option<Self> {
-        let ready = machine.readiness();
+    pub fn check(machine: Arc<dyn Machine>, ready: Readiness) -> Option<Self> {
         (!ready.git || !ready.author).then(|| Self {
             machine,
             ready,

@@ -25,12 +25,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 ui.set_min_width(220.0);
                 if ui.button(t.add_models).clicked() {
                     ui.close();
-                    app.start_adding(ctx, choose_models(), None);
+                    app.start_adding(choose_models(), None);
                 }
                 if ui.button(t.add_folder).clicked() {
                     ui.close();
                     if let Some(dir) = choose_folder(&app.path_input) {
-                        app.start_adding(ctx, models_in(&dir), None);
+                        app.start_adding(models_in(&dir), None);
                     }
                 }
                 if ui.button(t.new_part).clicked() {

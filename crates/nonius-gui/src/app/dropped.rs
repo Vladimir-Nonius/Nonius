@@ -43,7 +43,7 @@ impl App {
         if models.is_empty() {
             self.message = Some(texts().no_models_there.to_string());
         } else if self.project.is_some() {
-            self.start_adding(ctx, models, None);
+            self.start_adding(models, None);
         } else if in_project(first) {
             self.open(ctx, first.parent().unwrap_or(first).to_path_buf());
         } else {

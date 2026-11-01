@@ -121,19 +121,29 @@ fn read_scene(files: &[PathBuf]) -> (Option<Scene>, Option<String>) {
 /// Сказать словами о том, что в командной строке было бы подсказкой.
 fn in_words(e: nonius_app::Error) -> anyhow::Error {
     use nonius_app::Error;
+    use nonius_core::project::PROJECT_FILE;
     use nonius_core::Error as Core;
     match e {
         Error::Core(Core::NotAProject(path)) => anyhow::anyhow!(
             "в папке {} нет проекта Nonius. Выберите другую папку или создайте проект",
             path.display()
         ),
-        Error::Core(Core::AlreadyExists(path)) => {
-            anyhow::anyhow!("это уже есть: {}", path.display())
+        Error::Core(Core::AlreadyExists(path)) if path.ends_with(PROJECT_FILE) => {
+            anyhow::anyhow!("в этой папке уже есть проект: откройте его")
         }
+        Error::Core(Core::AlreadyExists(_)) => anyhow::anyhow!("такая деталь уже есть"),
         Error::Store(nonius_app::StoreError::Identity) => {
             anyhow::anyhow!("не задано имя автора версий: перезапустите Nonius, он спросит имя")
         }
         e => e.into(),
+    }
+}
+
+/// То же для ошибки, уже ставшей общей.
+fn plainly(e: anyhow::Error) -> anyhow::Error {
+    match e.downcast() {
+        Ok(e) => in_words(e),
+        Err(e) => e,
     }
 }
 
@@ -435,7 +445,7 @@ impl ProjectSource for AppSource {
             ItemKind::Part
         };
         let _files = self.writing();
-        self.app.new_item(name, kind)?;
+        self.app.new_item(name, kind).map_err(in_words)?;
         Ok(())
     }
 
@@ -503,12 +513,6 @@ pub fn open(
     };
     // Не в папке проекта — окно откроет последний проект или начальный экран.
     let source = AppSource::open(&start).ok();
-    let open_project = |p: &Path| {
-        AppSource::open(p).map_err(|e| match e.downcast() {
-            Ok(e) => in_words(e),
-            Err(e) => e,
-        })
-    };
     let pick = |v: Option<&str>| -> Result<Option<Pick>> {
         v.map(|v| Ok(Pick::Version(parse_version(v)?.get())))
             .transpose()
@@ -519,8 +523,8 @@ pub fn open(
     };
     nonius_gui::run(nonius_gui::Options {
         project: source,
-        opener: Arc::new(open_project),
-        creator: Arc::new(|p: &Path| AppSource::create(p)),
+        opener: Arc::new(|p: &Path| AppSource::open(p).map_err(plainly)),
+        creator: Arc::new(|p: &Path| AppSource::create(p).map_err(plainly)),
         machine: Arc::new(ThisMachine),
         part: part.map(str::to_string),
         picks,

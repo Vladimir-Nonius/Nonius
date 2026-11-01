@@ -104,6 +104,8 @@ pub struct App {
     after_open: Vec<PathBuf>,
     /// Окошко первого запуска.
     first_run: Option<first_run::FirstRun>,
+    /// Git есть, а Git LFS нет.
+    no_lfs: bool,
     /// Окно было в фокусе в прошлом кадре.
     was_focused: bool,
     /// Вернулись в окно: перечитать детали, как только оно освободится.
@@ -135,6 +137,7 @@ impl App {
             edges: settings.edges,
             ..Look::default()
         };
+        let ready = options.machine.readiness();
         let mut app = Self {
             opener: options.opener,
             creator: options.creator,
@@ -166,7 +169,8 @@ impl App {
             add: None,
             new_here: None,
             after_open: Vec::new(),
-            first_run: first_run::FirstRun::check(options.machine),
+            first_run: first_run::FirstRun::check(options.machine, ready),
+            no_lfs: ready.git && !ready.lfs,
             was_focused: true,
             reread_wanted: false,
             custom: material::Custom::default(),

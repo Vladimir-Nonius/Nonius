@@ -220,12 +220,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 impl App {
     /// Начать добавлять файлы. `part` — положить в эту деталь. Окошко уже
     /// открыто — файлы встают в очередь.
-    pub(super) fn start_adding(
-        &mut self,
-        _ctx: &egui::Context,
-        files: Vec<PathBuf>,
-        part: Option<String>,
-    ) {
+    pub(super) fn start_adding(&mut self, files: Vec<PathBuf>, part: Option<String>) {
         if files.is_empty() {
             return;
         }

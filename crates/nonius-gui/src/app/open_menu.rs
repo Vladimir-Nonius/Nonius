@@ -139,7 +139,7 @@ impl App {
             }
             Some(Ask::ReplaceModel(part)) => {
                 let models = super::file_menu::choose_models();
-                self.start_adding(ctx, models, Some(part));
+                self.start_adding(models, Some(part));
             }
             None => {}
         }

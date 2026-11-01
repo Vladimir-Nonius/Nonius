@@ -51,6 +51,8 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
                 }
             } else if let Some(n) = &app.notice {
                 ui.label(n);
+            } else if app.no_lfs {
+                ui.label(RichText::new(t.no_lfs).weak());
             } else {
                 ui.label(RichText::new(t.mouse_hint).weak());
             }

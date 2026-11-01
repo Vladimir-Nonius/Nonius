@@ -798,7 +798,10 @@ fn first_start_asks_the_name() {
     });
     wait_for(&mut h, "Как вас подписывать?");
     h.run();
-    h.get_by_role(egui::accesskit::Role::TextInput)
+    // На других системах за окошком есть ещё поле пути к проекту.
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.is_focused())
+        .unwrap()
         .type_text("Владимир");
     h.run();
     h.get_by_label("Запомнить").click();

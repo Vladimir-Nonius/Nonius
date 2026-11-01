@@ -41,7 +41,7 @@ impl App {
                 Done::Parts(Ok(parts)) => {
                     self.parts = parts;
                     let models = std::mem::take(&mut self.after_open);
-                    self.start_adding(ctx, models, None);
+                    self.start_adding(models, None);
                     let want = self.want.as_ref().map(|w| w.0.clone());
                     let only = (self.parts.len() == 1).then(|| self.parts[0].name.clone());
                     if let Some(name) = want.or(only) {
