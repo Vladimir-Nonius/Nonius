@@ -41,19 +41,21 @@ pub const COMMANDS: &[&str] = &[
 
 /// Выполнить команду и напечатать ответ.
 pub fn main(cli: &Cli) -> ExitCode {
+    let out = answer(cli);
+    println!("{out}");
+    if out["ok"] == json!(true) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Выполнить команду и вернуть ответ. Здесь же работает сервер MCP.
+pub fn answer(cli: &Cli) -> Value {
     match data(cli) {
-        Ok(Some(data)) => {
-            println!("{}", json!({ "ok": true, "data": data }));
-            ExitCode::SUCCESS
-        }
-        Ok(None) => {
-            print_error("no_json", "эта команда не отвечает в JSON");
-            ExitCode::FAILURE
-        }
-        Err(e) => {
-            print_error(code(&e), &format!("{e:#}"));
-            ExitCode::FAILURE
-        }
+        Ok(Some(data)) => json!({ "ok": true, "data": data }),
+        Ok(None) => failure("no_json", "эта команда не отвечает в JSON"),
+        Err(e) => failure(code(&e), &format!("{e:#}")),
     }
 }
 
@@ -66,13 +68,14 @@ pub fn usage(error: clap::Error) -> ExitCode {
     ) {
         error.exit();
     }
-    print_error("usage", error.to_string().trim());
+    println!("{}", failure("usage", error.to_string().trim()));
     ExitCode::from(2)
 }
 
-fn print_error(code: &str, message: &str) {
+/// Ответ об ошибке.
+pub fn failure(code: &str, message: &str) -> Value {
     let error = json!({ "code": code, "message": message });
-    println!("{}", json!({ "ok": false, "error": error }));
+    json!({ "ok": false, "error": error })
 }
 
 /// Постоянный код ошибки; `failed` — у ошибки нет своего кода.
@@ -200,7 +203,8 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
         Command::Init { .. }
         | Command::Render { .. }
         | Command::View { .. }
-        | Command::Open { .. } => return Ok(None),
+        | Command::Open { .. }
+        | Command::Mcp { .. } => return Ok(None),
     }))
 }
 
