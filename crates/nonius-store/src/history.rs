@@ -6,7 +6,7 @@ use nonius_core::project::{Item, DOCS_DIR};
 use nonius_core::VersionNumber;
 
 use crate::git::literal;
-use crate::message::{commit_message, parse_record, LOG_FORMAT};
+use crate::message::commit_message;
 use crate::{AiActor, FileChange, FileChangeKind, Result, Store, StoreError, VersionInfo};
 
 /// Вывод `git status --porcelain=v1 -z` → изменения с путями от корня проекта.
@@ -41,15 +41,8 @@ pub(crate) fn parse_status(out: &[u8]) -> Vec<FileChange> {
 impl Store {
     /// Все версии детали, новые первыми.
     pub fn versions(&self, item: &Item) -> Result<Vec<VersionInfo>> {
-        let path = self.pathspec(item);
-        let out = self
-            .git
-            .run(&["log", "-z", LOG_FORMAT, "--", &literal(&path)])?;
-        let text = String::from_utf8_lossy(&out);
-        Ok(text
-            .split('\0')
-            .filter_map(|record| parse_record(record, &item.name))
-            .collect())
+        let list = self.versions_of(std::slice::from_ref(item))?;
+        Ok(list.into_iter().next().unwrap_or_default())
     }
 
     /// Последняя версия детали.
@@ -145,7 +138,9 @@ impl Store {
         let path = literal(&self.pathspec(item));
         self.git
             .run(&["rm", "-r", "-q", "--ignore-unmatch", "--", &path])?;
-        self.git.run(&["checkout", &target.commit, "--", &path])?;
+        // Выкладкой, а не `checkout`: версия могла лежать под прежним именем.
+        self.export(item, &target, &item.dir)?;
+        self.git.run(&["add", "-A", "--", &path])?;
         let docs = item.dir.join(DOCS_DIR);
         fs::create_dir_all(&docs).map_err(|e| StoreError::Io {
             path: docs,

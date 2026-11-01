@@ -322,3 +322,205 @@ fn files_between_versions() {
     assert_eq!(added[0].kind, DiffLineKind::Added);
     assert_eq!(added[0].text, "первая строка");
 }
+
+fn name(text: &str) -> PartName {
+    PartName::new(text).unwrap()
+}
+
+/// Деталь с двумя версиями и файлом модели в каждой.
+fn two_versions(part: &str) -> (tempfile::TempDir, Store, nonius_core::project::Item) {
+    let (tmp, store, item) = setup(part);
+    fs::write(item.dir.join("model.step"), "первая форма").unwrap();
+    fs::write(item.dir.join("docs").join("заметка.md"), "строка 1\n").unwrap();
+    store.commit(&item, "первая").unwrap();
+    fs::write(item.dir.join("model.step"), "вторая форма").unwrap();
+    fs::write(item.dir.join("docs").join("заметка.md"), "строка 2\n").unwrap();
+    store.commit(&item, "вторая").unwrap();
+    (tmp, store, item)
+}
+
+#[test]
+fn rename_keeps_versions_and_their_files() {
+    let (_tmp, store, item) = two_versions("кронштейн");
+    let new = store.rename(&item, &name("скоба")).unwrap();
+    assert!(!item.dir.exists());
+    assert!(new.dir.join("model.step").is_file());
+
+    let versions = store.versions(&new).unwrap();
+    assert_eq!(versions.len(), 2);
+    assert_eq!(versions[0].item, name("скоба"));
+    assert!(store.changes(&new).unwrap().is_empty(), "отметка всё взяла");
+    // Старая версия читается из-под прежнего имени.
+    let v1 = store.version(&new, v(1)).unwrap();
+    assert_eq!(
+        store.read_file(&new, &v1, "model.step").unwrap(),
+        "первая форма".as_bytes()
+    );
+    // Весь проект одним проходом видит то же, что деталь отдельно.
+    let all = store.histories(std::slice::from_ref(&new)).unwrap();
+    assert_eq!(all[0].versions, versions);
+
+    // Разница видна и через переименование.
+    let v2 = store.version(&new, v(2)).unwrap();
+    let files = store.files_between(&new, Some(&v1), Some(&v2)).unwrap();
+    assert!(files
+        .iter()
+        .any(|f| f.path == "model.step" && f.change == Some(FileChangeKind::Modified)));
+    fs::write(new.dir.join("новый.txt"), "x").unwrap();
+    let now = store.files_between(&new, Some(&v1), None).unwrap();
+    assert!(now
+        .iter()
+        .any(|f| f.path == "новый.txt" && f.change == Some(FileChangeKind::Added)));
+    assert!(now
+        .iter()
+        .any(|f| f.path == "model.step" && f.change == Some(FileChangeKind::Modified)));
+    let lines = store
+        .text_diff(&new, Some(&v1), Some(&v2), "docs/заметка.md")
+        .unwrap();
+    assert!(lines
+        .iter()
+        .any(|l| l.kind == DiffLineKind::Added && l.text == "строка 2"));
+    fs::write(new.dir.join("docs").join("заметка.md"), "строка 3\n").unwrap();
+    let lines = store
+        .text_diff(&new, Some(&v1), None, "docs/заметка.md")
+        .unwrap();
+    assert!(lines
+        .iter()
+        .any(|l| l.kind == DiffLineKind::Added && l.text == "строка 3"));
+    fs::remove_file(new.dir.join("новый.txt")).unwrap();
+    fs::write(new.dir.join("docs").join("заметка.md"), "строка 2\n").unwrap();
+
+    // Откат к версии с прежним именем и новая версия продолжают номера.
+    let back = store.restore(&new, v(1), None).unwrap();
+    assert_eq!(back.version, v(3));
+    assert_eq!(
+        fs::read_to_string(new.dir.join("model.step")).unwrap(),
+        "первая форма"
+    );
+    assert!(new.dir.join("docs").is_dir());
+}
+
+#[test]
+fn rename_twice_and_name_used_again() {
+    let (_tmp, store, a) = two_versions("а");
+    let b = store.rename(&a, &name("б")).unwrap();
+    fs::write(b.dir.join("model.step"), "третья").unwrap();
+    store.commit(&b, "третья").unwrap();
+    let c = store.rename(&b, &name("в")).unwrap();
+    assert_eq!(store.versions(&c).unwrap().len(), 3);
+
+    // Новая деталь со старым именем чужих версий не получает.
+    let again = store
+        .project()
+        .create_item(ItemKind::Part, &name("а"))
+        .unwrap();
+    assert!(store.versions(&again).unwrap().is_empty());
+    let first = store.commit(&again, "другая деталь").unwrap();
+    assert_eq!(first.version, v(1));
+    assert_eq!(store.versions(&c).unwrap().len(), 3);
+    let list = store.histories(&[again.clone(), c.clone()]).unwrap();
+    assert_eq!(list[0].versions.len(), 1);
+    assert_eq!(list[1].versions.len(), 3);
+}
+
+#[test]
+fn rename_changes_only_the_case() {
+    let (_tmp, store, item) = two_versions("Kronshtein вал");
+    let new = store.rename(&item, &name("KRONSHTEIN Вал")).unwrap();
+    assert_eq!(store.versions(&new).unwrap().len(), 2);
+    let found = store.project().find_item(&name("kronshtein вал")).unwrap();
+    assert_eq!(found.unwrap().name, name("KRONSHTEIN Вал"));
+    assert!(store.changes(&new).unwrap().is_empty());
+}
+
+#[test]
+fn rename_refuses_what_would_be_lost() {
+    let (_tmp, store, item) = two_versions("кронштейн");
+    let other = store
+        .project()
+        .create_item(ItemKind::Part, &name("вал"))
+        .unwrap();
+    assert_eq!(
+        store.rename(&item, &name("ВАЛ")).unwrap_err().code(),
+        "already_exists"
+    );
+    fs::write(item.dir.join("model.step"), "не сохранено").unwrap();
+    assert_eq!(
+        store.rename(&item, &name("скоба")).unwrap_err().code(),
+        "dirty"
+    );
+    assert!(item.dir.is_dir());
+
+    // У детали без версий меняется только папка.
+    let plain = store.rename(&other, &name("ось")).unwrap();
+    assert!(plain.dir.is_dir());
+    assert!(!other.dir.exists());
+}
+
+#[test]
+fn deleted_part_stays_in_history_and_comes_back() {
+    let (_tmp, store, item) = two_versions("кронштейн");
+    fs::write(item.dir.join("model.step"), "не сохранено").unwrap();
+    store.delete(&item).unwrap();
+    assert!(!item.dir.exists());
+    assert!(store.project().items().unwrap().is_empty());
+    let deleted = store.deleted().unwrap();
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].name, item.name);
+    assert_eq!(deleted[0].kind, ItemKind::Part);
+
+    let back = store.recover(&item.name).unwrap();
+    assert!(store.deleted().unwrap().is_empty());
+    assert!(back.dir.join("docs").is_dir());
+    // Несохранённое не пропало: оно стало версией перед удалением.
+    assert_eq!(
+        fs::read_to_string(back.dir.join("model.step")).unwrap(),
+        "не сохранено"
+    );
+    let versions = store.versions(&back).unwrap();
+    assert_eq!(versions.len(), 3);
+    assert!(store.changes(&back).unwrap().is_empty());
+    assert_eq!(
+        store.recover(&item.name).unwrap_err().code(),
+        "already_exists"
+    );
+}
+
+#[test]
+fn new_part_with_the_name_of_deleted_starts_anew() {
+    let (_tmp, store, item) = two_versions("кронштейн");
+    store.delete(&item).unwrap();
+    assert_eq!(
+        store.recover(&name("вал")).unwrap_err().code(),
+        "not_deleted"
+    );
+
+    let again = store
+        .project()
+        .create_item(ItemKind::Part, &item.name)
+        .unwrap();
+    assert!(store.versions(&again).unwrap().is_empty());
+    assert_eq!(store.commit(&again, "новая").unwrap().version, v(1));
+    // Имя занято: сначала надо освободить его.
+    assert_eq!(
+        store.recover(&item.name).unwrap_err().code(),
+        "already_exists"
+    );
+    let other = store.rename(&again, &name("вал")).unwrap();
+    let back = store.recover(&item.name).unwrap();
+    assert_eq!(store.versions(&back).unwrap().len(), 2);
+    assert_eq!(store.versions(&other).unwrap().len(), 1);
+}
+
+#[test]
+fn deleted_assembly_comes_back_as_assembly() {
+    let (_tmp, store, _) = setup("деталь");
+    let item = store
+        .project()
+        .create_item(ItemKind::Assembly, &name("рама"))
+        .unwrap();
+    store.delete(&item).unwrap();
+    let back = store.recover(&item.name).unwrap();
+    assert_eq!(back.kind, ItemKind::Assembly);
+    assert_eq!(back.dir, item.dir);
+}

@@ -79,6 +79,10 @@ pub enum Error {
     #[error("расчёт отменён")]
     Cancelled,
 
+    /// Сравнить форму можно только с файлом STEP.
+    #[error("{0}: сравнить можно только с файлом STEP")]
+    NotStep(PathBuf),
+
     /// Новый проект нельзя создать внутри другого.
     #[error("эта папка уже внутри проекта «{name}» ({root}). Выберите папку вне его")]
     InsideProject {
@@ -125,6 +129,9 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("open_failed", "система не смогла открыть файл"),
     ("cancelled", "расчёт отменён"),
     ("inside_project", "папка уже внутри другого проекта"),
+    ("in_use", "файлы детали открыты в другой программе"),
+    ("not_deleted", "среди удалённых нет такой детали"),
+    ("not_step", "сравнить можно только с файлом STEP"),
 ];
 
 impl Error {
@@ -145,6 +152,7 @@ impl Error {
             Self::OpenFailed { .. } => "open_failed",
             Self::Cancelled => "cancelled",
             Self::InsideProject { .. } => "inside_project",
+            Self::NotStep(_) => "not_step",
         }
     }
 

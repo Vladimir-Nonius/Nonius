@@ -2,12 +2,11 @@
 //! запускаются на весь проект, а не на каждую деталь. На сотнях деталей это
 //! разница между долями секунды и десятками секунд.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use nonius_core::project::Item;
 
 use crate::history::parse_status;
-use crate::message::{parse_any_record, LOG_FORMAT};
 use crate::{FileChange, Result, Store, VersionInfo};
 
 /// Что известно о детали без чтения её файлов.
@@ -22,23 +21,14 @@ pub struct ItemHistory {
 impl Store {
     /// История каждой детали из `items`, в том же порядке.
     pub fn histories(&self, items: &[Item]) -> Result<Vec<ItemHistory>> {
-        let mut list = vec![ItemHistory::default(); items.len()];
-        let by_name: BTreeMap<&str, usize> = items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| (item.name.as_str(), i))
+        let mut list: Vec<ItemHistory> = self
+            .versions_of(items)?
+            .into_iter()
+            .map(|versions| ItemHistory {
+                versions,
+                changes: Vec::new(),
+            })
             .collect();
-        let log = self
-            .git
-            .run(&["log", "-z", LOG_FORMAT, "--grep=^Nonius-Version: "])?;
-        for record in String::from_utf8_lossy(&log).split('\0') {
-            let Some(version) = parse_any_record(record) else {
-                continue;
-            };
-            if let Some(&i) = by_name.get(version.item.as_str()) {
-                list[i].versions.push(version);
-            }
-        }
 
         let paths: Vec<String> = items.iter().map(|item| self.pathspec(item)).collect();
         let by_dir: HashMap<&str, usize> = paths

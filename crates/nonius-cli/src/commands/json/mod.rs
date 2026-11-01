@@ -21,6 +21,10 @@ use view::{change, item, kind, mass, version};
 /// Команды, которые отвечают в JSON. Остальные открывают окна или программы.
 pub const COMMANDS: &[&str] = &[
     "part new",
+    "part rename",
+    "part delete",
+    "part deleted",
+    "part recover",
     "list",
     "info",
     "overview",
@@ -31,6 +35,7 @@ pub const COMMANDS: &[&str] = &[
     "commit",
     "log",
     "diff",
+    "compare",
     "restore",
     "export",
     "files",
@@ -101,6 +106,33 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
             let item = app()?.new_item(name, project::kind_of(*assembly))?;
             json!({ "name": item.name.as_str(), "kind": kind(item.kind) })
         }
+        Command::Part(PartCommand::Rename { name, new }) => {
+            let item = app()?.rename_item(name, new)?;
+            json!({ "name": item.name.as_str(), "kind": kind(item.kind), "was": name })
+        }
+        Command::Part(PartCommand::Delete { name }) => {
+            app()?.delete_item(name)?;
+            json!({ "deleted": name })
+        }
+        Command::Part(PartCommand::Deleted) => {
+            let list: Vec<Value> = app()?
+                .deleted_items()?
+                .iter()
+                .map(|d| {
+                    json!({
+                        "name": d.name.as_str(),
+                        "kind": kind(d.kind),
+                        "date": d.date,
+                        "author": d.author,
+                    })
+                })
+                .collect();
+            json!({ "items": list })
+        }
+        Command::Part(PartCommand::Recover { name }) => {
+            let item = app()?.recover_item(name)?;
+            json!({ "name": item.name.as_str(), "kind": kind(item.kind) })
+        }
         Command::List => {
             let list = app()?.item_list()?;
             let items: Vec<Value> = list
@@ -154,6 +186,17 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
                 "files": files,
                 "empty": c.is_empty(),
             })
+        }
+        Command::Compare {
+            part,
+            version: at,
+            file,
+            with,
+        } => {
+            let other = compare::other(file.as_deref(), with.as_deref())?;
+            let done = compare::outside(&app()?, part, at.as_deref(), other)?;
+            let empty = done.reports.iter().all(|r| r.is_empty());
+            json!({ "item": part, "reports": done.reports, "empty": empty })
         }
         Command::Restore {
             part,

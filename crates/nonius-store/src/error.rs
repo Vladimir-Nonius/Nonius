@@ -67,6 +67,14 @@ pub enum StoreError {
     )]
     Dirty(PartName),
 
+    /// Файл детали держит другая программа, папку не сдвинуть.
+    #[error("«{0}»: файлы детали открыты в другой программе. Закройте их и повторите")]
+    InUse(PartName),
+
+    /// Удалённой детали с таким именем нет.
+    #[error("среди удалённых нет детали «{0}» (список: nonius part deleted)")]
+    NotDeleted(PartName),
+
     /// Имя или модель ИИ нельзя записать в коммит.
     #[error("имя или модель ИИ не годятся: «{0}». Нужна непустая строка без < и >")]
     BadActor(String),
@@ -89,6 +97,8 @@ impl StoreError {
             Self::UnknownVersion { .. } => "unknown_version",
             Self::NoChanges(_) => "no_changes",
             Self::Dirty(_) => "dirty",
+            Self::InUse(_) => "in_use",
+            Self::NotDeleted(_) => "not_deleted",
             Self::BadActor(_) => "bad_actor",
             Self::EmptyMessage => "empty_message",
         }

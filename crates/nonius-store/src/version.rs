@@ -1,5 +1,6 @@
 //! Что хранилище отдаёт наружу: версия детали и изменённые файлы.
 
+use nonius_core::meta::ItemKind;
 use nonius_core::{PartName, VersionNumber};
 
 use crate::{Result, StoreError};
@@ -52,10 +53,13 @@ impl AiActor {
 /// Зафиксированная версия детали.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionInfo {
-    /// Деталь.
+    /// Деталь: её нынешнее имя, даже если версия сделана под прежним.
     pub item: PartName,
     /// Номер версии.
     pub version: VersionNumber,
+    /// Папка детали в этой версии, от корня проекта. После переименования
+    /// старые версии лежат в истории под прежним именем.
+    pub folder: String,
     /// Коммит git.
     pub commit: String,
     /// Автор: человек или ИИ.
@@ -90,6 +94,21 @@ impl VersionInfo {
     pub fn short_commit(&self) -> &str {
         &self.commit[..self.commit.len().min(8)]
     }
+}
+
+/// Удалённая деталь: её файлы и версии остаются в истории.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedItem {
+    /// Имя.
+    pub name: PartName,
+    /// Деталь или сборка.
+    pub kind: ItemKind,
+    /// Коммит удаления.
+    pub commit: String,
+    /// Кто удалил.
+    pub author: String,
+    /// Когда, в формате ISO 8601.
+    pub date: String,
 }
 
 /// Что изменилось в папке детали с последней версии.

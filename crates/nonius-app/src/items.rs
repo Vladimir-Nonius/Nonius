@@ -3,7 +3,7 @@
 use nonius_core::meta::ItemKind;
 use nonius_core::project::Item;
 use nonius_core::PartName;
-use nonius_store::{FileChange, VersionInfo};
+use nonius_store::{DeletedItem, FileChange, VersionInfo};
 
 use crate::{App, Result};
 
@@ -46,6 +46,29 @@ impl App {
     /// Добавить деталь или сборку.
     pub fn new_item(&self, name: &str, kind: ItemKind) -> Result<Item> {
         Ok(self.project.create_item(kind, &PartName::new(name)?)?)
+    }
+
+    /// Удалить деталь. Файлы и версии остаются в истории, несохранённое
+    /// сохраняется версией: деталь можно вернуть.
+    pub fn delete_item(&self, name: &str) -> Result<()> {
+        Ok(self.store()?.delete(&self.item(name)?)?)
+    }
+
+    /// Удалённые детали, которые можно вернуть, новые первыми.
+    pub fn deleted_items(&self) -> Result<Vec<DeletedItem>> {
+        Ok(self.store()?.deleted()?)
+    }
+
+    /// Вернуть удалённую деталь такой, какой она была перед удалением.
+    pub fn recover_item(&self, name: &str) -> Result<Item> {
+        Ok(self.store()?.recover(&PartName::new(name)?)?)
+    }
+
+    /// Переименовать деталь. Её версии остаются при ней; несохранённое надо
+    /// сначала сохранить.
+    pub fn rename_item(&self, name: &str, new: &str) -> Result<Item> {
+        let item = self.item(name)?;
+        Ok(self.store()?.rename(&item, &PartName::new(new)?)?)
     }
 
     /// Детали и сборки без статуса: быстро и без git.

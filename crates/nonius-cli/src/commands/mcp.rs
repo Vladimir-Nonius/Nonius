@@ -17,8 +17,16 @@ use crate::commands::json::{self, COMMANDS};
 const PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// Команды, которые что-то меняют. `material` меняет, только если назначает.
-const WRITING: [&str; 6] = [
-    "part new", "import", "commit", "restore", "export", "agents",
+const WRITING: [&str; 9] = [
+    "part new",
+    "part rename",
+    "part delete",
+    "part recover",
+    "import",
+    "commit",
+    "restore",
+    "export",
+    "agents",
 ];
 
 /// Подпись, если клиент не назвал себя.
