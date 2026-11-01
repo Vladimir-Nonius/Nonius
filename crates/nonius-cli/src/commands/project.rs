@@ -32,13 +32,18 @@ pub fn init(path: Option<&PathBuf>, name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `nonius part new`.
-pub fn part_new(app: &App, name: &str, assembly: bool) -> Result<()> {
-    let kind = if assembly {
+/// Сборка или деталь по ключу `--assembly`.
+pub fn kind_of(assembly: bool) -> ItemKind {
+    if assembly {
         ItemKind::Assembly
     } else {
         ItemKind::Part
-    };
+    }
+}
+
+/// `nonius part new`.
+pub fn part_new(app: &App, name: &str, assembly: bool) -> Result<()> {
+    let kind = kind_of(assembly);
     let item = app.new_item(name, kind)?;
     println!("Добавлено: {} ({})", item.name, kind_word(kind));
     Ok(())

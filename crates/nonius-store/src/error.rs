@@ -75,3 +75,22 @@ pub enum StoreError {
     #[error("нужно описание версии: -m \"что и почему изменено\"")]
     EmptyMessage,
 }
+
+impl StoreError {
+    /// Постоянный код для программ: не меняется вместе с текстом сообщения.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Core(e) => e.code(),
+            Self::GitMissing => "git_missing",
+            Self::Identity => "git_identity",
+            Self::Git { .. } => "git_failed",
+            Self::Io { .. } => "io",
+            Self::UnknownItem(_) => "unknown_item",
+            Self::UnknownVersion { .. } => "unknown_version",
+            Self::NoChanges(_) => "no_changes",
+            Self::Dirty(_) => "dirty",
+            Self::BadActor(_) => "bad_actor",
+            Self::EmptyMessage => "empty_message",
+        }
+    }
+}

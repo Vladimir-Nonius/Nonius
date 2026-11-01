@@ -20,6 +20,10 @@ pub struct Cli {
     #[arg(long, global = true, env = "NONIUS_AI_MODEL", value_name = "МОДЕЛЬ")]
     pub ai_model: Option<String>,
 
+    /// Ответить в JSON для программ и ИИ (какие команды умеют: nonius describe).
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -49,6 +53,8 @@ pub enum Command {
     },
     /// Подключённые модули.
     Modules,
+    /// Все команды, параметры и коды ошибок в JSON: для программ и ИИ.
+    Describe,
     /// Добавить файл модели (STEP, SLDPRT, SLDASM) в деталь.
     Import {
         /// Файл модели.

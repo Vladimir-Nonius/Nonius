@@ -21,6 +21,7 @@ nonius-scene.workspace = true
 nonius-gui.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,18 +1,18 @@
 //! `nonius material` и `nonius materials`: материал, плотность, масса.
 
 use anyhow::Result;
-use nonius_app::{App, Mass, MaterialChoice, MATERIALS};
+use nonius_app::{App, Mass, MaterialChoice, Passport, MATERIALS};
 use nonius_core::meta::PartMeta;
 
-/// `nonius material`: без материала — показать паспорт, иначе назначить.
-pub fn material(
+/// Без материала — прочитать паспорт, иначе назначить или убрать.
+pub fn apply(
     app: &App,
     part: &str,
     material: Option<&str>,
     density: Option<f64>,
     remove: bool,
-) -> Result<()> {
-    let passport = match (material, remove) {
+) -> Result<Passport> {
+    Ok(match (material, remove) {
         (_, true) => app.set_material(part, None)?,
         (Some(name), false) => app.set_material(
             part,
@@ -22,7 +22,18 @@ pub fn material(
             }),
         )?,
         (None, false) => app.passport(part, None)?,
-    };
+    })
+}
+
+/// `nonius material`.
+pub fn material(
+    app: &App,
+    part: &str,
+    material: Option<&str>,
+    density: Option<f64>,
+    remove: bool,
+) -> Result<()> {
+    let passport = apply(app, part, material, density, remove)?;
     let meta = &passport.meta;
     println!("«{}»", passport.item);
     match (&meta.material, meta.density_kg_m3) {

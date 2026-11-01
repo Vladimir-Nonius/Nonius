@@ -72,6 +72,19 @@ pub enum Error {
 }
 
 impl Error {
+    /// Постоянный код для программ: не меняется вместе с текстом сообщения.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Io { .. } => "io",
+            Self::Yaml { .. } => "bad_yaml",
+            Self::UnsupportedSchema { .. } => "unsupported_schema",
+            Self::InvalidName { .. } => "invalid_name",
+            Self::NotAProject(_) => "not_a_project",
+            Self::AlreadyExists(_) => "already_exists",
+            Self::Module { .. } => "module",
+        }
+    }
+
     pub(crate) fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
             path: path.into(),

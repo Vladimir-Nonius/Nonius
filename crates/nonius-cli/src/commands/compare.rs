@@ -9,7 +9,7 @@ use nonius_core::VersionNumber;
 
 use crate::format::{marker, parse_version};
 
-fn versions(
+pub fn versions(
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<(Option<VersionNumber>, Option<VersionNumber>)> {
