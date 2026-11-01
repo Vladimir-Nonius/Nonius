@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, Color32, RichText};
 
+use super::jobs::Done;
 use super::open_menu::{self, Target};
 use super::App;
 use crate::source::{PartEntry, Pick};
@@ -78,6 +79,42 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         app.list_versions(ctx, &name);
     }
     app.answer_menu(ctx, asked);
+}
+
+impl App {
+    /// Раскрыть деталь в дереве, не выбирая её.
+    pub(super) fn list_versions(&mut self, ctx: &egui::Context, name: &str) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let name = name.to_string();
+        self.jobs.spawn(ctx, move |_| {
+            let v = project.versions(&name);
+            Done::Listed(name, v)
+        });
+    }
+
+    /// Новый список деталей: раскрытые, что изменились, перечитать.
+    pub(super) fn set_parts(&mut self, ctx: &egui::Context, parts: Vec<PartEntry>) {
+        let old = std::mem::replace(&mut self.parts, parts);
+        let names = self.parts.iter().map(|p| p.name.clone());
+        let names: std::collections::BTreeSet<String> = names.collect();
+        self.expanded.retain(|n| names.contains(n));
+        self.listed.retain(|n, _| names.contains(n));
+        let stale: Vec<String> = self
+            .expanded
+            .iter()
+            .filter(|n| Some(*n) != self.part.as_ref())
+            .filter(|n| {
+                let entry = |list: &[PartEntry]| list.iter().find(|p| p.name == **n).cloned();
+                entry(&old) != entry(&self.parts)
+            })
+            .cloned()
+            .collect();
+        for name in stale {
+            self.list_versions(ctx, &name);
+        }
+    }
 }
 
 /// Подходит ли деталь под поиск: без учёта регистра.

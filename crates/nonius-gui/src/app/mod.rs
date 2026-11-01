@@ -13,6 +13,7 @@ mod files;
 mod first_run;
 mod history;
 mod jobs;
+mod legend;
 mod map;
 mod material;
 mod model_names;
@@ -21,6 +22,7 @@ mod numbers;
 mod open_menu;
 mod panels;
 mod part_actions;
+mod part_dialogs;
 mod results;
 mod save;
 mod settings;
@@ -101,7 +103,7 @@ pub struct App {
     /// С чем сравнивается деталь вне истории: имя файла или детали.
     outside: Option<String>,
     /// Открытое окошко действия над деталью.
-    dialog: Option<part_actions::Dialog>,
+    dialog: Option<part_dialogs::Dialog>,
     materials: Vec<MaterialEntry>,
     /// Материал и масса для пары версий: «Было», «Стало», сейчас.
     masses: Option<((Pick, Pick), [MassEntry; 3])>,
@@ -232,7 +234,7 @@ impl eframe::App for App {
         save::show(self, ctx);
         new_part::show(self, ctx);
         add_model::show(self, ctx);
-        part_actions::show(self, ctx);
+        part_dialogs::show(self, ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {

@@ -159,12 +159,13 @@ impl Desk {
     }
 
     fn type_in(&mut self, text: &str) {
-        let inputs = self.h.get_all_by_role(Role::TextInput);
-        let field = inputs
-            .filter(|i| i.accesskit_node().is_focused())
-            .last()
-            .expect("курсор в поле");
-        field.type_text(text);
+        {
+            let mut inputs = self.h.get_all_by_role(Role::TextInput);
+            let field = inputs
+                .rfind(|i| i.accesskit_node().is_focused())
+                .expect("курсор в поле");
+            field.type_text(text);
+        }
         self.settle();
     }
 
@@ -250,9 +251,8 @@ fn whole_way_of_a_part() {
 
     // Цвета на настоящей геометрии.
     if nonius_occt::available() {
-        d.wait("Добавлено");
-        d.wait("Убрано");
         d.wait("Без изменений");
+        d.wait("Места изменений");
     }
 
     // Вкладки по щелчку: модель видно, служебное спрятано.
@@ -301,6 +301,9 @@ fn whole_way_of_a_part() {
     d.menu("Деталь", "Сравнить с файлом…");
     d.wait("v2 → плита.step");
     d.wait_gone("Считаю изменения");
+    if nonius_occt::available() {
+        d.wait("Места изменений");
+    }
     assert_eq!(saved_versions(&project, "плита основания").len(), 3);
     d.press("Закрыть сравнение");
     d.wait_gone("v2 → плита.step");

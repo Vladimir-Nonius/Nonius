@@ -527,6 +527,9 @@ fn right_click_menu() {
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Файлы")
         .click();
     wait_for(&mut h, "~ docs/заметка.md");
+    for _ in 0..4 {
+        h.step();
+    }
 
     // Файл версии: меню предупреждает про копию и показывает программы.
     h.get_by_label_contains("~ docs/заметка.md")

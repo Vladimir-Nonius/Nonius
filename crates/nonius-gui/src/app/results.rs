@@ -4,7 +4,7 @@
 use eframe::egui;
 
 use super::jobs::Done;
-use super::part_actions::Dialog;
+use super::part_dialogs::Dialog;
 use super::App;
 use crate::source::{default_picks, Pick, VersionEntry};
 use crate::texts::texts;

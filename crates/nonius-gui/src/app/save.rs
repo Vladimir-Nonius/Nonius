@@ -171,7 +171,7 @@ fn summary(app: &App, part: &str) -> Option<Vec<(String, Option<Color32>)>> {
                 .sum();
             if volume > 0.0 {
                 let [r, g, b] = role.color();
-                let name = super::panels::role_name(role).to_lowercase();
+                let name = super::legend::role_name(role).to_lowercase();
                 lines.push((
                     format!("{sign} {name} {}", volume_text(volume)),
                     Some(Color32::from_rgb(r, g, b)),
