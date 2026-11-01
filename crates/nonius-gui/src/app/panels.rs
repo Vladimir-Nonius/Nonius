@@ -1,18 +1,13 @@
-//! Панели вокруг 3D-вида: детали слева, «Что изменилось» справа, строка
+//! Панели вокруг 3D-вида: «Что изменилось» справа, строка
 //! состояния внизу и надписи поверх вида.
 
 use eframe::egui::{self, Color32, RichText};
 use nonius_scene::Role;
 
 use super::numbers::{change_line, volume_text};
-use super::open_menu::{self, Target};
 use super::App;
-use crate::source::Pick;
 use crate::texts::texts;
 use crate::view::Model;
-
-/// Паспорт детали: он есть всегда, даже без файла модели.
-const META_FILE: &str = nonius_core::project::META_FILE;
 
 /// Строка состояния: ход работы и «Отменить», ошибка, что получилось или
 /// подсказка по мыши.
@@ -44,65 +39,6 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     if cancel {
         app.cancel_compare(ctx);
     }
-}
-
-/// Детали слева, под ними — история выбранной детали.
-pub fn parts(app: &mut App, ctx: &egui::Context) {
-    let t = texts();
-    let mut clicked = None;
-    let mut asked = None;
-    egui::SidePanel::left("parts")
-        .default_width(220.0)
-        .show(ctx, |ui| {
-            if let Some(p) = &app.project {
-                ui.add_space(6.0);
-                ui.heading(p.title());
-            }
-            ui.label(RichText::new(t.parts).strong());
-            ui.separator();
-            if app.parts.is_empty() && !app.jobs.busy() {
-                ui.label(RichText::new(t.no_parts).weak());
-            }
-            egui::ScrollArea::vertical()
-                .id_salt("parts")
-                .max_height(ui.available_height() * 0.4)
-                .show(ui, |ui| {
-                    for p in &app.parts {
-                        let mut text = p.name.clone();
-                        if let Some(v) = &p.latest {
-                            text = format!("{text}   {v}");
-                        }
-                        if p.assembly {
-                            text = format!("{text}  ({})", t.assembly);
-                        }
-                        let mut rich = RichText::new(text);
-                        if p.dirty {
-                            rich = rich.color(Color32::from_rgb(200, 120, 0));
-                        }
-                        let selected = app.part.as_ref() == Some(&p.name);
-                        let mut r = ui.selectable_label(selected, rich);
-                        if p.dirty {
-                            r = r.on_hover_text(t.unsaved_changes);
-                        }
-                        if r.clicked() && !selected {
-                            clicked = Some(p.name.clone());
-                        }
-                        let target = || Target {
-                            part: p.name.clone(),
-                            pick: Pick::Current,
-                            // Папку детали можно показать и без файла модели.
-                            path: p.model.clone().unwrap_or_else(|| META_FILE.to_string()),
-                            openable: p.model.is_some(),
-                        };
-                        open_menu::attach(&r, &app.programs, target, &mut asked);
-                    }
-                });
-            super::history::show(app, ui);
-        });
-    if let Some(name) = clicked {
-        app.select_part(ctx, &name);
-    }
-    app.answer_menu(ctx, asked);
 }
 
 /// «Что изменилось» справа: легенда, места изменений, числа, настройки вида.

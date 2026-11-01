@@ -221,9 +221,15 @@ pub trait ProjectSource: Send + Sync {
     ) -> anyhow::Result<PathBuf>;
     /// Программы, которые система знает для такого файла.
     fn programs(&self, path: &str) -> Vec<ProgramEntry>;
+    /// Создать пустую деталь или сборку.
+    fn new_part(&self, name: &str, assembly: bool) -> anyhow::Result<()>;
+    /// Положить файл модели в деталь `part`; `None` — деталь по имени файла.
+    /// Возвращает имя детали и предупреждения.
+    fn import(&self, file: &Path, part: Option<&str>) -> anyhow::Result<(String, Vec<String>)>;
 }
 
-/// Открывает проект по папке (для «Открыть папку проекта…» и перетаскивания).
+/// Открывает или создаёт проект по папке: «Открыть проект…», «Создать
+/// проект…», перетаскивание.
 pub type Opener = Arc<dyn Fn(&Path) -> anyhow::Result<Box<dyn ProjectSource>> + Send + Sync>;
 
 /// Что сравнить по умолчанию: изменённое — с последней версией; иначе —

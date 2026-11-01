@@ -34,6 +34,7 @@ impl MenuPlace<'_> {
             pick,
             path: path.to_string(),
             openable: true,
+            model_slot: false,
         }
     }
 

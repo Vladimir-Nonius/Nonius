@@ -1,5 +1,5 @@
-//! Начальный экран, пока проект не открыт: кнопка «Открыть папку проекта…»
-//! и перетаскивание папки в окно.
+//! Начальный экран, пока проект не открыт: «Открыть проект…», «Создать
+//! проект…» и перетаскивание папки в окно.
 
 use eframe::egui::{self, RichText};
 
@@ -22,6 +22,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if ui.add(open).clicked() {
                 if let Some(dir) = choose_folder(&app.path_input) {
                     app.open(ctx, dir);
+                }
+            }
+            ui.add_space(6.0);
+            let create = egui::Button::new(RichText::new(t.create_project).size(16.0));
+            if ui.add(create).clicked() {
+                if let Some(dir) = choose_folder(&app.path_input) {
+                    app.create(ctx, dir);
                 }
             }
             ui.add_space(6.0);
@@ -51,12 +58,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 }
 
 #[cfg(windows)]
-fn choose_folder(_typed: &str) -> Option<std::path::PathBuf> {
+pub(super) fn choose_folder(_typed: &str) -> Option<std::path::PathBuf> {
     rfd::FileDialog::new().pick_folder()
 }
 
 /// Без системного окна выбора: путь из поля ввода.
 #[cfg(not(windows))]
-fn choose_folder(typed: &str) -> Option<std::path::PathBuf> {
+pub(super) fn choose_folder(typed: &str) -> Option<std::path::PathBuf> {
     looks_like_dir(typed).then(|| typed.trim().into())
 }

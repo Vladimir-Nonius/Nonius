@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockEr
 
 use anyhow::{bail, Context, Result};
 use nonius_app::{
-    is_text_file, App, CompareOptions, DiffLineKind, FileChangeKind, Mass, MaterialChoice,
+    is_text_file, App, CompareOptions, DiffLineKind, FileChangeKind, History, Mass, MaterialChoice,
     MATERIALS,
 };
 use nonius_core::meta::ItemKind;
@@ -43,6 +43,16 @@ impl AppSource {
             busy: Mutex::new(()),
             files: RwLock::new(()),
         }))
+    }
+
+    /// Создать проект в папке, название — имя папки. Проект без истории
+    /// версий окну не нужен: сохранить в нём было бы нельзя.
+    fn create(path: &Path) -> Result<Box<dyn ProjectSource>> {
+        let created = nonius_app::create_project(path, None)?;
+        if let History::Off(why) = created.history {
+            bail!("проект создан, но история версий не включена: {why}");
+        }
+        Self::open(path)
     }
 
     fn reading(&self) -> RwLockReadGuard<'_, ()> {
@@ -329,6 +339,25 @@ impl ProjectSource for AppSource {
             })
             .collect()
     }
+
+    fn new_part(&self, name: &str, assembly: bool) -> Result<()> {
+        let kind = if assembly {
+            ItemKind::Assembly
+        } else {
+            ItemKind::Part
+        };
+        let _files = self.writing();
+        self.app.new_item(name, kind)?;
+        Ok(())
+    }
+
+    fn import(&self, file: &Path, part: Option<&str>) -> Result<(String, Vec<String>)> {
+        // Импорт читает STEP, а OpenCascade работает по одному.
+        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _files = self.writing();
+        let imported = self.app.import(file, part)?;
+        Ok((imported.item.name.to_string(), imported.warnings))
+    }
 }
 
 /// Запуск без команды. В Windows окно запускается отдельным процессом без
@@ -387,6 +416,7 @@ pub fn open(
     nonius_gui::run(nonius_gui::Options {
         project: source,
         opener: Arc::new(|p: &Path| AppSource::open(p)),
+        creator: Arc::new(|p: &Path| AppSource::create(p)),
         part: part.map(str::to_string),
         picks,
     })
@@ -489,6 +519,40 @@ mod tests {
             .compare("кронштейн", Pick::Version(2), Pick::Current, &cancelled)
             .unwrap_err();
         assert!(format!("{e:#}").contains("отменен"), "{e:#}");
+    }
+
+    #[test]
+    fn project_and_model_from_the_window() {
+        for (k, v) in [
+            ("GIT_AUTHOR_NAME", "Тестировщик"),
+            ("GIT_AUTHOR_EMAIL", "test@example.com"),
+            ("GIT_COMMITTER_NAME", "Тестировщик"),
+            ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ] {
+            std::env::set_var(k, v);
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path().join("Станок");
+        std::fs::create_dir(&d).unwrap();
+        let src = AppSource::create(&d).unwrap();
+        assert_eq!(src.title(), "Станок", "название — имя папки");
+        assert!(
+            AppSource::create(&d).is_err(),
+            "второй раз проект не создаётся"
+        );
+
+        src.new_part("корпус", true).unwrap();
+        assert!(src.new_part("корпус", false).is_err(), "имя занято");
+        let step = tmp.path().join("пластина.step");
+        std::fs::write(&step, STEP).unwrap();
+        let (name, _) = src.import(&step, None).unwrap();
+        assert_eq!(name, "пластина");
+        let (name, _) = src.import(&step, Some("корпус")).unwrap();
+        assert_eq!(name, "корпус");
+        let parts = src.parts().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|p| p.model.is_some()), "{parts:?}");
+        assert!(parts.iter().any(|p| p.name == "корпус" && p.assembly));
     }
 
     #[test]

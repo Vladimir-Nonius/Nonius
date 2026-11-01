@@ -1,5 +1,6 @@
 //! Меню правого щелчка по файлу или детали: «Открыть», «Открыть в…»,
-//! «Показать в папке». Список программ читается в фоне при первом показе.
+//! «Показать в папке», у детали ещё «Заменить модель…». Список программ
+//! читается в фоне при первом показе.
 
 use std::collections::HashMap;
 
@@ -24,6 +25,8 @@ pub struct Target {
     pub path: String,
     /// Файл можно открыть. Иначе в меню только папка.
     pub openable: bool,
+    /// Щёлкнули по детали: её модель можно заменить.
+    pub model_slot: bool,
 }
 
 /// Что попросили в этом кадре.
@@ -32,6 +35,8 @@ pub enum Ask {
     Open(Target, OpenWay),
     /// Прочитать программы для типа файла.
     Programs(String, String),
+    /// Выбрать файл и положить его в деталь.
+    ReplaceModel(String),
 }
 
 /// Тип файла для списка программ: расширение маленькими буквами.
@@ -68,6 +73,18 @@ pub fn attach(
         if ui.button(t.show_in_folder).clicked() {
             *ask = Some(Ask::Open(target.clone(), OpenWay::Folder));
             ui.close();
+        }
+        if target.model_slot {
+            ui.separator();
+            let label = if target.openable {
+                t.replace_model
+            } else {
+                t.add_model
+            };
+            if ui.button(label).clicked() {
+                *ask = Some(Ask::ReplaceModel(target.part.clone()));
+                ui.close();
+            }
         }
     });
 }
@@ -119,6 +136,11 @@ impl App {
                 self.programs.insert(kind.clone(), None);
                 self.jobs
                     .spawn(ctx, move |_| Done::Programs(kind, project.programs(&path)));
+            }
+            Some(Ask::ReplaceModel(part)) => {
+                if let Some(file) = super::project_bar::choose_model() {
+                    self.import(ctx, file, Some(part));
+                }
             }
             None => {}
         }

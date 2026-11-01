@@ -69,10 +69,7 @@ fn versions(app: &mut App, ui: &mut egui::Ui) {
         ui.label(RichText::new(t.no_versions).weak());
         return;
     }
-    let dirty = app
-        .parts
-        .iter()
-        .any(|p| Some(&p.name) == app.part.as_ref() && p.dirty);
+    let dirty = app.part_dirty();
     let mut choices: Vec<(Pick, String)> = Vec::new();
     if dirty {
         choices.push((Pick::Current, t.current.to_string()));
