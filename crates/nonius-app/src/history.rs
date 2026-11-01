@@ -1,8 +1,9 @@
-//! История детали: версии, сохранить версию, откатить, выгрузить.
+//! История: версии детали, сохранить, откатить, выгрузить; правила для ИИ.
 
 use std::path::{Path, PathBuf};
 
 use nonius_core::extension::Event;
+use nonius_core::project::AGENTS_FILE;
 use nonius_core::VersionNumber;
 use nonius_store::VersionInfo;
 
@@ -56,6 +57,17 @@ impl App {
         let v = store.version(&item, version)?;
         let files = store.export(&item, &v, dest)?;
         Ok((v, files))
+    }
+
+    /// Обновить правила для ИИ в `AGENTS.md` и зафиксировать файл. Текст людей
+    /// остаётся. Возвращает `true`, если файл изменился.
+    pub fn update_agents(&self) -> Result<bool> {
+        let changed = self.project.update_agents()?;
+        if changed {
+            let message = "AGENTS.md: правила для ИИ обновлены\n\nСоздано Nonius.\n";
+            self.store()?.commit_project_file(AGENTS_FILE, message)?;
+        }
+        Ok(changed)
     }
 
     /// Сообщить модулям о новой версии. Ошибка обработчика не отменяет версию.

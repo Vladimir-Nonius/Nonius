@@ -102,6 +102,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Info => project::info(&app()?)?,
         Command::Overview { changed } => project::overview(&app()?, *changed)?,
         Command::Modules => project::modules(&registry()),
+        Command::Agents => project::agents(&app()?)?,
         Command::Describe => println!("{}", describe::describe()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
         Command::Status { part } => history::status(&app()?, part.as_deref())?,

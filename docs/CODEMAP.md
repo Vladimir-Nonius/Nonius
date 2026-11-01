@@ -21,6 +21,7 @@
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
 | Программы для файла, запуск, показ в папке | `nonius-app/src/system/` (`windows.rs`, запасной `other.rs`) |
 | Меню правого щелчка | `nonius-gui/src/app/open_menu.rs` |
+| Правила для ИИ в проекте | `nonius-core/src/project/agents.rs` |
 | Формат сообщения коммита, подпись ИИ | `nonius-store/src/message.rs`, `version.rs` (`AiActor`) |
 | Статус всего проекта одним проходом | `nonius-store/src/overview.rs`, `nonius-app/src/items.rs` |
 | Новый модуль (крейт) | `nonius-core/src/extension/traits.rs`, `extension/manifest.rs`, `contract.rs`; пример — `nonius-step/src/lib.rs` |
@@ -54,7 +55,8 @@
 | `meta.rs` | `meta.yaml` — паспорт версии: геометрия, материал, свойства |
 | `tree.rs` | `tree.yaml` — дерево построения |
 | `project/mod.rs` | папка проекта, `project.yaml`, детали и сборки |
-| `project/templates.rs` | `.gitattributes` и `AGENTS.md` нового проекта |
+| `project/templates.rs` | `.gitattributes` нового проекта |
+| `project/agents.rs` | `AGENTS.md` проекта: правила для ИИ, обновление блока между метками |
 | `extension/manifest.rs` | манифест модуля, точки расширения, права, версия API |
 | `extension/traits.rs` | трейты точек (`GeometrySource`, `Comparator`, …), `Snapshot`, `Event` |
 | `extension/registry.rs` | реестр модулей и проверка при подключении |
@@ -185,7 +187,7 @@
 | `window.rs` | окно: `nonius` без команды, `nonius view`, мост от `nonius-app` к окну (`AppSource`) |
 | `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
-| `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `modules` |
+| `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `agents`, `modules` |
 | `commands/import.rs` | `import` |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `export` |
 | `commands/files.rs` | `files`, `open` |
