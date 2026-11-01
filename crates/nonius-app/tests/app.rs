@@ -104,6 +104,7 @@ fn fixture(with_renderer: bool) -> Fixture {
     }
     let app = App::with_project(project, reg).with_git_options(GitOptions {
         identity: Some(("Тестировщик".into(), "test@example.com".into())),
+        ai: None,
     });
     Fixture {
         _tmp: tmp,
@@ -318,7 +319,7 @@ fn compare_uses_cache() {
         .compare("пластина", Some(v(1)), Some(v(2)), &opts, &NoProgress)
         .unwrap();
     assert_eq!(c.to_label(), "v2");
-    assert!(c.file_changes.is_empty());
+    assert!(c.file_changes.iter().any(|c| c.path == "model.step"));
     assert!(!c.is_empty());
 }
 

@@ -137,7 +137,7 @@ impl ProjectSource for AppSource {
             .map(|v| VersionEntry {
                 number: v.version.get(),
                 date: short_date(&v.date),
-                author: v.author.clone(),
+                author: v.signature(),
                 summary: v.summary().to_string(),
             })
             .collect();

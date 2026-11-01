@@ -12,12 +12,14 @@
 //! Nonius-Version: v3
 //! ```
 //!
+//! Версию, сделанную ИИ, отмечают ещё строки `Nonius-AI` и `Nonius-AI-Model`.
+//!
 //! Поэтому историю можно смотреть и обычным `git log`, а бинарные файлы
 //! (STEP, SLDPRT, PDF) хранятся через Git LFS по `.gitattributes` проекта.
 //! Ничего не удаляется: откат создаёт новую версию.
 //!
 //! Файлы: здесь — открытие хранилища, `history.rs` — версии, фиксация и
-//! откат, `files.rs` — файлы версии и снимки, `message.rs` — сообщение
+//! откат, `overview.rs` — история всего проекта за один проход, `files.rs` — файлы версии и снимки, `message.rs` — сообщение
 //! коммита, `version.rs` — типы версий, `git.rs` — запуск git, `workdir.rs` —
 //! служебная папка `.git/nonius` и запись в неё целыми папками.
 
@@ -27,6 +29,7 @@ mod files;
 mod git;
 mod history;
 mod message;
+mod overview;
 mod version;
 pub mod workdir;
 
@@ -36,13 +39,18 @@ use nonius_core::{PartName, Project};
 pub use diff::is_text_file;
 pub use error::{Result, StoreError};
 use git::{git_path, Git};
-pub use version::{DiffLine, DiffLineKind, FileChange, FileChangeKind, VersionFile, VersionInfo};
+pub use overview::ItemHistory;
+pub use version::{
+    AiActor, DiffLine, DiffLineKind, FileChange, FileChangeKind, VersionFile, VersionInfo,
+};
 
 /// Настройки доступа к git.
 #[derive(Debug, Clone, Default)]
 pub struct GitOptions {
     /// Имя и почта автора версий. Если не заданы — берутся из настроек git.
     pub identity: Option<(String, String)>,
+    /// ИИ, от имени которого делаются версии. Если не задан — делает человек.
+    pub ai: Option<AiActor>,
 }
 
 /// Хранилище версий проекта.
@@ -50,6 +58,7 @@ pub struct Store {
     project: Project,
     git: Git,
     lfs: bool,
+    ai: Option<AiActor>,
 }
 
 impl Store {
@@ -67,7 +76,13 @@ impl Store {
             git.run(&["lfs", "install", "--local"])?;
         }
 
-        let store = Self { project, git, lfs };
+        let ai = options.ai.clone();
+        let store = Self {
+            project,
+            git,
+            lfs,
+            ai,
+        };
         if !store.git.ok(&["rev-parse", "-q", "--verify", "HEAD"]) {
             store.initial_commit()?;
         }

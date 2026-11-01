@@ -25,6 +25,8 @@ pub struct ItemStatus {
     pub item: Item,
     /// Последняя версия, если есть.
     pub latest: Option<VersionInfo>,
+    /// Сколько всего версий.
+    pub versions: usize,
     /// Изменённые файлы с последней версии.
     pub changes: Vec<FileChange>,
 }
@@ -51,12 +53,24 @@ impl App {
         Ok(self.project.items()?)
     }
 
-    /// Все детали и сборки со статусом.
+    /// Все детали и сборки со статусом. git запускается дважды на весь
+    /// проект, а не на каждую деталь.
     pub fn items(&self) -> Result<Vec<ItemStatus>> {
-        self.item_list()?
+        let items = self.item_list()?;
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let histories = self.store()?.histories(&items)?;
+        Ok(items
             .into_iter()
-            .map(|i| self.status_of(i))
-            .collect()
+            .zip(histories)
+            .map(|(item, h)| ItemStatus {
+                latest: h.versions.first().cloned(),
+                versions: h.versions.len(),
+                changes: h.changes,
+                item,
+            })
+            .collect())
     }
 
     /// Статус одной детали.
@@ -75,8 +89,10 @@ impl App {
     }
 
     fn status_of(&self, item: Item) -> Result<ItemStatus> {
+        let versions = self.store()?.versions(&item)?;
         Ok(ItemStatus {
-            latest: self.latest(&item)?,
+            latest: versions.first().cloned(),
+            versions: versions.len(),
             changes: self.changes(&item)?,
             item,
         })

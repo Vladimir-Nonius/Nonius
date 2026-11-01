@@ -12,6 +12,14 @@ pub struct Cli {
     #[arg(short = 'C', long, global = true)]
     pub project: Option<PathBuf>,
 
+    /// Действует ИИ: его имя пишется автором версии. Запустивший человек тоже остаётся в истории.
+    #[arg(long, global = true, env = "NONIUS_AI", value_name = "ИМЯ")]
+    pub ai: Option<String>,
+
+    /// Модель ИИ: пишется в версию рядом с именем.
+    #[arg(long, global = true, env = "NONIUS_AI_MODEL", value_name = "МОДЕЛЬ")]
+    pub ai_model: Option<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -33,6 +41,12 @@ pub enum Command {
     List,
     /// Сведения о проекте.
     Info,
+    /// Весь проект одним ответом: детали, последние версии, что не сохранено.
+    Overview {
+        /// Только детали с несохранёнными изменениями.
+        #[arg(long)]
+        changed: bool,
+    },
     /// Подключённые модули.
     Modules,
     /// Добавить файл модели (STEP, SLDPRT, SLDASM) в деталь.

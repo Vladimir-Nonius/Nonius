@@ -67,7 +67,7 @@ pub struct Comparison {
     pub to: Option<VersionNumber>,
     /// Отчёты модулей сравнения.
     pub reports: Vec<ChangeReport>,
-    /// Изменённые файлы детали (только когда «стало» — текущее состояние).
+    /// Файлы детали, которые изменились между «было» и «стало».
     pub file_changes: Vec<FileChange>,
     /// Файлы отрисовщиков (если просили `render`). Лежат в кэше: не меняйте
     /// их, а копируйте.
@@ -256,9 +256,14 @@ impl App {
         if !out.from_cache {
             cache::prune(&self.cache_dir(), cache::KEEP_ENTRIES);
         }
-        if to.is_none() {
-            out.file_changes = store.changes(&item)?;
-        }
+        out.file_changes = match after {
+            None => store.changes(&item)?,
+            Some(_) => store
+                .files_between(&item, Some(before), after)?
+                .into_iter()
+                .filter_map(|f| f.change.map(|kind| FileChange { kind, path: f.path }))
+                .collect(),
+        };
         Ok(out)
     }
 

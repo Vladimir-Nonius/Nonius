@@ -6,20 +6,45 @@ use nonius_core::project::{Item, DOCS_DIR};
 use nonius_core::VersionNumber;
 
 use crate::git::literal;
-use crate::message::{commit_message, parse_record};
-use crate::{FileChange, FileChangeKind, Result, Store, StoreError, VersionInfo};
+use crate::message::{commit_message, parse_record, LOG_FORMAT};
+use crate::{AiActor, FileChange, FileChangeKind, Result, Store, StoreError, VersionInfo};
+
+/// Вывод `git status --porcelain=v1 -z` → изменения с путями от корня проекта.
+pub(crate) fn parse_status(out: &[u8]) -> Vec<FileChange> {
+    let text = String::from_utf8_lossy(out);
+    let mut entries = text.split('\0').filter(|e| !e.is_empty());
+    let mut changes = Vec::new();
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let (code, file) = entry.split_at(3);
+        let code = code.as_bytes();
+        if matches!(code[0], b'R' | b'C') {
+            entries.next(); // старое имя при переименовании
+        }
+        let kind = if code[0] == b'?' || code[0] == b'A' {
+            FileChangeKind::Added
+        } else if code[0] == b'D' || code[1] == b'D' {
+            FileChangeKind::Deleted
+        } else {
+            FileChangeKind::Modified
+        };
+        changes.push(FileChange {
+            kind,
+            path: file.to_string(),
+        });
+    }
+    changes
+}
 
 impl Store {
     /// Все версии детали, новые первыми.
     pub fn versions(&self, item: &Item) -> Result<Vec<VersionInfo>> {
         let path = self.pathspec(item);
-        let out = self.git.run(&[
-            "log",
-            "-z",
-            "--format=%H%x1f%an%x1f%aI%x1f%B",
-            "--",
-            &literal(&path),
-        ])?;
+        let out = self
+            .git
+            .run(&["log", "-z", LOG_FORMAT, "--", &literal(&path)])?;
         let text = String::from_utf8_lossy(&out);
         Ok(text
             .split('\0')
@@ -54,28 +79,12 @@ impl Store {
             "--",
             &literal(&path),
         ])?;
-        let text = String::from_utf8_lossy(&out);
         let prefix = format!("{path}/");
-        let mut entries = text.split('\0').filter(|e| !e.is_empty());
-        let mut changes = Vec::new();
-        while let Some(entry) = entries.next() {
-            if entry.len() < 4 {
-                continue;
+        let mut changes = parse_status(&out);
+        for c in &mut changes {
+            if let Some(rel) = c.path.strip_prefix(&prefix) {
+                c.path = rel.to_string();
             }
-            let (code, file) = entry.split_at(3);
-            let code = code.as_bytes();
-            if matches!(code[0], b'R' | b'C') {
-                entries.next(); // старое имя при переименовании
-            }
-            let kind = if code[0] == b'?' || code[0] == b'A' {
-                FileChangeKind::Added
-            } else if code[0] == b'D' || code[1] == b'D' {
-                FileChangeKind::Deleted
-            } else {
-                FileChangeKind::Modified
-            };
-            let rel = file.strip_prefix(&prefix).unwrap_or(file).to_string();
-            changes.push(FileChange { kind, path: rel });
         }
         changes.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(changes)
@@ -96,11 +105,14 @@ impl Store {
         };
         let path = literal(&self.pathspec(item));
         self.git.run(&["add", "-A", "--", &path])?;
-        let text = commit_message(&item.name, next, message);
-        self.git.run_with_input(
-            &["commit", "-q", "-F", "-", "--", &path],
-            Some(text.as_bytes()),
-        )?;
+        let text = commit_message(&item.name, next, message, self.ai.as_ref());
+        let author = self.ai.as_ref().map(AiActor::git_author);
+        let mut args = vec!["commit", "-q", "-F", "-"];
+        if let Some(author) = &author {
+            args.extend(["--author", author]);
+        }
+        args.extend(["--", &path]);
+        self.git.run_with_input(&args, Some(text.as_bytes()))?;
         self.version(item, next)
     }
 

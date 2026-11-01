@@ -20,7 +20,8 @@
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
 | Программы для файла, запуск, показ в папке | `nonius-app/src/system/` (`windows.rs`, запасной `other.rs`) |
 | Меню правого щелчка | `nonius-gui/src/app/open_menu.rs` |
-| Формат сообщения коммита | `nonius-store/src/message.rs` |
+| Формат сообщения коммита, подпись ИИ | `nonius-store/src/message.rs`, `version.rs` (`AiActor`) |
+| Статус всего проекта одним проходом | `nonius-store/src/overview.rs`, `nonius-app/src/items.rs` |
 | Новый модуль (крейт) | `nonius-core/src/extension/traits.rs`, `extension/manifest.rs`, `contract.rs`; пример — `nonius-step/src/lib.rs` |
 | Поле в `meta.yaml` / `tree.yaml` / `project.yaml` | `nonius-core/src/meta.rs` / `tree.rs` / `project/mod.rs` + `schema.rs` (миграция) |
 | Сравнение паспортов (числа, материал, свойства) | `nonius-core/src/compare/meta.rs`, формат отчёта — `compare/mod.rs` |
@@ -70,8 +71,9 @@
 | `history.rs` | список версий, изменения, `commit`, `restore` |
 | `files.rs` | файлы версии, `export`, кэш версий, `snapshot` |
 | `diff.rs` | разница между версиями: файлы, размеры, строки текста |
-| `message.rs` | сообщение коммита и строки `Nonius-Item` / `Nonius-Version` |
-| `version.rs` | `VersionInfo`, `FileChange` |
+| `overview.rs` | история и изменения всех деталей за один проход |
+| `message.rs` | сообщение коммита, строки `Nonius-Item` / `Nonius-Version` / `Nonius-AI` |
+| `version.rs` | `VersionInfo`, `AiActor`, `FileChange` |
 | `git.rs` | запуск системного `git` |
 | `workdir.rs` | служебная папка `.git/nonius`, запись в неё целыми папками (временная папка → переименование) |
 | `error.rs` | ошибки хранилища |
@@ -182,7 +184,7 @@
 | `window.rs` | окно: `nonius` без команды, `nonius view`, мост от `nonius-app` к окну (`AppSource`) |
 | `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
-| `commands/project.rs` | `init`, `part new`, `list`, `info`, `modules` |
+| `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `modules` |
 | `commands/import.rs` | `import` |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `export` |
 | `commands/files.rs` | `files`, `open` |
