@@ -98,3 +98,10 @@ impl App {
         })
     }
 }
+
+impl App {
+    /// Отпечаток модели и паспорта детали: окно замечает правки извне.
+    pub fn stamp(&self, item: &Item) -> String {
+        crate::cache::model_fingerprint(&item.dir, true).unwrap_or_default()
+    }
+}

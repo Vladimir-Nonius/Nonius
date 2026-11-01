@@ -4,7 +4,7 @@ use nonius_core::compare::{Change, ChangeKind, ChangeReport, CompareContext};
 use nonius_core::extension::{Comparator, ExtensionPoint, Module, ModuleManifest, Snapshot};
 use nonius_core::Result;
 
-use super::{manifest, model_pair, module_err, same_bytes, GeometryDiff};
+use super::{manifest, model_pair, module_err, same_bytes, shared_diff};
 
 /// Сравнение формы через булевы операции: сколько материала добавлено и убрано.
 pub struct GeometryComparator {
@@ -66,8 +66,7 @@ impl Comparator for GeometryComparator {
         if same_bytes(&a, &b) {
             return Ok(report);
         }
-        let diff = GeometryDiff::of_files(&a, &b, ctx.tolerance_mm)
-            .map_err(|e| module_err(Self::ID, e))?;
+        let diff = shared_diff(&a, &b, ctx.tolerance_mm).map_err(|e| module_err(Self::ID, e))?;
         if diff.has_added() {
             report.changes.push(Change {
                 kind: ChangeKind::Added,

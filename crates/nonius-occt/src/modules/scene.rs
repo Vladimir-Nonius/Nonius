@@ -7,7 +7,9 @@ use nonius_core::extension::{ExtensionPoint, Module, ModuleManifest, Renderer, S
 use nonius_core::{Error, Result};
 use nonius_scene::{Mesh, Region, Role, Scene};
 
-use super::{deflection, manifest, model_pair, module_err, same_bytes, GeometryDiff, ANGULAR};
+use super::{
+    deflection, manifest, model_pair, module_err, same_bytes, shared_diff, GeometryDiff, ANGULAR,
+};
 use crate::render;
 use crate::shape::Shape;
 use crate::{OcctError, CHANGES_GLB, SCENE_RENDERER};
@@ -86,7 +88,7 @@ fn scene_of(before: &Path, after: &Path) -> std::result::Result<Scene, OcctError
         return Ok(shape_scene(&Shape::read_step(after)?));
     }
     let tolerance = CompareContext::default().tolerance_mm;
-    Ok(GeometryDiff::of_files(before, after, tolerance)?.scene())
+    Ok(shared_diff(before, after, tolerance)?.scene())
 }
 
 /// Сцена изменений для окна: `changes.glb` с местами изменений.

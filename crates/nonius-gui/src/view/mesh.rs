@@ -108,8 +108,13 @@ fn vertices(m: &Mesh) -> Vec<Vertex> {
         .collect()
 }
 
+/// Треугольник у отрезка: его нормаль и исходные точки отрезка.
+type Side = (Vec3, [u32; 2]);
+
 /// Рёбра детали: где грани сходятся под углом и где у поверхности край.
-/// Точки сшиваются по положению, потому что грани не делят вершины.
+/// Точки сшиваются по положению, потому что грани не делят вершины. Вершины
+/// общие только внутри одной грани, поэтому отрезок с общими вершинами — след
+/// разбиения кривой поверхности на треугольники, а не ребро.
 fn edges(m: &Mesh, size: f32) -> Vec<[f32; 3]> {
     let step = (size * 1e-5).max(1e-6);
     let mut weld: HashMap<[i64; 3], u32> = HashMap::new();
@@ -123,8 +128,8 @@ fn edges(m: &Mesh, size: f32) -> Vec<[f32; 3]> {
         })
         .collect();
 
-    // Ребро (по сшитым точкам) → нормали треугольников и одна пара исходных точек.
-    let mut sides: HashMap<(u32, u32), (Vec<Vec3>, [u32; 2])> = HashMap::new();
+    // Ребро (по сшитым точкам) → нормали и исходные точки треугольников.
+    let mut sides: HashMap<(u32, u32), Vec<Side>> = HashMap::new();
     for t in &m.triangles {
         let n = face_normal(m, t).normalize_or_zero();
         for k in 0..3 {
@@ -136,9 +141,8 @@ fn edges(m: &Mesh, size: f32) -> Vec<[f32; 3]> {
             let key = (wa.min(wb), wa.max(wb));
             sides
                 .entry(key)
-                .or_insert_with(|| (Vec::new(), [a, b]))
-                .0
-                .push(n);
+                .or_default()
+                .push((n, [a.min(b), a.max(b)]));
         }
     }
 
@@ -147,14 +151,15 @@ fn edges(m: &Mesh, size: f32) -> Vec<[f32; 3]> {
     let mut keys: Vec<_> = sides.keys().copied().collect();
     keys.sort_unstable();
     for key in keys {
-        let (normals, [a, b]) = &sides[&key];
-        let sharp = match normals.as_slice() {
-            [x, y] => x.dot(*y) < cos_limit,
+        let list = &sides[&key];
+        let real = match list.as_slice() {
+            [(x, p), (y, q)] => p != q && x.dot(*y) < cos_limit,
             _ => true,
         };
-        if sharp {
-            out.push(m.positions[*a as usize]);
-            out.push(m.positions[*b as usize]);
+        if real {
+            let [a, b] = list[0].1;
+            out.push(m.positions[a as usize]);
+            out.push(m.positions[b as usize]);
         }
     }
     out
@@ -205,6 +210,28 @@ pub(crate) mod tests {
             assert!((axis - 1.0).abs() < 1e-5, "нормаль вдоль оси: {n}");
         }
         assert_eq!(p.triangles().count(), 12);
+    }
+
+    #[test]
+    fn folds_inside_one_face_are_not_edges() {
+        // Грубая дуга одной грани: излом 90°, но вершины общие.
+        let inside = Mesh {
+            positions: vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 10.0, 0.0],
+                [10.0, 0.0, 0.0],
+                [10.0, 10.0, 0.0],
+                [10.0, 0.0, 10.0],
+                [10.0, 10.0, 10.0],
+            ],
+            triangles: vec![[0, 2, 1], [1, 2, 3], [2, 4, 3], [3, 4, 5]],
+        };
+        let found = edges(&inside, 20.0);
+        let on_fold = found
+            .chunks_exact(2)
+            .any(|e| e[0][0] == 10.0 && e[0][2] == 0.0 && e[1][0] == 10.0 && e[1][2] == 0.0);
+        assert!(!on_fold, "линия сгиба — не ребро: {found:?}");
+        assert_eq!(found.len(), 2 * 6, "края поверхности остаются");
     }
 
     #[test]

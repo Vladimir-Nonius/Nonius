@@ -1,7 +1,7 @@
 //! Что окно делает по просьбе человека: открыть проект, выбрать деталь и
 //! версии, сравнить, сохранить версию, назначить материал. Долгое — в фоне.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use eframe::egui;
@@ -20,11 +20,12 @@ impl App {
         self.jobs.spawn(ctx, move |_| Done::Opened(opener(&path)));
     }
 
-    /// Создать проект в папке (в фоне) и открыть его.
-    pub(super) fn create(&mut self, ctx: &egui::Context, path: PathBuf) {
+    /// Создать проект в папке (в фоне), открыть его и добавить модели.
+    pub(super) fn create(&mut self, ctx: &egui::Context, path: PathBuf, models: Vec<PathBuf>) {
         let creator = self.creator.clone();
         self.message = None;
         self.want = None;
+        self.after_open = models;
         self.jobs.spawn(ctx, move |_| Done::Opened(creator(&path)));
     }
 
@@ -45,9 +46,12 @@ impl App {
         self.select(None);
         self.viewport.set_model(None, false);
         self.shown = None;
+        self.framed = None;
         self.picks = (Pick::Current, Pick::Current);
         self.material_busy = false;
         self.new_part = None;
+        self.add = None;
+        self.new_here = None;
         self.sticky = None;
         self.search.clear();
         self.jobs.spawn(ctx, move |_| Done::Parts(project.parts()));
@@ -81,6 +85,38 @@ impl App {
         self.file_text = None;
     }
 
+    /// Заметить возврат в окно: модель могли поправить в SolidWorks.
+    pub(super) fn notice_focus(&mut self, ctx: &egui::Context) {
+        let focused = ctx.input(|i| i.focused);
+        self.reread_wanted |= focused && !self.was_focused;
+        self.was_focused = focused;
+        let free = !self.jobs.busy() && self.save.is_none() && self.add.is_none();
+        if let (true, true, Some(project)) = (self.reread_wanted, free, self.project.clone()) {
+            self.reread_wanted = false;
+            self.jobs.spawn(ctx, move |_| Done::Reread(project.parts()));
+        }
+    }
+
+    /// Пришёл свежий список деталей. Если выбранная изменилась — показать
+    /// заново; если её больше нет — снять выбор.
+    pub(super) fn got_parts(&mut self, ctx: &egui::Context, parts: Vec<crate::source::PartEntry>) {
+        let find = |list: &[crate::source::PartEntry], name: &str| {
+            list.iter().find(|p| p.name == name).cloned()
+        };
+        let chosen = self.part.clone();
+        let before = chosen.as_deref().and_then(|n| find(&self.parts, n));
+        let after = chosen.as_deref().and_then(|n| find(&parts, n));
+        self.parts = parts;
+        if chosen.is_some() && after.is_none() {
+            self.select(None);
+            self.viewport.set_model(None, false);
+            self.shown = None;
+        } else if before != after {
+            self.shown = None;
+            self.refresh(ctx);
+        }
+    }
+
     /// Перечитать детали и версии выбранной детали после сохранения или
     /// смены материала. Показ остаётся, пока не придёт новое сравнение.
     pub(super) fn refresh(&mut self, ctx: &egui::Context) {
@@ -110,6 +146,12 @@ impl App {
         };
         let picks = self.picks;
         self.notice = None;
+        // Старые цвета и числа — не про эту пару версий: пока считаем, их нет.
+        self.comparison = None;
+        self.selected = None;
+        if self.shown.as_ref() != Some(&(part.clone(), picks)) {
+            self.viewport.set_model(None, false);
+        }
         let (p, name) = (project, part);
         self.jobs.spawn_cancellable(ctx, move |progress| {
             let result = p.compare(&name, picks.0, picks.1, progress);
@@ -141,23 +183,18 @@ impl App {
         });
     }
 
-    /// «Отменить» в строке состояния: бросить сравнение и вернуть пару
-    /// версий, которая сейчас на экране.
+    /// «Отменить» в строке состояния: бросить сравнение и вернуться к паре
+    /// версий, которая была показана последней. Она в кэше, это быстро.
     pub(super) fn cancel_compare(&mut self, ctx: &egui::Context) {
         if !self.jobs.cancel() {
             return;
         }
-        if let Some((name, picks)) = &self.shown {
-            if self.part.as_ref() == Some(name) {
-                self.picks = *picks;
-            }
-        }
-        // Масса читалась для брошенной пары — перечитать для показанной.
-        if self.masses.as_ref().is_none_or(|m| m.0 != self.picks) {
-            self.load_masses(ctx);
-        }
-        if self.files.as_ref().is_none_or(|f| f.0 != self.picks) {
-            self.load_files(ctx);
+        let last = self
+            .shown
+            .clone()
+            .filter(|s| self.part.as_ref() == Some(&s.0));
+        if let Some((_, picks)) = last.filter(|s| s.1 != self.picks) {
+            self.show_picks(ctx, picks);
         }
         self.notice = Some(texts().compare_cancelled.to_string());
     }
@@ -235,27 +272,6 @@ impl App {
         });
     }
 
-    /// Положить модель в деталь `part`; `None` — новая деталь по имени
-    /// файла. Такая деталь уже есть — её модель не затирается без спроса.
-    pub(super) fn import(&mut self, ctx: &egui::Context, file: PathBuf, part: Option<String>) {
-        let t = texts();
-        let Some(project) = self.project.clone() else {
-            return;
-        };
-        if part.is_none() {
-            if let Some(name) = part_name(&file).filter(|n| self.parts.iter().any(|p| p.name == *n))
-            {
-                self.message = Some(format!("«{name}»: {}", t.part_exists));
-                return;
-            }
-        }
-        self.message = None;
-        self.jobs.spawn(ctx, move |progress| {
-            progress.step(t.importing);
-            Done::Imported(project.import(&file, part.as_deref()))
-        });
-    }
-
     /// Деталь появилась или изменилась: перечитать список и выбрать её.
     /// `text` остаётся в строке состояния и после нового сравнения.
     pub(super) fn reload_on(&mut self, ctx: &egui::Context, part: String, text: String) {
@@ -264,6 +280,8 @@ impl App {
         };
         self.want = Some((part, None));
         self.sticky = Some(text);
+        // Новая деталь не должна спрятаться за старым поиском.
+        self.search.clear();
         self.jobs.spawn(ctx, move |_| Done::Parts(project.parts()));
     }
 
@@ -276,9 +294,4 @@ impl App {
             s.save();
         }
     }
-}
-
-/// Имя детали, которое получит модель из файла.
-fn part_name(file: &Path) -> Option<String> {
-    Some(file.file_stem()?.to_string_lossy().into_owned())
 }

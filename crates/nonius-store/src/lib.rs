@@ -28,6 +28,7 @@ mod error;
 mod files;
 mod git;
 mod history;
+mod machine;
 mod message;
 mod overview;
 mod version;
@@ -39,6 +40,7 @@ use nonius_core::{PartName, Project};
 pub use diff::is_text_file;
 pub use error::{Result, StoreError};
 use git::{git_path, Git};
+pub use machine::{readiness, set_author, Readiness};
 pub use overview::ItemHistory;
 pub use version::{
     AiActor, DiffLine, DiffLineKind, FileChange, FileChangeKind, VersionFile, VersionInfo,

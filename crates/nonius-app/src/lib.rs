@@ -13,7 +13,8 @@
 //! `system/` — программы системы, запуск, показ в папке,
 //! `import.rs` — импорт модели, `passport.rs` — паспорт и масса,
 //! `materials.rs` — справочник плотностей, `compare.rs` — сравнение,
-//! `cache.rs` — кэш сравнений, `error.rs` — ошибки.
+//! `model_view.rs` — показ детали без сравнения, `cache.rs` — кэш сравнений,
+//! `error.rs` — ошибки.
 
 mod cache;
 mod compare;
@@ -23,6 +24,7 @@ mod history;
 mod import;
 mod items;
 mod materials;
+mod model_view;
 mod passport;
 mod system;
 
@@ -43,9 +45,10 @@ pub use passport::{Mass, MaterialChoice, Passport};
 pub use system::{programs_for, OpenWay, Program};
 
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.
+pub use nonius_store::workdir::work_dir;
 pub use nonius_store::{
-    is_text_file, AiActor, DiffLine, DiffLineKind, FileChange, FileChangeKind, GitOptions,
-    StoreError, VersionFile, VersionInfo,
+    is_text_file, readiness, set_author, AiActor, DiffLine, DiffLineKind, FileChange,
+    FileChangeKind, GitOptions, Readiness, StoreError, VersionFile, VersionInfo,
 };
 
 /// Открытый проект и подключённые модули.
@@ -137,6 +140,13 @@ pub enum History {
 /// Создать проект в папке `root`. Название по умолчанию — имя папки.
 /// Сразу включает историю версий (git + LFS), если получается.
 pub fn create_project(root: &Path, name: Option<&str>) -> Result<Created> {
+    let full = std::path::absolute(root).map_err(|e| Error::io(root, e))?;
+    if let Some(outer) = full.parent().and_then(|p| Project::discover(p).ok()) {
+        return Err(Error::InsideProject {
+            name: outer.config().name.clone(),
+            root: outer.root().to_path_buf(),
+        });
+    }
     let name = match name {
         Some(n) => n.to_string(),
         None => root

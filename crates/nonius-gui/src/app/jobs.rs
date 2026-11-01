@@ -10,9 +10,11 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
+use nonius_scene::Scene;
+
 use crate::source::{
-    Comparison, DiffEntry, FileEntry, MassEntry, PartEntry, Pick, ProgramEntry, Progress,
-    ProjectSource, VersionEntry,
+    AddedModel, Comparison, DiffEntry, FileEntry, MassEntry, PartEntry, Pick, ProgramEntry,
+    Progress, ProjectSource, VersionEntry,
 };
 
 /// Готовый результат.
@@ -23,6 +25,8 @@ pub enum Done {
     Parts(anyhow::Result<Vec<PartEntry>>),
     /// Версии детали.
     Versions(String, anyhow::Result<Vec<VersionEntry>>),
+    /// Список деталей при возврате в окно.
+    Reread(anyhow::Result<Vec<PartEntry>>),
     /// Детали и версии одной детали заново (после сохранения).
     Refreshed(Vec<PartEntry>, String, anyhow::Result<Vec<VersionEntry>>),
     /// Сравнение: деталь, пара версий, результат.
@@ -45,8 +49,8 @@ pub enum Done {
     Programs(String, Vec<ProgramEntry>),
     /// Создана деталь.
     PartCreated(String, anyhow::Result<()>),
-    /// Модель добавлена: деталь и предупреждения.
-    Imported(anyhow::Result<(String, Vec<String>)>),
+    /// Файл добавлен в деталь и сохранён версией.
+    Added(anyhow::Result<AddedModel>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }
@@ -62,6 +66,8 @@ pub struct Jobs {
     running: Vec<Id>,
     next: Id,
     progress: Arc<Mutex<String>>,
+    /// Деталь от идущего сравнения, пока считаются цвета.
+    model: Arc<Mutex<Option<Scene>>>,
     /// Работа, которую можно отменить, и её флажок.
     cancellable: Option<(Id, Arc<AtomicBool>)>,
 }
@@ -75,6 +81,7 @@ impl Default for Jobs {
             running: Vec::new(),
             next: 0,
             progress: Arc::default(),
+            model: Arc::default(),
             cancellable: None,
         }
     }
@@ -84,6 +91,7 @@ impl Default for Jobs {
 struct Reporter {
     ctx: egui::Context,
     progress: Arc<Mutex<String>>,
+    model: Arc<Mutex<Option<Scene>>>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -95,6 +103,16 @@ impl Progress for Reporter {
         }
         if let Ok(mut p) = self.progress.lock() {
             *p = what.to_string();
+        }
+        self.ctx.request_repaint();
+    }
+
+    fn model(&self, scene: Scene) {
+        if self.cancelled() {
+            return;
+        }
+        if let Ok(mut m) = self.model.lock() {
+            *m = Some(scene);
         }
         self.ctx.request_repaint();
     }
@@ -138,6 +156,7 @@ impl Jobs {
         let reporter = Reporter {
             ctx: ctx.clone(),
             progress: self.progress.clone(),
+            model: self.model.clone(),
             cancel: cancel.clone(),
         };
         let tx = self.tx.clone();
@@ -161,7 +180,13 @@ impl Jobs {
         self.running.retain(|&r| r != id);
         // Шаги сообщает только отменяемая работа: её строка больше не нужна.
         self.clear_progress();
+        self.take_model();
         was
+    }
+
+    /// Забрать деталь, которую прислало идущее сравнение.
+    pub fn take_model(&self) -> Option<Scene> {
+        self.model.lock().ok()?.take()
     }
 
     /// Забыть все работы: открыт другой проект, их результаты не нужны.

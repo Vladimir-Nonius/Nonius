@@ -22,7 +22,8 @@ use crate::shape::Shape;
 use crate::OcctError;
 
 pub use compare::GeometryComparator;
-pub use diff::GeometryDiff;
+use diff::shared_diff;
+pub use diff::{forget_diff, GeometryDiff};
 pub use highlight::HighlightRenderer;
 pub use preview::{PreviewExporter, PREVIEW_PNG};
 pub use scene::{shape_scene, SceneRenderer};
@@ -67,7 +68,8 @@ fn deflection(props_bbox: Option<([f64; 3], [f64; 3])>) -> f64 {
     (diag * 1.5e-3).max(0.005)
 }
 
-const ANGULAR: f64 = 0.3;
+/// Наибольший угол между соседними треугольниками, рад: дуга выглядит дугой.
+const ANGULAR: f64 = 0.1;
 
 /// Нарисовать превью одной детали из STEP.
 pub fn preview(step: &Path, view: &View) -> std::result::Result<Image, OcctError> {
@@ -90,6 +92,9 @@ fn model_pair(before: &Snapshot, after: &Snapshot) -> Option<(PathBuf, PathBuf)>
 }
 
 fn same_bytes(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
     match (std::fs::metadata(a), std::fs::metadata(b)) {
         (Ok(ma), Ok(mb)) if ma.len() != mb.len() => false,
         _ => matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y),

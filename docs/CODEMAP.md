@@ -33,7 +33,9 @@
 | Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/share.cpp`, `src/cache.rs` |
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
 | Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/actions.rs` и `results.rs` (действия и их итог), `app/panels.rs`, `app/toolbar.rs`, надписи — `texts.rs` |
-| Окно: кнопки проекта, новая деталь, добавление модели | `nonius-gui/src/app/project_bar.rs`, `app/new_part.rs`, `app/start.rs` |
+| Окно: меню «Файл», новая деталь, добавление модели | `nonius-gui/src/app/file_menu.rs`, `app/add_model.rs` (окошко), `app/model_names.rs` (угадать деталь), `app/dropped.rs` (перетаскивание), `app/new_part.rs`, `app/start.rs` |
+| Окно: первый запуск, git и имя автора | `nonius-gui/src/app/first_run.rs`, `nonius-store/src/machine.rs` |
+| Один проект в одном окне | `nonius-cli/src/window_lock.rs` |
 | Окно: дерево деталей, карта версий | `nonius-gui/src/app/tree.rs`, `app/map.rs` |
 | Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source.rs` и `nonius-cli/src/window.rs` |
 | Окно: вкладки под 3D | `nonius-gui/src/app/tabs.rs` (панель, «Числа»), `app/files.rs` (`«Файлы»`) |
@@ -81,6 +83,7 @@
 | `message.rs` | сообщение коммита, строки `Nonius-Item` / `Nonius-Version` / `Nonius-AI` |
 | `version.rs` | `VersionInfo`, `AiActor`, `FileChange` |
 | `git.rs` | запуск системного `git` |
+| `machine.rs` | что есть на компьютере: git, LFS, имя автора; запомнить имя |
 | `workdir.rs` | служебная папка `.git/nonius`, запись в неё целыми папками (временная папка → переименование) |
 | `error.rs` | ошибки хранилища |
 
@@ -109,7 +112,7 @@
 | `src/cache.rs` | кэш прочитанных STEP (BRep в папке временных файлов) |
 | `src/modules/mod.rs` | общие помощники модулей, `preview` |
 | `src/modules/source.rs` | `step-occt`: контрольные числа из STEP |
-| `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал |
+| `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал; `shared_diff`: одна булева операция на сравнение и сцену |
 | `src/modules/compare.rs` | `geometry-occt`: сравнение формы |
 | `src/modules/highlight.rs` | `highlight-occt`: `changes.png` |
 | `src/modules/scene.rs` | `scene-occt`: сцена `changes.glb` для окна, каждый кусок изменений — отдельное место |
@@ -136,11 +139,15 @@
 | `app/mod.rs` | `App`: состояние окна, раскладка панелей |
 | `app/actions.rs` | действия: открыть проект, выбрать деталь и версии, сравнить, отменить, сохранить, назначить материал |
 | `app/results.rs` | что делать с готовыми результатами фоновой работы |
-| `app/project_bar.rs` | полоса сверху: открыть и создать проект, новая деталь, добавить модель |
+| `app/file_menu.rs` | меню «Файл»; какие файлы считаются моделями, поиск моделей в папке |
+| `app/add_model.rs` | окошко «Добавить модель» на каждый файл, очередь файлов, сразу сохраняет версию |
+| `app/model_names.rs` | что за деталь в файле: то же имя или то же без хвоста версии |
+| `app/dropped.rs` | перетаскивание: модели, папка с моделями, папка проекта |
+| `app/first_run.rs` | окошко первого запуска: имя автора, нет git |
 | `app/new_part.rs` | окошко «Новая деталь» |
 | `app/tree.rs` | дерево слева: поиск, детали, внутри выбранной — история |
 | `app/map.rs` | карта версий снизу: кружки на линии, щелчок и правая кнопка как в истории |
-| `app/panels.rs` | «Что изменилось» справа, строка состояния с «Отменить», надписи поверх 3D |
+| `app/panels.rs` | полоса ошибки, «Что изменилось» справа, строка состояния с «Отменить», надписи поверх 3D |
 | `app/history.rs` | история внутри дерева: «Сейчас», версии, метки «было» и «стало», «Сохранить версию»; действия, общие с картой |
 | `app/save.rs` | окошко «Сохранить версию»: что изменилось и описание |
 | `app/tabs.rs` | вкладки под 3D, таблица «Числа» |
@@ -180,6 +187,7 @@
 | `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
 | `materials.rs` | справочник материалов с плотностью |
 | `compare.rs` | `compare`, `Comparison`, `CompareOptions`, `Progress` (ход и отмена) |
+| `model_view.rs` | `model_view`: деталь как есть, без сравнения и версий |
 | `cache.rs` | кэш сравнений `.git/nonius/cache/<ключ>/cache.yaml` (`schema: 1`) |
 | `error.rs` | ошибки действий |
 
@@ -192,6 +200,7 @@
 | `main.rs` | запуск, выбор команды, набор модулей (`registry`) |
 | `args.rs` | команды и параметры, текст справки |
 | `window.rs` | окно: `nonius` без команды, `nonius view`, мост от `nonius-app` к окну (`AppSource`) |
+| `window_lock.rs` | один проект в одном окне |
 | `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `agents`, `modules` |
@@ -214,7 +223,7 @@
 | `nonius-occt/tests/occt.rs`, `without_occt.rs` | геометрия с OpenCascade и сборка без него |
 | `nonius-occt/tests/scene.rs` | сцена изменений на настоящем OpenCascade |
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
-| `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии, кнопки проекта, смена проекта, новая деталь, перетаскивание модели, дерево, карта |
+| `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии, меню «Файл», смена проекта, новая деталь, окошко «Добавить модель», очередь файлов, битый файл, полоса ошибки, «Считаю…», возврат в окно, первый запуск, дерево, карта |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, кэш STEP |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |

@@ -6,6 +6,7 @@
 //! Файлы: здесь — запуск и выбор команды, набор модулей; `args.rs` — команды
 //! и справка, `commands/` — печать итогов и ответ в JSON, `format.rs` — мелочи вывода,
 //! `window.rs` — окно (`nonius` без команды и `nonius view`),
+//! `window_lock.rs` — один проект в одном окне,
 //! `welcome.rs` — подсказка, если окно не открылось.
 
 mod args;
@@ -13,6 +14,7 @@ mod commands;
 mod format;
 mod welcome;
 mod window;
+mod window_lock;
 
 use std::process::ExitCode;
 

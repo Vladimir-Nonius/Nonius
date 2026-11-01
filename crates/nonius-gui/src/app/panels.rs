@@ -9,8 +9,30 @@ use super::App;
 use crate::texts::texts;
 use crate::view::Model;
 
-/// Строка состояния: ход работы и «Отменить», ошибка, что получилось или
-/// подсказка по мыши.
+/// Полоса ошибки над окном: не заметить её нельзя, закрывается крестиком.
+pub fn error_bar(app: &mut App, ctx: &egui::Context) {
+    let t = texts();
+    let Some(text) = app.message.clone() else {
+        return;
+    };
+    let frame = egui::Frame::NONE
+        .fill(Color32::from_rgb(251, 232, 232))
+        .inner_margin(egui::Margin::symmetric(10, 6));
+    egui::TopBottomPanel::top("error")
+        .frame(frame)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("✕").on_hover_text(t.close).clicked() {
+                    app.message = None;
+                }
+                let color = Color32::from_rgb(160, 30, 30);
+                ui.add(egui::Label::new(RichText::new(text).color(color)).wrap());
+            });
+        });
+}
+
+/// Строка состояния: ход работы и «Отменить», что получилось или подсказка
+/// по мыши.
 pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     let t = texts();
     let mut cancel = false;
@@ -27,10 +49,10 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
                 if app.jobs.can_cancel() && ui.button(t.cancel_compare).clicked() {
                     cancel = true;
                 }
-            } else if let Some(m) = &app.message {
-                ui.label(RichText::new(m).color(ui.visuals().warn_fg_color));
             } else if let Some(n) = &app.notice {
                 ui.label(n);
+            } else if app.no_lfs {
+                ui.label(RichText::new(t.no_lfs).weak());
             } else {
                 ui.label(RichText::new(t.mouse_hint).weak());
             }
@@ -52,7 +74,15 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.add_space(6.0);
                 ui.heading(t.what_changed);
-                if let Some(model) = app.viewport.model() {
+                let single = app.picks.0 == app.picks.1;
+                if app.jobs.can_cancel() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(t.calculating);
+                    });
+                } else if app.part.is_some() && single {
+                    ui.label(RichText::new(t.nothing_to_compare).weak());
+                } else if let (Some(model), Some(_)) = (app.viewport.model(), &app.comparison) {
                     if model.has_changes {
                         legend(ui, model, &mut app.look);
                         zoom = places(ui, model, &mut app.selected);
@@ -61,6 +91,13 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                     }
                 }
                 if let Some(c) = &app.comparison {
+                    let warn = ui.visuals().warn_fg_color;
+                    if c.step_behind {
+                        ui.label(RichText::new(t.step_behind).color(warn));
+                    }
+                    if let Some(why) = c.scene_problem.as_ref().filter(|_| c.scene.is_some()) {
+                        ui.label(RichText::new(format!("{}: {why}", t.no_colors)).color(warn));
+                    }
                     let lines: Vec<_> = c.reports.iter().flat_map(|r| &r.changes).collect();
                     if !lines.is_empty() {
                         ui.add_space(8.0);
@@ -169,7 +206,7 @@ fn places(ui: &mut egui::Ui, model: &Model, selected: &mut Option<usize>) -> Opt
     zoom
 }
 
-/// Надписи поверх 3D: что выбрать, нечего показать, идёт сравнение.
+/// Надписи поверх 3D: что выбрать, нечего показать, идёт расчёт.
 pub fn overlay(app: &App, ui: &mut egui::Ui) {
     let t = texts();
     let problem;
@@ -177,8 +214,6 @@ pub fn overlay(app: &App, ui: &mut egui::Ui) {
         Some(t.gpu_missing)
     } else if app.part.is_none() {
         Some(t.choose_part)
-    } else if app.versions.is_empty() && !app.jobs.busy() {
-        Some(t.save_first_version)
     } else if app.jobs.busy() && app.viewport.model().is_none() {
         Some(t.comparing_hint)
     } else if let Some(c) = app.comparison.as_ref().filter(|c| c.scene.is_none()) {

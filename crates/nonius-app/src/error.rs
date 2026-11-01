@@ -78,6 +78,15 @@ pub enum Error {
     /// Расчёт отменён.
     #[error("расчёт отменён")]
     Cancelled,
+
+    /// Новый проект нельзя создать внутри другого.
+    #[error("эта папка уже внутри проекта «{name}» ({root}). Выберите папку вне его")]
+    InsideProject {
+        /// Название внешнего проекта.
+        name: String,
+        /// Его папка.
+        root: PathBuf,
+    },
 }
 
 /// Все постоянные коды ошибок и что они значат. Старые коды не меняются и не
@@ -115,6 +124,7 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("unknown_file", "в версии нет такого файла"),
     ("open_failed", "система не смогла открыть файл"),
     ("cancelled", "расчёт отменён"),
+    ("inside_project", "папка уже внутри другого проекта"),
 ];
 
 impl Error {
@@ -134,6 +144,7 @@ impl Error {
             Self::UnknownFile { .. } => "unknown_file",
             Self::OpenFailed { .. } => "open_failed",
             Self::Cancelled => "cancelled",
+            Self::InsideProject { .. } => "inside_project",
         }
     }
 

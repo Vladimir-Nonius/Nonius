@@ -120,10 +120,10 @@ pub fn save_picture(app: &mut App) {
         .image()
         .and_then(|img| img.ok_or_else(|| anyhow::anyhow!("{}", t.no_scene)))
         .and_then(|img| img.save_png(&path));
-    app.message = Some(match result {
-        Ok(()) => format!("{}: {}", t.picture_saved, path.display()),
-        Err(e) => format!("{}: {e:#}", t.error),
-    });
+    match result {
+        Ok(()) => app.notice = Some(format!("{}: {}", t.picture_saved, path.display())),
+        Err(e) => app.message = Some(format!("{}: {e:#}", t.error)),
+    }
 }
 
 #[cfg(windows)]
