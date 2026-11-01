@@ -42,6 +42,10 @@ nonius commit кронштейн -m "Толщина 4 → 5 мм под новы
 nonius log кронштейн                       # история, новые первыми
 nonius diff кронштейн v1 v2                # сравнить две версии
 nonius restore кронштейн v1 -m "v2 не подошла"   # v3 = содержимое v1, история цела
+nonius compare кронштейн --file новая.step       # сравнить, ничего не сохраняя
+nonius part rename кронштейн скоба               # версии остаются при детали
+nonius part delete скоба                         # остаётся в истории
+nonius part recover скоба                        # вернуть удалённую
 nonius export кронштейн v2 ./для-лазера    # выгрузить файлы версии
 nonius files кронштейн v1 v2               # какие файлы изменились
 nonius open кронштейн docs/чертёж.pdf --version v2   # открыть копию файла версии

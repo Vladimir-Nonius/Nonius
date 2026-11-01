@@ -62,11 +62,15 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// «Что изменилось» справа: легенда, места изменений, числа. Пока деталь не
-/// выбрана, панели нет: 3D занимает её место.
+/// «Что изменилось» справа: легенда, места изменений, числа.
 pub fn changes(app: &mut App, ctx: &egui::Context) {
     let t = texts();
-    if app.part.is_none() {
+    // Без детали и без модели говорить не о чем: 3D занимает всё место.
+    let model = app
+        .parts
+        .iter()
+        .find(|p| Some(&p.name) == app.part.as_ref());
+    if model.is_none_or(|p| p.model.is_none() && !p.assembly) {
         return;
     }
     let mut zoom = None;

@@ -3,7 +3,6 @@
 //! записи в git: если файл держит другая программа, ничего не меняется.
 
 use std::fs;
-use std::io;
 use std::path::Path;
 
 use nonius_core::project::{Item, DOCS_DIR};
@@ -15,6 +14,10 @@ use crate::{workdir, AiActor, DeletedItem, Result, Store, StoreError};
 
 /// Описание версии, в которой сохраняется несохранённое перед удалением.
 const BEFORE_DELETE: &str = "Сохранено перед удалением";
+
+/// Коды Windows, когда файл держит другая программа: нет доступа, файл занят,
+/// часть файла заблокирована.
+const FILE_HELD: [i32; 3] = [5, 32, 33];
 
 impl Store {
     /// Записать подготовленный индекс в отметку истории.
@@ -32,12 +35,15 @@ impl Store {
 
     /// Сдвинуть папку детали целиком.
     fn move_dir(&self, item: &PartName, from: &Path, to: &Path) -> Result<()> {
-        fs::rename(from, to).map_err(|e| match e.kind() {
-            io::ErrorKind::PermissionDenied => StoreError::InUse(item.clone()),
-            _ => StoreError::Io {
-                path: from.to_path_buf(),
-                source: e,
-            },
+        fs::rename(from, to).map_err(|e| {
+            if cfg!(windows) && e.raw_os_error().is_some_and(|c| FILE_HELD.contains(&c)) {
+                StoreError::InUse(item.clone())
+            } else {
+                StoreError::Io {
+                    path: from.to_path_buf(),
+                    source: e,
+                }
+            }
         })
     }
 

@@ -524,3 +524,26 @@ fn deleted_assembly_comes_back_as_assembly() {
     assert_eq!(back.kind, ItemKind::Assembly);
     assert_eq!(back.dir, item.dir);
 }
+
+/// Файл открыт в другой программе: деталь не трогается, причина названа.
+#[cfg(windows)]
+#[test]
+fn part_held_by_another_program_stays() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_tmp, store, item) = two_versions("кронштейн");
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(item.dir.join("model.step"))
+        .unwrap();
+    assert_eq!(store.delete(&item).unwrap_err().code(), "in_use");
+    assert_eq!(
+        store.rename(&item, &name("скоба")).unwrap_err().code(),
+        "in_use"
+    );
+    assert!(item.dir.join("model.step").is_file());
+    drop(held);
+    assert_eq!(store.versions(&item).unwrap().len(), 2);
+    assert!(store.changes(&item).unwrap().is_empty());
+    store.delete(&item).unwrap();
+}
