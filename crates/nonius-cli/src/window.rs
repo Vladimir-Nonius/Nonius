@@ -6,13 +6,15 @@
 
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use anyhow::{bail, Context, Result};
-use nonius_app::{App, CompareOptions, Progress};
+use nonius_app::{App, CompareOptions, FileChangeKind, Mass, MaterialChoice, MATERIALS};
 use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
-use nonius_gui::source::{Comparison, PartEntry, Pick, ProjectSource, VersionEntry};
+use nonius_gui::source::{
+    Comparison, MassEntry, MaterialEntry, PartEntry, Pick, Progress, ProjectSource, VersionEntry,
+};
 use nonius_scene::Scene;
 
 use crate::format::{parse_version, short_date};
@@ -24,6 +26,10 @@ struct AppSource {
     /// Одно сравнение за раз: OpenCascade падает при параллельном чтении STEP,
     /// а человек может быстро переключить версии, пока идёт прошлое сравнение.
     busy: Mutex<()>,
+    /// Запись (сохранить версию, назначить материал) — когда никто не читает
+    /// папку детали и git: иначе git спотыкается о свой index.lock, а
+    /// сравнение видит полусохранённое.
+    files: RwLock<()>,
 }
 
 impl AppSource {
@@ -31,16 +37,47 @@ impl AppSource {
         Ok(Box::new(Self {
             app: App::open(path, window_registry())?,
             busy: Mutex::new(()),
+            files: RwLock::new(()),
         }))
+    }
+
+    fn reading(&self) -> RwLockReadGuard<'_, ()> {
+        self.files.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn writing(&self) -> RwLockWriteGuard<'_, ()> {
+        self.files.write().unwrap_or_else(|e| e.into_inner())
     }
 }
 
-/// Ход сравнения → строка состояния окна.
-struct Steps<'a>(&'a (dyn Fn(&str) + Sync));
+/// Ход сравнения → строка состояния окна; «Отменить» в окне → отмена расчёта.
+struct Steps<'a>(&'a dyn Progress);
 
-impl Progress for Steps<'_> {
+impl nonius_app::Progress for Steps<'_> {
     fn step(&self, what: &str) {
-        (self.0)(&format!("{what}…"));
+        self.0.step(&format!("{what}…"));
+    }
+
+    fn cancelled(&self) -> bool {
+        self.0.cancelled()
+    }
+}
+
+/// Паспорт → материал и масса для окна.
+fn mass_entry(p: nonius_app::Passport) -> MassEntry {
+    let no_mass = match &p.mass {
+        Mass::Computed { .. } | Mass::FromCad { .. } => None,
+        Mass::NoMaterial => Some("материал не задан".to_string()),
+        Mass::NoDensity { material } => Some(format!(
+            "плотность «{material}» неизвестна — выберите «Свой материал…» и введите её"
+        )),
+        Mass::NoVolume => Some("объём не измерен: в модели нет геометрии".to_string()),
+    };
+    MassEntry {
+        material: p.meta.material.clone(),
+        density_kg_m3: p.meta.density_kg_m3,
+        mass_kg: p.mass.kg(),
+        no_mass,
     }
 }
 
@@ -61,6 +98,7 @@ impl ProjectSource for AppSource {
     }
 
     fn parts(&self) -> Result<Vec<PartEntry>> {
+        let _files = self.reading();
         Ok(self
             .app
             .items()?
@@ -69,12 +107,13 @@ impl ProjectSource for AppSource {
                 name: s.item.name.to_string(),
                 assembly: s.item.kind == ItemKind::Assembly,
                 latest: s.latest.as_ref().map(|v| v.version.to_string()),
-                dirty: s.latest.is_some() && !s.changes.is_empty(),
+                dirty: !s.changes.is_empty(),
             })
             .collect())
     }
 
     fn versions(&self, part: &str) -> Result<Vec<VersionEntry>> {
+        let _files = self.reading();
         let mut list: Vec<VersionEntry> = self
             .app
             .versions(part)?
@@ -95,12 +134,21 @@ impl ProjectSource for AppSource {
         part: &str,
         before: Pick,
         after: Pick,
-        progress: &(dyn Fn(&str) + Sync),
+        progress: &dyn Progress,
     ) -> Result<Comparison> {
         let Some(from) = version(before)? else {
             bail!("«Было» — это сохранённая версия: сравнивать можно с ней");
         };
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _one_at_a_time = match self.busy.try_lock() {
+            Ok(g) => g,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            // Прошлое (отменённое) сравнение доделывает свой шаг.
+            Err(TryLockError::WouldBlock) => {
+                progress.step("Жду, пока закончится прошлое сравнение…");
+                self.busy.lock().unwrap_or_else(|e| e.into_inner())
+            }
+        };
+        let _files = self.reading();
         let options = CompareOptions {
             reports: true,
             render: true,
@@ -111,6 +159,7 @@ impl ProjectSource for AppSource {
             Ok(c) => c,
             // 3D не получилось (нет OpenCascade, в STEP нет геометрии) —
             // числа всё равно покажем, а причину скажем словами.
+            Err(nonius_app::Error::Cancelled) => bail!("сравнение отменено"),
             Err(e) => {
                 let problem = match e {
                     nonius_app::Error::NoRenderer => None,
@@ -140,6 +189,58 @@ impl ProjectSource for AppSource {
             scene_problem,
             reports: c.reports,
         })
+    }
+
+    fn changed_files(&self, part: &str) -> Result<Vec<String>> {
+        let _files = self.reading();
+        let item = self.app.item(part)?;
+        Ok(self
+            .app
+            .changes(&item)?
+            .into_iter()
+            .map(|f| {
+                let mark = match f.kind {
+                    FileChangeKind::Added => "+",
+                    FileChangeKind::Modified => "~",
+                    FileChangeKind::Deleted => "−",
+                };
+                format!("{mark} {}", f.path)
+            })
+            .collect())
+    }
+
+    fn save_version(&self, part: &str, message: &str) -> Result<u32> {
+        let _files = self.writing();
+        Ok(self.app.save_version(part, message)?.version.get())
+    }
+
+    fn mass(&self, part: &str, pick: Pick) -> Result<MassEntry> {
+        let _files = self.reading();
+        Ok(mass_entry(self.app.passport(part, version(pick)?)?))
+    }
+
+    fn materials(&self) -> Vec<MaterialEntry> {
+        MATERIALS
+            .iter()
+            .map(|m| MaterialEntry {
+                name: m.name.to_string(),
+                density_kg_m3: m.density_kg_m3,
+            })
+            .collect()
+    }
+
+    fn set_material(
+        &self,
+        part: &str,
+        material: Option<&str>,
+        density_kg_m3: Option<f64>,
+    ) -> Result<MassEntry> {
+        let choice = material.map(|name| MaterialChoice {
+            name: name.to_string(),
+            density_kg_m3,
+        });
+        let _files = self.writing();
+        Ok(mass_entry(self.app.set_material(part, choice)?))
     }
 }
 
@@ -209,6 +310,22 @@ mod tests {
     use super::*;
     use crate::registry;
 
+    /// Ход работы для проверки: запоминает шаги, может «нажать Отменить».
+    #[derive(Default)]
+    struct Said {
+        steps: Mutex<Vec<String>>,
+        cancel: bool,
+    }
+
+    impl Progress for Said {
+        fn step(&self, what: &str) {
+            self.steps.lock().unwrap().push(what.to_string());
+        }
+        fn cancelled(&self) -> bool {
+            self.cancel
+        }
+    }
+
     const STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('кронштейн','2026-10-26',('Владимир'),(''),'SwSTEP 2.0','SolidWorks 2020','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
     #[test]
@@ -249,14 +366,9 @@ mod tests {
         assert_eq!(versions[0].summary, "Материал");
         assert_eq!(versions[0].author, "Тестировщик");
 
-        let said = std::sync::Mutex::new(Vec::new());
+        let said = Said::default();
         let c = src
-            .compare(
-                "кронштейн",
-                Pick::Version(1),
-                Pick::Version(2),
-                &|m| said.lock().unwrap().push(m.to_string()),
-            )
+            .compare("кронштейн", Pick::Version(1), Pick::Version(2), &said)
             .unwrap();
         let lines: Vec<String> = c
             .reports
@@ -270,12 +382,86 @@ mod tests {
         if let Some(p) = &c.scene_problem {
             assert!(p.contains("нет геометрии"), "{p}");
         }
-        assert!(!said.lock().unwrap().is_empty(), "окно видит ход работы");
+        assert!(
+            !said.steps.lock().unwrap().is_empty(),
+            "окно видит ход работы"
+        );
+        let quiet = Said::default();
         assert!(src
-            .compare("нет такой", Pick::Version(1), Pick::Current, &|_| {})
+            .compare("нет такой", Pick::Version(1), Pick::Current, &quiet)
             .is_err());
         assert!(src
-            .compare("кронштейн", Pick::Current, Pick::Version(1), &|_| {})
+            .compare("кронштейн", Pick::Current, Pick::Version(1), &quiet)
             .is_err());
+        // «Отменить» — ни сравнения, ни подмены одними числами.
+        let cancelled = Said {
+            cancel: true,
+            ..Said::default()
+        };
+        let e = src
+            .compare("кронштейн", Pick::Version(2), Pick::Current, &cancelled)
+            .unwrap_err();
+        assert!(format!("{e:#}").contains("отменен"), "{e:#}");
+    }
+
+    #[test]
+    fn material_and_saving_from_the_window() {
+        for (k, v) in [
+            ("GIT_AUTHOR_NAME", "Тестировщик"),
+            ("GIT_AUTHOR_EMAIL", "test@example.com"),
+            ("GIT_COMMITTER_NAME", "Тестировщик"),
+            ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ] {
+            std::env::set_var(k, v);
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        nonius_app::create_project(d, Some("Станок")).unwrap();
+        let step = d.join("пластина.step");
+        std::fs::write(&step, STEP).unwrap();
+        App::open(d, registry())
+            .unwrap()
+            .import(&step, None)
+            .unwrap();
+        let src = AppSource::open(d).unwrap();
+
+        // Новая деталь без версий — есть что сохранить.
+        assert!(src.parts().unwrap()[0].dirty);
+        assert!(!src.changed_files("пластина").unwrap().is_empty());
+        assert!(src.save_version("пластина", "  ").is_err(), "без описания");
+        assert_eq!(src.save_version("пластина", "Первая").unwrap(), 1);
+        assert!(!src.parts().unwrap()[0].dirty);
+
+        let none = src.mass("пластина", Pick::Version(1)).unwrap();
+        assert_eq!(none.material, None);
+        assert_eq!(none.mass_kg, None);
+        assert!(none.no_mass.unwrap().contains("материал не задан"));
+
+        // Из справочника плотность берётся сама.
+        let st3 = src.set_material("пластина", Some("Ст3"), None).unwrap();
+        assert_eq!(st3.material.as_deref(), Some("Ст3"));
+        assert_eq!(st3.density_kg_m3, Some(7850.0));
+        assert!(src.materials().iter().any(|m| m.name == "Ст3"));
+        let parts = src.parts().unwrap();
+        assert!(parts[0].dirty, "материал меняет деталь");
+        assert!(src
+            .changed_files("пластина")
+            .unwrap()
+            .iter()
+            .any(|f| f.contains("meta.yaml")));
+
+        // Свой материал — с плотностью вручную.
+        let own = src
+            .set_material("пластина", Some("Сплав заказчика"), Some(2850.0))
+            .unwrap();
+        assert_eq!(own.density_kg_m3, Some(2850.0));
+        assert_eq!(src.save_version("пластина", "Материал").unwrap(), 2);
+        let v2 = src.mass("пластина", Pick::Version(2)).unwrap();
+        assert_eq!(v2.material.as_deref(), Some("Сплав заказчика"));
+
+        // Убрать материал — массы снова нет.
+        let cleared = src.set_material("пластина", None, None).unwrap();
+        assert_eq!(cleared.material, None);
+        assert!(cleared.no_mass.is_some());
     }
 }

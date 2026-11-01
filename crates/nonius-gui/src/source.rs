@@ -1,7 +1,7 @@
 //! Откуда окно берёт детали, версии и сравнения.
 //!
 //! Окно не знает про git и OpenCascade: всё приходит через [`ProjectSource`].
-//! Реализацию даёт программа (сейчас — `nonius-cli`, потом — `nonius-app`).
+//! Реализацию даёт программа: `nonius-cli` поверх `nonius-app`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -18,7 +18,8 @@ pub struct PartEntry {
     pub assembly: bool,
     /// Последняя сохранённая версия: `v3`.
     pub latest: Option<String>,
-    /// Файлы изменены после последней версии.
+    /// Есть что сохранить: файлы изменены после последней версии или у новой
+    /// детали ещё нет ни одной версии.
     pub dirty: bool,
 }
 
@@ -55,6 +56,38 @@ pub struct Comparison {
     pub reports: Vec<ChangeReport>,
 }
 
+/// Материал и масса детали в версии или сейчас.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MassEntry {
+    /// Материал; `None` — не задан.
+    pub material: Option<String>,
+    /// Плотность, кг/м³.
+    pub density_kg_m3: Option<f64>,
+    /// Масса, кг.
+    pub mass_kg: Option<f64>,
+    /// Почему массы нет, словами: «материал не задан».
+    pub no_mass: Option<String>,
+}
+
+/// Материал из справочника.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialEntry {
+    /// Название.
+    pub name: String,
+    /// Плотность, кг/м³.
+    pub density_kg_m3: f64,
+}
+
+/// Ход долгой работы и её отмена.
+pub trait Progress: Sync {
+    /// Начался шаг: «Сравниваю…».
+    fn step(&self, what: &str);
+    /// Человек нажал «Отменить». Работа проверяет это между шагами.
+    fn cancelled(&self) -> bool {
+        false
+    }
+}
+
 /// Проект для окна. Вызовы блокирующие: окно делает их в фоне.
 pub trait ProjectSource: Send + Sync {
     /// Название проекта.
@@ -67,14 +100,31 @@ pub trait ProjectSource: Send + Sync {
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>>;
     /// Сравнить две версии. `before` — всегда сохранённая версия;
     /// `before == after` — показать одну версию без сравнения.
-    /// `progress` получает короткие сообщения о ходе работы.
+    /// `progress` получает короткие сообщения о ходе работы и говорит,
+    /// не отменено ли сравнение.
     fn compare(
         &self,
         part: &str,
         before: Pick,
         after: Pick,
-        progress: &(dyn Fn(&str) + Sync),
+        progress: &dyn Progress,
     ) -> anyhow::Result<Comparison>;
+    /// Изменённые с последней версии файлы детали, для показа: «~ кронштейн.step».
+    fn changed_files(&self, part: &str) -> anyhow::Result<Vec<String>>;
+    /// Сохранить текущее состояние детали новой версией. Возвращает её номер.
+    fn save_version(&self, part: &str, message: &str) -> anyhow::Result<u32>;
+    /// Материал и масса детали в версии или сейчас.
+    fn mass(&self, part: &str, pick: Pick) -> anyhow::Result<MassEntry>;
+    /// Справочник материалов, в порядке списка выбора.
+    fn materials(&self) -> Vec<MaterialEntry>;
+    /// Назначить материал детали сейчас: название и плотность. Плотность
+    /// `None` — взять из справочника. Название `None` — убрать материал.
+    fn set_material(
+        &self,
+        part: &str,
+        material: Option<&str>,
+        density_kg_m3: Option<f64>,
+    ) -> anyhow::Result<MassEntry>;
 }
 
 /// Открывает проект по папке (для «Открыть папку проекта…» и перетаскивания).

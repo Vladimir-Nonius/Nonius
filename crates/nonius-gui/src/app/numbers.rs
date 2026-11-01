@@ -64,6 +64,40 @@ fn tidy(text: &str) -> String {
     out
 }
 
+/// Масса: до килограмма — в граммах («126 г»), дальше — в кг («1,26 кг»).
+pub fn mass_text(kg: f64) -> String {
+    let t = texts();
+    // 999,6 г округлились бы до «1 000 г» — это уже «1 кг».
+    let (value, unit) = if kg.abs() < 0.9995 {
+        (kg * 1000.0, t.grams)
+    } else {
+        (kg, t.kilograms)
+    };
+    let places = match value.abs() {
+        x if x >= 100.0 => 0,
+        x if x >= 10.0 => 1,
+        _ => 2,
+    };
+    let text = format!("{value:.places$}");
+    let (int, frac) = text.split_once('.').unwrap_or((&text, ""));
+    let frac = frac.trim_end_matches('0');
+    let int = group(int);
+    if frac.is_empty() {
+        format!("{int} {unit}")
+    } else {
+        format!("{int},{frac} {unit}")
+    }
+}
+
+/// Плотность: «7 850 кг/м³».
+pub fn density_text(kg_m3: f64) -> String {
+    format!(
+        "{} {}",
+        group(&format!("{:.0}", kg_m3.max(0.0))),
+        texts().kg_m3
+    )
+}
+
 /// Разряды целой части через неразрывный пробел.
 fn group(digits: &str) -> String {
     let mut out = String::new();
@@ -85,6 +119,18 @@ mod tests {
         assert_eq!(volume_text(14400.4), "14\u{a0}400 мм³");
         assert_eq!(volume_text(402.1), "402 мм³");
         assert_eq!(volume_text(1234567.0), "1\u{a0}234\u{a0}567 мм³");
+    }
+
+    #[test]
+    fn masses_read_easily() {
+        assert_eq!(mass_text(0.1257), "126 г");
+        assert_eq!(mass_text(0.01234), "12,3 г");
+        assert_eq!(mass_text(0.0005), "0,5 г");
+        assert_eq!(mass_text(1.26), "1,26 кг");
+        assert_eq!(mass_text(0.9996), "1 кг");
+        assert_eq!(mass_text(0.9994), "999 г");
+        assert_eq!(mass_text(1234.4), "1\u{a0}234 кг");
+        assert_eq!(density_text(7850.0), "7\u{a0}850 кг/м³");
     }
 
     #[test]
