@@ -9,25 +9,23 @@ use crate::format::{parse_version, short_date};
 
 pub fn status(app: &App, part: Option<&str>) -> Result<()> {
     let items = match part {
-        Some(p) => vec![app.item(p)?],
-        None => app.item_list()?,
+        Some(p) => vec![app.item_status(p)?],
+        None => app.items()?,
     };
     let mut clean = 0;
-    for item in &items {
-        // История нужна только изменённым деталям: так быстрее на больших проектах.
-        let changes = app.changes(item)?;
-        if changes.is_empty() {
+    for s in &items {
+        if s.changes.is_empty() {
             clean += 1;
             if part.is_some() {
-                println!("«{}»: изменений нет", item.name);
+                println!("«{}»: изменений нет", s.item.name);
             }
             continue;
         }
-        match app.latest(item)? {
-            Some(v) => println!("«{}» (последняя {}):", item.name, v.version),
-            None => println!("«{}» (ещё нет версий):", item.name),
+        match &s.latest {
+            Some(v) => println!("«{}» (последняя {}):", s.item.name, v.version),
+            None => println!("«{}» (ещё нет версий):", s.item.name),
         }
-        for c in &changes {
+        for c in &s.changes {
             let word = match c.kind {
                 FileChangeKind::Added => "новый",
                 FileChangeKind::Modified => "изменён",
@@ -64,7 +62,7 @@ pub fn log(app: &App, part: &str) -> Result<()> {
         println!(
             "{ver:<5} {}  {}  {}",
             short_date(&v.date),
-            v.author,
+            v.signature(),
             v.summary()
         );
     }

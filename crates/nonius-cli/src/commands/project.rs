@@ -1,13 +1,13 @@
-//! Проект целиком: `init`, `part new`, `list`, `info`, `modules`.
+//! Проект целиком: `init`, `part new`, `list`, `info`, `overview`, `modules`.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use nonius_app::{create_project, App, History};
+use nonius_app::{create_project, App, History, ItemState, ItemStatus};
 use nonius_core::extension::Registry;
 use nonius_core::meta::ItemKind;
 
-use crate::format::kind_word;
+use crate::format::{kind_word, short_date};
 
 /// `nonius init`: папка — `path`, иначе `-C`, иначе текущая.
 pub fn init(path: Option<&PathBuf>, name: Option<&str>) -> Result<()> {
@@ -71,6 +71,55 @@ pub fn info(app: &App) -> Result<()> {
         println!("Участник:  {} ({:?})", m.name, m.role);
     }
     Ok(())
+}
+
+/// `nonius overview`: сверху итог, дальше одна деталь — одна строка.
+pub fn overview(app: &App, changed: bool) -> Result<()> {
+    let items = app.items()?;
+    let count = |state| items.iter().filter(|s| s.state() == state).count();
+    let parts = items
+        .iter()
+        .filter(|s| s.item.kind == ItemKind::Part)
+        .count();
+    println!(
+        "Проект «{}»: деталей {parts}, сборок {}. Сохранено {}, изменено {}, новых {}.",
+        app.project().config().name,
+        items.len() - parts,
+        count(ItemState::Saved),
+        count(ItemState::Changed),
+        count(ItemState::New),
+    );
+    if items.is_empty() {
+        println!("Пока пусто. Добавьте деталь: nonius part new <имя>");
+    }
+    for s in &items {
+        if !changed || s.state() != ItemState::Saved {
+            println!("{}", overview_line(s));
+        }
+    }
+    Ok(())
+}
+
+fn overview_line(s: &ItemStatus) -> String {
+    let mut line = format!("{} | {}", s.item.name, kind_word(s.item.kind));
+    if let Some(v) = &s.latest {
+        line.push_str(&format!(
+            " | {} из {} | {} | {} | {}",
+            v.version,
+            s.versions,
+            short_date(&v.date),
+            v.signature(),
+            v.summary()
+        ));
+    }
+    match s.state() {
+        ItemState::New => line.push_str(" | новая"),
+        ItemState::Saved => line.push_str(" | сохранена"),
+        ItemState::Changed => {
+            line.push_str(&format!(" | изменено файлов: {}", s.changes.len()));
+        }
+    }
+    line
 }
 
 /// `nonius modules`.

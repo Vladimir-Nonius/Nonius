@@ -18,7 +18,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use nonius_app::App;
+use nonius_app::{AiActor, App, GitOptions};
 use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
@@ -71,7 +71,13 @@ fn run(cli: Cli) -> Result<()> {
             Some(p) => p.clone(),
             None => std::env::current_dir().context("не удалось узнать текущую папку")?,
         };
-        Ok(App::open(&start, registry())?)
+        let ai = cli
+            .ai
+            .as_deref()
+            .map(|name| AiActor::new(name, cli.ai_model.as_deref()))
+            .transpose()?;
+        let git = GitOptions { ai, identity: None };
+        Ok(App::open(&start, registry())?.with_git_options(git))
     };
 
     match &cli.command {
@@ -83,6 +89,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::List => project::list(&app()?)?,
         Command::Info => project::info(&app()?)?,
+        Command::Overview { changed } => project::overview(&app()?, *changed)?,
         Command::Modules => project::modules(&registry()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
         Command::Status { part } => history::status(&app()?, part.as_deref())?,

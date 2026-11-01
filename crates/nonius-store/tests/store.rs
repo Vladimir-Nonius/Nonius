@@ -5,11 +5,12 @@ use std::fs;
 use nonius_core::meta::ItemKind;
 use nonius_core::project::META_FILE;
 use nonius_core::{schema, PartName, Project, VersionNumber};
-use nonius_store::{DiffLineKind, FileChangeKind, GitOptions, Store, StoreError};
+use nonius_store::{AiActor, DiffLineKind, FileChangeKind, GitOptions, Store, StoreError};
 
 fn options() -> GitOptions {
     GitOptions {
         identity: Some(("Тестировщик".into(), "test@example.com".into())),
+        ai: None,
     }
 }
 
@@ -31,6 +32,59 @@ fn set_mass(item: &nonius_core::project::Item, store: &Store, mass: f64) {
     let mut meta = store.project().load_meta(item).unwrap();
     meta.geometry.mass_kg = Some(mass);
     schema::save(&meta, &item.dir.join(META_FILE)).unwrap();
+}
+
+#[test]
+fn histories_match_item_by_item_queries() {
+    let (tmp, store, a) = setup("кронштейн");
+    let b = store
+        .project()
+        .create_item(ItemKind::Part, &PartName::new("вал 20").unwrap())
+        .unwrap();
+    let c = store
+        .project()
+        .create_item(ItemKind::Assembly, &PartName::new("рама").unwrap())
+        .unwrap();
+    store.commit(&a, "первая").unwrap();
+    store.commit(&b, "вал").unwrap();
+    set_mass(&a, &store, 1.5);
+    store.commit(&a, "вторая").unwrap();
+    set_mass(&b, &store, 2.5);
+    std::fs::write(b.dir.join("docs").join("новый.txt"), "текст").unwrap();
+    std::fs::write(tmp.path().join("вне деталей.txt"), "текст").unwrap();
+
+    let items = [a, b, c];
+    let histories = store.histories(&items).unwrap();
+    for (item, history) in items.iter().zip(&histories) {
+        assert_eq!(history.versions, store.versions(item).unwrap());
+        assert_eq!(history.changes, store.changes(item).unwrap());
+    }
+    assert_eq!(histories[0].versions.len(), 2);
+    assert_eq!(histories[1].changes.len(), 2);
+    assert!(histories[2].versions.is_empty());
+    assert!(!histories[2].changes.is_empty(), "новая сборка");
+}
+
+#[test]
+fn ai_is_the_author_and_person_stays_committer() {
+    let (tmp, store, item) = setup("кронштейн");
+    store.commit(&item, "человек").unwrap();
+    assert_eq!(store.latest(&item).unwrap().unwrap().ai, None);
+
+    let ai = AiActor::new("Claude", Some("claude-opus-5-5")).unwrap();
+    let mut with_ai = options();
+    with_ai.ai = Some(ai.clone());
+    let project = Project::discover(tmp.path()).unwrap();
+    let store = Store::open(project, &with_ai).unwrap();
+    set_mass(&item, &store, 1.5);
+    let saved = store.commit(&item, "ИИ").unwrap();
+    assert_eq!(saved.author, "Claude");
+    assert_eq!(saved.committer, "Тестировщик");
+    assert_eq!(saved.ai, Some(ai.clone()));
+
+    // Откат тоже подписан.
+    let back = store.restore(&item, v(1), None).unwrap();
+    assert_eq!(back.ai, Some(ai));
 }
 
 #[test]

@@ -67,6 +67,71 @@ fn outside_project_gives_clear_error() {
     assert!(out.contains("нет проекта Nonius"), "{out}");
 }
 
+#[test]
+fn overview_and_ai_signature() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init", "--name", "Станок"]).0);
+    let (ok, out) = nonius(d, &["overview"]);
+    assert!(ok && out.contains("Пока пусто"), "{out}");
+
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    assert!(nonius(d, &["part", "new", "рама"]).0);
+    let saved = nonius(
+        d,
+        &[
+            "commit",
+            "вал",
+            "-m",
+            "Первая",
+            "--ai",
+            "Claude",
+            "--ai-model",
+            "claude-opus-5-5",
+        ],
+    );
+    assert!(saved.0, "{}", saved.1);
+
+    let (ok, out) = nonius(d, &["overview"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.starts_with("Проект «Станок»: деталей 2, сборок 0. Сохранено 1, изменено 0, новых 1."),
+        "{out}"
+    );
+    assert!(out.contains("вал | деталь | v1 из 1 |"), "{out}");
+    assert!(
+        out.contains("Claude (ИИ, claude-opus-5-5, запустил Тестировщик) | Первая | сохранена"),
+        "{out}"
+    );
+    assert!(out.contains("рама | деталь | новая"), "{out}");
+
+    let (ok, out) = nonius(d, &["overview", "--changed"]);
+    assert!(
+        ok && out.contains("рама") && !out.contains("вал |"),
+        "{out}"
+    );
+
+    let (ok, out) = nonius(d, &["log", "вал"]);
+    assert!(ok && out.contains("Claude (ИИ"), "{out}");
+}
+
+#[test]
+fn diff_between_versions_lists_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    assert!(nonius(d, &["commit", "вал", "-m", "Первая"]).0);
+    let docs = d.join("parts").join("вал").join("docs");
+    std::fs::write(docs.join("чертёж.pdf"), "pdf").unwrap();
+    assert!(nonius(d, &["commit", "вал", "-m", "Чертёж"]).0);
+
+    let (ok, out) = nonius(d, &["diff", "вал", "v1", "v2"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("+ файл docs/чертёж.pdf"), "{out}");
+    assert!(!out.contains("изменений нет"), "{out}");
+}
+
 const STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('кронштейн','2026-10-26',('Владимир'),(''),'SwSTEP 2.0','SolidWorks 2020','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
 #[test]

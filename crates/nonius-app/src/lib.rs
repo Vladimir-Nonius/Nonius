@@ -44,8 +44,8 @@ pub use system::{programs_for, OpenWay, Program};
 
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.
 pub use nonius_store::{
-    is_text_file, DiffLine, DiffLineKind, FileChange, FileChangeKind, GitOptions, VersionFile,
-    VersionInfo,
+    is_text_file, AiActor, DiffLine, DiffLineKind, FileChange, FileChangeKind, GitOptions,
+    VersionFile, VersionInfo,
 };
 
 /// Открытый проект и подключённые модули.
@@ -76,7 +76,7 @@ impl App {
         }
     }
 
-    /// Задать автора версий вместо настроек git (для тестов и сервера).
+    /// Задать автора версий вместо настроек git: для тестов, сервера и ИИ.
     pub fn with_git_options(mut self, git: GitOptions) -> Self {
         self.git = git;
         self.store = OnceLock::new();
