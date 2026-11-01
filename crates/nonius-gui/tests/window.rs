@@ -345,7 +345,15 @@ fn wait_for(h: &mut Harness<'_, App>, text: &str) {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("не дождались «{text}»");
+    let all = h.query_all(egui_kittest::kittest::By::new());
+    let seen: Vec<_> = all
+        .filter_map(|n| {
+            let node = n.accesskit_node();
+            node.label().or_else(|| node.value())
+        })
+        .filter(|l| !l.is_empty())
+        .collect();
+    panic!("не дождались «{text}», на экране: {seen:#?}");
 }
 
 /// Окно с поддельным проектом; настройки — во временной папке, не в
@@ -480,6 +488,9 @@ fn files_and_numbers_tabs() {
 
     // Изменённый файл идёт первым, у него видно старый и новый размер.
     wait_for(&mut h, "~ docs/заметка.md");
+    for _ in 0..4 {
+        h.step();
+    }
     assert!(h.query_by_label_contains("10 байт → 20 байт").is_some());
     assert!(h.query_by_label_contains("model.step   2,0 КБ").is_some());
 
