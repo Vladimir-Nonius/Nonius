@@ -1,7 +1,7 @@
 //! Что окно делает по просьбе человека: открыть проект, выбрать деталь и
 //! версии, сравнить, сохранить версию, назначить материал. Долгое — в фоне.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui;
@@ -16,7 +16,16 @@ impl App {
     pub(super) fn open(&mut self, ctx: &egui::Context, path: PathBuf) {
         let opener = self.opener.clone();
         self.message = None;
+        self.want = None;
         self.jobs.spawn(ctx, move |_| Done::Opened(opener(&path)));
+    }
+
+    /// Создать проект в папке (в фоне) и открыть его.
+    pub(super) fn create(&mut self, ctx: &egui::Context, path: PathBuf) {
+        let creator = self.creator.clone();
+        self.message = None;
+        self.want = None;
+        self.jobs.spawn(ctx, move |_| Done::Opened(creator(&path)));
     }
 
     pub(super) fn set_project(&mut self, ctx: &egui::Context, project: Box<dyn ProjectSource>) {
@@ -30,8 +39,17 @@ impl App {
         )));
         self.materials = project.materials();
         self.project = Some(project.clone());
+        // Всё от прошлого проекта: и работы, и то, что на экране.
+        self.jobs.forget_all();
         self.parts.clear();
         self.select(None);
+        self.viewport.set_model(None, false);
+        self.shown = None;
+        self.picks = (Pick::Current, Pick::Current);
+        self.material_busy = false;
+        self.new_part = None;
+        self.sticky = None;
+        self.search.clear();
         self.jobs.spawn(ctx, move |_| Done::Parts(project.parts()));
     }
 
@@ -206,6 +224,49 @@ impl App {
         });
     }
 
+    /// Создать деталь из окошка «Новая деталь».
+    pub(super) fn create_part(&mut self, ctx: &egui::Context, name: String, assembly: bool) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        self.jobs.spawn(ctx, move |_| {
+            let made = project.new_part(&name, assembly);
+            Done::PartCreated(name, made)
+        });
+    }
+
+    /// Положить модель в деталь `part`; `None` — новая деталь по имени
+    /// файла. Такая деталь уже есть — её модель не затирается без спроса.
+    pub(super) fn import(&mut self, ctx: &egui::Context, file: PathBuf, part: Option<String>) {
+        let t = texts();
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        if part.is_none() {
+            if let Some(name) = part_name(&file).filter(|n| self.parts.iter().any(|p| p.name == *n))
+            {
+                self.message = Some(format!("«{name}»: {}", t.part_exists));
+                return;
+            }
+        }
+        self.message = None;
+        self.jobs.spawn(ctx, move |progress| {
+            progress.step(t.importing);
+            Done::Imported(project.import(&file, part.as_deref()))
+        });
+    }
+
+    /// Деталь появилась или изменилась: перечитать список и выбрать её.
+    /// `text` остаётся в строке состояния и после нового сравнения.
+    pub(super) fn reload_on(&mut self, ctx: &egui::Context, part: String, text: String) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        self.want = Some((part, None));
+        self.sticky = Some(text);
+        self.jobs.spawn(ctx, move |_| Done::Parts(project.parts()));
+    }
+
     /// Человек поменял переключатель — запомнить.
     pub(super) fn remember_look(&mut self) {
         let s = &mut self.settings;
@@ -215,4 +276,9 @@ impl App {
             s.save();
         }
     }
+}
+
+/// Имя детали, которое получит модель из файла.
+fn part_name(file: &Path) -> Option<String> {
+    Some(file.file_stem()?.to_string_lossy().into_owned())
 }

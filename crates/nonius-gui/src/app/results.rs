@@ -15,7 +15,11 @@ impl App {
         for done in self.jobs.finished() {
             let current = |name: &str| self.part.as_deref() == Some(name);
             match done {
-                Done::Opened(Ok(p)) => self.set_project(ctx, p),
+                Done::Opened(Ok(p)) => {
+                    self.set_project(ctx, p);
+                    // Остальное в этой пачке — от прошлого проекта.
+                    break;
+                }
                 Done::Opened(Err(e)) => {
                     self.message = Some(format!("{}: {e:#}", t.project_open_failed))
                 }
@@ -135,6 +139,23 @@ impl App {
                 Done::Parts(Err(e)) | Done::Versions(_, Err(e)) | Done::Compared(_, _, Err(e)) => {
                     self.message = Some(format!("{}: {e:#}", t.error))
                 }
+                Done::PartCreated(name, Ok(())) => {
+                    self.new_part = None;
+                    let text = format!("{} «{name}»", t.part_created);
+                    self.reload_on(ctx, name, text);
+                }
+                Done::PartCreated(_, Err(e)) => match self.new_part.as_mut() {
+                    Some(d) => d.failed(format!("{e:#}")),
+                    None => self.message = Some(format!("{}: {e:#}", t.error)),
+                },
+                Done::Imported(Ok((name, warnings))) => {
+                    let mut text = format!("{} «{name}»", t.model_added);
+                    if !warnings.is_empty() {
+                        text = format!("{text}. {}", warnings.join("; "));
+                    }
+                    self.reload_on(ctx, name, text);
+                }
+                Done::Imported(Err(e)) => self.message = Some(format!("{}: {e:#}", t.error)),
                 Done::Crashed => self.message = Some(t.crashed.to_string()),
                 // Устарело: выбрали другое.
                 Done::Versions(..)
@@ -165,6 +186,9 @@ impl App {
             self.load_files(ctx);
         } else {
             self.show_picks(ctx, picks);
+        }
+        if let Some(text) = self.sticky.take() {
+            self.notice = Some(text);
         }
     }
 }

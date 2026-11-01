@@ -16,12 +16,23 @@ use nonius_gui::source::{
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
 
+/// Добавленная модель: файл и деталь.
+type Added = (PathBuf, Option<String>);
+
 struct Fake {
     root: PathBuf,
     /// Что сохранили из окна: деталь и описание.
     saved: Arc<Mutex<Vec<(String, String)>>>,
     /// Что открыли из окна.
     opened: Arc<Mutex<Vec<(String, OpenWay)>>>,
+    /// Какие пары версий сравнивали.
+    compared: Arc<Mutex<Vec<(Pick, Pick)>>>,
+    /// Какие модели добавили: файл и деталь.
+    imported: Arc<Mutex<Vec<Added>>>,
+    /// Какие детали созданы из окна.
+    created: Arc<Mutex<Vec<(String, bool)>>>,
+    /// Название проекта.
+    title: &'static str,
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -38,13 +49,13 @@ fn tetra(at: f32) -> Mesh {
 
 impl ProjectSource for Fake {
     fn title(&self) -> String {
-        "Стенд".into()
+        self.title.into()
     }
     fn root(&self) -> &Path {
         &self.root
     }
     fn parts(&self) -> anyhow::Result<Vec<PartEntry>> {
-        Ok(vec![
+        let mut list = vec![
             PartEntry {
                 name: "кронштейн".into(),
                 assembly: false,
@@ -59,7 +70,29 @@ impl ProjectSource for Fake {
                 dirty: true,
                 model: None,
             },
-        ])
+        ];
+        let made = self.created.lock().unwrap();
+        let added = self.imported.lock().unwrap();
+        let stem = |(f, part): &Added| {
+            let name = f.file_stem().unwrap().to_string_lossy().into_owned();
+            part.clone().unwrap_or(name)
+        };
+        let names = made
+            .iter()
+            .map(|m| m.0.clone())
+            .chain(added.iter().map(stem));
+        for name in names {
+            if !list.iter().any(|p| p.name == name) {
+                list.push(PartEntry {
+                    name,
+                    assembly: false,
+                    latest: None,
+                    dirty: true,
+                    model: None,
+                });
+            }
+        }
+        Ok(list)
     }
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>> {
         let v = |number| VersionEntry {
@@ -82,7 +115,7 @@ impl ProjectSource for Fake {
         progress: &dyn Progress,
     ) -> anyhow::Result<Comparison> {
         progress.step("Сравниваю…");
-        assert_eq!((before, after), (Pick::Version(1), Pick::Version(2)));
+        self.compared.lock().unwrap().push((before, after));
         let region = |role, at, volume_mm3| Region {
             role,
             volume_mm3,
@@ -192,6 +225,25 @@ impl ProjectSource for Fake {
     fn programs(&self, _path: &str) -> Vec<ProgramEntry> {
         vec![program()]
     }
+    fn new_part(&self, name: &str, assembly: bool) -> anyhow::Result<()> {
+        if name == "кронштейн" {
+            anyhow::bail!("такая деталь уже есть");
+        }
+        self.created
+            .lock()
+            .unwrap()
+            .push((name.to_string(), assembly));
+        Ok(())
+    }
+    fn import(&self, file: &Path, part: Option<&str>) -> anyhow::Result<(String, Vec<String>)> {
+        let entry = (file.to_path_buf(), part.map(str::to_string));
+        self.imported.lock().unwrap().push(entry);
+        let stem = file.file_stem().unwrap().to_string_lossy().into_owned();
+        Ok((
+            part.map_or(stem, str::to_string),
+            vec!["превью не сделано".into()],
+        ))
+    }
 }
 
 fn program() -> ProgramEntry {
@@ -230,14 +282,31 @@ fn window_with(
     std::env::set_var("NONIUS_CONFIG_DIR", dir);
     let options = Options {
         project: Some(Box::new(Fake {
-            root: dir.to_path_buf(),
             saved,
             opened,
+            ..fake(dir, "Стенд")
         })),
         opener: Arc::new(|_| anyhow::bail!("не нужно")),
+        creator: Arc::new(|_| anyhow::bail!("не нужно")),
         part: None,
         picks: None,
     };
+    build(options)
+}
+
+fn fake(dir: &Path, title: &'static str) -> Fake {
+    Fake {
+        root: dir.to_path_buf(),
+        saved: Arc::default(),
+        opened: Arc::default(),
+        compared: Arc::default(),
+        imported: Arc::default(),
+        created: Arc::default(),
+        title,
+    }
+}
+
+fn build(options: Options) -> Harness<'static, App> {
     Harness::builder()
         .with_size([1200.0, 800.0])
         .build_eframe(|cc| App::new(&cc.egui_ctx, None, options, Settings::default()))
@@ -263,7 +332,10 @@ fn choose_part_and_see_places() {
         .query_by_label_contains("Масса, г: 12,25 → 13,46")
         .is_some());
     // История: обе версии с описанием; материал и масса.
-    assert!(h.query_by_label_contains("История «кронштейн»").is_some());
+    assert!(
+        h.query_by_label_contains("Сейчас").is_none(),
+        "изменений нет"
+    );
     assert!(h.query_by_label_contains("версия 1").is_some());
     wait_for(&mut h, "126 г");
     assert!(h.query_by_label_contains("из справочника").is_some());
@@ -397,4 +469,197 @@ fn right_click_menu() {
             (path("model.step"), OpenWay::Folder),
         ]
     );
+}
+
+/// Окно, где видно, что попросили у проекта.
+fn window_on(dir: &Path, project: Fake) -> Harness<'static, App> {
+    std::env::set_var("NONIUS_CONFIG_DIR", dir);
+    build(Options {
+        project: Some(Box::new(project)),
+        opener: Arc::new(|p| Ok(Box::new(self::fake(p, "Второй")))),
+        creator: Arc::new(|_| anyhow::bail!("не нужно")),
+        part: None,
+        picks: None,
+    })
+}
+
+fn drop_file(h: &mut Harness<'_, App>, path: &Path) {
+    h.input_mut().dropped_files.push(egui::DroppedFile {
+        path: Some(path.to_path_buf()),
+        ..Default::default()
+    });
+}
+
+#[test]
+fn project_buttons_are_always_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(dir.path(), Arc::default());
+    wait_for(&mut h, "кронштейн");
+    for label in [
+        "Открыть проект…",
+        "Создать проект…",
+        "Новая деталь…",
+        "Добавить модель…",
+    ] {
+        assert!(h.query_by_label(label).is_some(), "нет кнопки {label}");
+    }
+}
+
+#[test]
+fn start_screen_opens_and_creates() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("NONIUS_CONFIG_DIR", dir.path());
+    let mut h = build(Options {
+        project: None,
+        opener: Arc::new(|_| anyhow::bail!("не нужно")),
+        creator: Arc::new(|_| anyhow::bail!("не нужно")),
+        part: None,
+        picks: None,
+    });
+    h.run();
+    assert!(h.query_by_label("Открыть проект…").is_some());
+    assert!(h.query_by_label("Создать проект…").is_some());
+}
+
+#[test]
+fn another_project_replaces_everything() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let second = dir.path().join("второй");
+    std::fs::create_dir(&second).unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+
+    drop_file(&mut h, &second);
+    wait_for(&mut h, "Второй");
+    assert!(h.query_by_label("Стенд").is_none());
+    assert!(
+        h.query_by_label_contains("Добавлено 1").is_none(),
+        "старое сравнение"
+    );
+    assert!(
+        h.query_by_label_contains("версия 1").is_none(),
+        "старая история"
+    );
+}
+
+#[test]
+fn new_part_from_the_window() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let created = project.created.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+
+    h.get_by_label("Новая деталь…").click();
+    wait_for(&mut h, "Это сборка");
+    // Поле названия уже в фокусе: щелчок мимо окошка закрыл бы его.
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("кронштейн");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "такая деталь уже есть");
+
+    // Окошко осталось: имя можно исправить.
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("2");
+    h.run();
+    h.get_by_label("Это сборка").click();
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Создана деталь «кронштейн2»");
+    assert_eq!(*created.lock().unwrap(), [("кронштейн2".to_string(), true)]);
+    assert!(h.query_by_label("кронштейн2").is_some());
+}
+
+#[test]
+fn dropped_model_becomes_a_part_but_never_overwrites() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let imported = project.imported.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+
+    let model = dir.path().join("плита.STEP");
+    drop_file(&mut h, &model);
+    wait_for(&mut h, "Модель добавлена в деталь «плита»");
+    assert!(h.query_by_label_contains("превью не сделано").is_some());
+    assert_eq!(*imported.lock().unwrap(), [(model, None)]);
+
+    // Деталь с таким именем уже есть: её модель не затирается молча.
+    drop_file(&mut h, &dir.path().join("кронштейн.step"));
+    wait_for(&mut h, "такая деталь уже есть");
+    assert_eq!(imported.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn tree_search_and_collapse() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(dir.path(), Arc::default());
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "версия 1");
+
+    // Стрелка сворачивает и разворачивает версии выбранной детали.
+    h.get_by_label("▾").click();
+    h.run();
+    assert!(h.query_by_label_contains("версия 1").is_none());
+    h.get_by_label_contains("кронштейн   v2").click();
+    h.run();
+    assert!(h.query_by_label_contains("версия 1").is_some());
+
+    h.get_by_role(egui::accesskit::Role::TextInput).click();
+    h.run();
+    h.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("КОРП");
+    h.run();
+    assert!(h.query_by_label_contains("кронштейн   v2").is_none());
+    assert!(h.query_by_label_contains("корпус").is_some());
+}
+
+#[test]
+fn map_shows_versions() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    assert!(
+        h.query_by_label("Карта версий").is_none(),
+        "деталь не выбрана"
+    );
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Карта v2");
+    wait_for(&mut h, "Добавлено 1");
+
+    // Щелчок: версия становится «Стало», «Было» — предыдущей, её нет.
+    h.get_by_label("Карта v1").click();
+    for _ in 0..100 {
+        h.step();
+        if compared.lock().unwrap().len() == 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        compared.lock().unwrap().last(),
+        Some(&(Pick::Version(1), Pick::Version(1)))
+    );
+    // Правая кнопка: то же меню, что в истории.
+    h.get_by_label("Карта v2").click_secondary();
+    wait_for(&mut h, "Сделать «Было»");
+    assert!(h.query_by_label("Сделать «Стало»").is_some());
 }

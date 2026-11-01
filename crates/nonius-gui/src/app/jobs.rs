@@ -43,6 +43,10 @@ pub enum Done {
     FileOpened(Pick, bool, anyhow::Result<PathBuf>),
     /// Программы для типа файла.
     Programs(String, Vec<ProgramEntry>),
+    /// Создана деталь.
+    PartCreated(String, anyhow::Result<()>),
+    /// Модель добавлена: деталь и предупреждения.
+    Imported(anyhow::Result<(String, Vec<String>)>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }
@@ -158,6 +162,13 @@ impl Jobs {
         // Шаги сообщает только отменяемая работа: её строка больше не нужна.
         self.clear_progress();
         was
+    }
+
+    /// Забыть все работы: открыт другой проект, их результаты не нужны.
+    pub fn forget_all(&mut self) {
+        self.cancel();
+        self.running.clear();
+        self.clear_progress();
     }
 
     /// Идёт ли работа, которую можно отменить.

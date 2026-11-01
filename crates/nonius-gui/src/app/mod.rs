@@ -8,16 +8,20 @@ mod actions;
 mod files;
 mod history;
 mod jobs;
+mod map;
 mod material;
+mod new_part;
 mod numbers;
 mod open_menu;
 mod panels;
+mod project_bar;
 mod results;
 mod save;
 mod settings;
 mod start;
 mod tabs;
 mod toolbar;
+mod tree;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,6 +43,8 @@ pub struct Options {
     pub project: Option<Box<dyn ProjectSource>>,
     /// Как открыть проект по папке.
     pub opener: Opener,
+    /// Как создать проект в папке и открыть его.
+    pub creator: Opener,
     /// Сразу выбрать деталь.
     pub part: Option<String>,
     /// И сразу сравнить эти версии.
@@ -48,6 +54,7 @@ pub struct Options {
 /// Состояние окна.
 pub struct App {
     opener: Opener,
+    creator: Opener,
     project: Option<Arc<dyn ProjectSource>>,
     parts: Vec<PartEntry>,
     programs: open_menu::Programs,
@@ -67,12 +74,20 @@ pub struct App {
     message: Option<String>,
     /// Что получилось: «Сохранена версия …», «Сравнение отменено».
     notice: Option<String>,
+    /// Что сказать, когда деталь будет показана.
+    sticky: Option<String>,
     path_input: String,
+    /// Строка поиска в дереве.
+    search: String,
+    /// История выбранной детали раскрыта.
+    tree_open: bool,
     materials: Vec<MaterialEntry>,
     /// Материал и масса для пары версий: «Было», «Стало», сейчас.
     masses: Option<((Pick, Pick), [MassEntry; 3])>,
     /// Открытое окошко «Сохранить версию».
     save: Option<save::SaveDialog>,
+    /// Открытое окошко «Новая деталь».
+    new_part: Option<new_part::NewPart>,
     /// Ввод своего материала.
     custom: material::Custom,
     /// Материал записывается — список выбора ждёт.
@@ -102,13 +117,14 @@ impl App {
         };
         let mut app = Self {
             opener: options.opener,
+            creator: options.creator,
             project: None,
             parts: Vec::new(),
             programs: Default::default(),
             part: None,
             versions: Vec::new(),
             picks: (Pick::Current, Pick::Current),
-            want: options.part.map(|p| (p, options.picks)),
+            want: None,
             comparison: None,
             shown: None,
             viewport: Viewport::new(render),
@@ -118,10 +134,14 @@ impl App {
             jobs: Jobs::default(),
             message: None,
             notice: None,
+            sticky: None,
             path_input: String::new(),
+            search: String::new(),
+            tree_open: true,
             materials: Vec::new(),
             masses: None,
             save: None,
+            new_part: None,
             custom: material::Custom::default(),
             material_busy: false,
             tab: Some(tabs::Tab::Files),
@@ -138,6 +158,7 @@ impl App {
                 }
             }
         }
+        app.want = options.part.map(|p| (p, options.picks));
         app
     }
 }
@@ -145,19 +166,20 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.take_results(ctx);
-        if let Some(dir) = dropped_folder(ctx) {
-            self.open(ctx, dir);
-        }
+        self.take_dropped(ctx);
 
         if self.project.is_none() {
             start::show(self, ctx);
             return;
         }
+        project_bar::show(self, ctx);
         panels::status_bar(self, ctx);
-        panels::parts(self, ctx);
+        map::show(self, ctx);
+        tree::show(self, ctx);
         panels::changes(self, ctx);
         tabs::show(self, ctx);
         save::show(self, ctx);
+        new_part::show(self, ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -178,14 +200,35 @@ impl eframe::App for App {
     }
 }
 
-/// Папка, которую перетащили в окно (файл — его папка).
-fn dropped_folder(ctx: &egui::Context) -> Option<PathBuf> {
-    ctx.input(|i| {
-        i.raw.dropped_files.iter().find_map(|f| {
-            let p = f.path.as_deref()?;
-            Some(if p.is_dir() { p } else { p.parent()? }.to_path_buf())
-        })
-    })
+impl App {
+    /// Перетащили в окно: модели идут в проект, папка открывается как
+    /// проект, у другого файла открывается его папка.
+    fn take_dropped(&mut self, ctx: &egui::Context) {
+        let paths: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect()
+        });
+        let (models, other): (Vec<_>, Vec<_>) = paths
+            .into_iter()
+            .partition(|p| self.project.is_some() && project_bar::is_model(p));
+        if !models.is_empty() {
+            for file in models {
+                self.import(ctx, file, None);
+            }
+        } else if let Some(path) = other.first() {
+            let dir = if path.is_dir() {
+                Some(path.as_path())
+            } else {
+                path.parent()
+            };
+            if let Some(dir) = dir {
+                self.open(ctx, dir.to_path_buf());
+            }
+        }
+    }
 }
 
 /// Подпись версии: `v3` или «текущее».

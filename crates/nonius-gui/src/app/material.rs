@@ -5,7 +5,7 @@ use eframe::egui::{self, Color32, RichText};
 
 use super::numbers::{density_text, mass_text};
 use super::{pick_label, App};
-use crate::source::{MassEntry, MaterialEntry};
+use crate::source::{MassEntry, MaterialEntry, Pick};
 use crate::texts::texts;
 
 /// Ввод своего материала: название и плотность.
@@ -28,7 +28,7 @@ enum Choice {
 /// Нарисовать блок.
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
-    if app.part.is_none() || app.versions.is_empty() && !dirty(app) {
+    if app.part.is_none() || app.versions.is_empty() && !app.part_dirty() {
         return;
     }
     ui.add_space(8.0);
@@ -116,12 +116,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.label(RichText::new(t.material_hint).weak());
 }
 
-fn dirty(app: &App) -> bool {
-    app.parts
-        .iter()
-        .any(|p| Some(&p.name) == app.part.as_ref() && p.dirty)
-}
-
 /// Материал детали — из справочника (то же название и та же плотность)?
 fn catalog_entry<'a>(materials: &'a [MaterialEntry], now: &MassEntry) -> Option<&'a MaterialEntry> {
     let name = now.material.as_deref()?;
@@ -132,18 +126,14 @@ fn catalog_entry<'a>(materials: &'a [MaterialEntry], now: &MassEntry) -> Option<
 
 /// «v2: 113 г → текущее: 126 г»; одна версия — просто масса. Нет массы —
 /// почему, оранжевым.
-fn mass_line(
-    ui: &mut egui::Ui,
-    picks: (crate::source::Pick, crate::source::Pick),
-    before: &MassEntry,
-    after: &MassEntry,
-) {
+fn mass_line(ui: &mut egui::Ui, picks: (Pick, Pick), before: &MassEntry, after: &MassEntry) {
     let warn = Color32::from_rgb(170, 100, 0);
     let text = |m: &MassEntry| m.mass_kg.map(mass_text);
     match (text(before), text(after)) {
         (_, None) => {
             let why = after.no_mass.clone().unwrap_or_default();
-            ui.add(egui::Label::new(RichText::new(why).color(warn)).wrap());
+            let text = no_mass_text(picks.1, why);
+            ui.add(egui::Label::new(RichText::new(text).color(warn)).wrap());
         }
         (b, Some(a)) if picks.0 == picks.1 || b.as_ref() == Some(&a) => {
             ui.label(RichText::new(a).strong());
@@ -156,6 +146,15 @@ fn mass_line(
                 pick_label(picks.1)
             ));
         }
+    }
+}
+
+/// Почему массы нет. Материал выше — текущий, а масса — версии «Стало»,
+/// поэтому у версии причина подписана её номером.
+fn no_mass_text(after: Pick, why: String) -> String {
+    match after {
+        Pick::Current => why,
+        Pick::Version(_) => format!("{}: {why}", pick_label(after)),
     }
 }
 
@@ -228,6 +227,16 @@ mod tests {
         assert_eq!(parse_density("-5"), None);
         assert_eq!(parse_density("сталь"), None);
         assert_eq!(parse_density(""), None);
+    }
+
+    #[test]
+    fn missing_mass_names_the_version() {
+        let why = || "материал не задан".to_string();
+        assert_eq!(no_mass_text(Pick::Current, why()), why());
+        assert_eq!(
+            no_mass_text(Pick::Version(1), why()),
+            "v1: материал не задан"
+        );
     }
 
     #[test]
