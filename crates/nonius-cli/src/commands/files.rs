@@ -2,8 +2,23 @@
 
 use anyhow::{bail, Result};
 use nonius_app::{programs_for, App, DiffLineKind, FileChangeKind, OpenWay};
+use nonius_core::VersionNumber;
 
 use crate::format::parse_version;
+
+/// Какие версии показать: `from` по умолчанию последняя.
+pub fn range(
+    app: &App,
+    part: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<(Option<VersionNumber>, Option<VersionNumber>)> {
+    let from = match from {
+        Some(v) => Some(parse_version(v)?),
+        None => app.latest(&app.item(part)?)?.map(|v| v.version),
+    };
+    Ok((from, to.map(parse_version).transpose()?))
+}
 
 /// `nonius files`.
 pub fn files(
@@ -13,12 +28,7 @@ pub fn files(
     to: Option<&str>,
     text: Option<&str>,
 ) -> Result<()> {
-    let item = app.item(part)?;
-    let from = match from {
-        Some(v) => Some(parse_version(v)?),
-        None => app.latest(&item)?.map(|v| v.version),
-    };
-    let to = to.map(parse_version).transpose()?;
+    let (from, to) = range(app, part, from, to)?;
     if let Some(path) = text {
         for line in app.file_diff(part, from, to, path)? {
             let mark = match line.kind {

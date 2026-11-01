@@ -4,7 +4,7 @@
 //! печатает итог. Те же действия вызывают окно и (позже) MCP для ИИ.
 //!
 //! Файлы: здесь — запуск и выбор команды, набор модулей; `args.rs` — команды
-//! и справка, `commands/` — печать итогов, `format.rs` — мелочи вывода,
+//! и справка, `commands/` — печать итогов и ответ в JSON, `format.rs` — мелочи вывода,
 //! `window.rs` — окно (`nonius` без команды и `nonius view`),
 //! `welcome.rs` — подсказка, если окно не открылось.
 
@@ -23,14 +23,22 @@ use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
 use args::{Cli, Command, PartCommand};
-use commands::{compare, files, history, import, passport, project};
+use commands::{compare, describe, files, history, import, json, passport, project};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
     if std::env::args_os().len() <= 1 {
         return window::double_click();
     }
-    let cli = Cli::parse();
+    let wants_json = std::env::args_os().any(|a| a == "--json");
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) if wants_json => return json::usage(e),
+        Err(e) => e.exit(),
+    };
+    if cli.json {
+        return json::main(&cli);
+    }
     let in_window = matches!(cli.command, Command::View { .. });
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
@@ -65,20 +73,23 @@ fn registry_with(occt: fn(&mut Registry) -> nonius_core::Result<()>) -> Registry
     r
 }
 
-fn run(cli: Cli) -> Result<()> {
-    let app = || -> Result<App> {
-        let start = match &cli.project {
-            Some(p) => p.clone(),
-            None => std::env::current_dir().context("не удалось узнать текущую папку")?,
-        };
-        let ai = cli
-            .ai
-            .as_deref()
-            .map(|name| AiActor::new(name, cli.ai_model.as_deref()))
-            .transpose()?;
-        let git = GitOptions { ai, identity: None };
-        Ok(App::open(&start, registry())?.with_git_options(git))
+/// Открыть проект: из `-C` или ближайший к текущей папке.
+fn open_app(cli: &Cli) -> Result<App> {
+    let start = match &cli.project {
+        Some(p) => p.clone(),
+        None => std::env::current_dir().context("не удалось узнать текущую папку")?,
     };
+    let ai = cli
+        .ai
+        .as_deref()
+        .map(|name| AiActor::new(name, cli.ai_model.as_deref()))
+        .transpose()?;
+    let git = GitOptions { ai, identity: None };
+    Ok(App::open(&start, registry())?.with_git_options(git))
+}
+
+fn run(cli: Cli) -> Result<()> {
+    let app = || open_app(&cli);
 
     match &cli.command {
         Command::Init { path, name } => {
@@ -91,6 +102,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Info => project::info(&app()?)?,
         Command::Overview { changed } => project::overview(&app()?, *changed)?,
         Command::Modules => project::modules(&registry()),
+        Command::Describe => println!("{}", describe::describe()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
         Command::Status { part } => history::status(&app()?, part.as_deref())?,
         Command::Commit { part, message } => history::commit(&app()?, part, message)?,

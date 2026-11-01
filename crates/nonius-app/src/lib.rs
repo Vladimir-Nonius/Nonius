@@ -35,7 +35,7 @@ use nonius_core::Project;
 use nonius_store::Store;
 
 pub use compare::{CompareOptions, Comparison, NoProgress, Progress};
-pub use error::{Error, Result};
+pub use error::{Error, Result, ERROR_CODES};
 pub use import::{Imported, PREVIEW_FORMAT};
 pub use items::{ItemState, ItemStatus};
 pub use materials::{find_material, Material, MATERIALS};
@@ -45,7 +45,7 @@ pub use system::{programs_for, OpenWay, Program};
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.
 pub use nonius_store::{
     is_text_file, AiActor, DiffLine, DiffLineKind, FileChange, FileChangeKind, GitOptions,
-    VersionFile, VersionInfo,
+    StoreError, VersionFile, VersionInfo,
 };
 
 /// Открытый проект и подключённые модули.

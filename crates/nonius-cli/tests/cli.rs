@@ -132,6 +132,91 @@ fn diff_between_versions_lists_files() {
     assert!(!out.contains("изменений нет"), "{out}");
 }
 
+fn json(dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let (_, out) = nonius(dir, args);
+    serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{e}: {out}"))
+}
+
+#[test]
+fn json_answers_and_stable_error_codes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let code = |out: serde_json::Value| {
+        assert_eq!(out["ok"], false, "{out}");
+        out["error"]["code"].as_str().unwrap().to_string()
+    };
+    assert_eq!(code(json(d, &["list", "--json"])), "not_a_project");
+    assert!(nonius(d, &["init"]).0);
+    assert_eq!(code(json(d, &["--json", "нет-команды"])), "usage");
+    assert_eq!(code(json(d, &["log", "нет", "--json"])), "unknown_item");
+    assert_eq!(code(json(d, &["init", "--json"])), "no_json");
+
+    let made = json(d, &["part", "new", "вал", "--json"]);
+    assert_eq!(made["data"]["kind"], "part", "{made}");
+    assert_eq!(code(json(d, &["diff", "вал", "--json"])), "no_versions");
+
+    let saved = json(
+        d,
+        &["commit", "вал", "-m", "Первая", "--ai", "Claude", "--json"],
+    );
+    assert_eq!(saved["data"]["ref"], "вал@v1", "{saved}");
+    assert_eq!(saved["data"]["ai"]["name"], "Claude", "{saved}");
+    assert_eq!(saved["data"]["committer"], "Тестировщик", "{saved}");
+    assert_eq!(
+        code(json(d, &["commit", "вал", "-m", "ещё", "--json"])),
+        "no_changes"
+    );
+    assert_eq!(
+        code(json(d, &["restore", "вал", "v9", "--json"])),
+        "unknown_version"
+    );
+
+    let top = json(d, &["overview", "--json"]);
+    assert_eq!(top["data"]["saved"], 1, "{top}");
+    assert_eq!(top["data"]["items"][0]["latest"]["version"], "v1", "{top}");
+
+    let docs = d.join("parts").join("вал").join("docs");
+    std::fs::write(docs.join("чертёж.txt"), "сталь").unwrap();
+    let status = json(d, &["status", "--json"]);
+    assert_eq!(status["data"]["items"][0]["state"], "changed", "{status}");
+    let diff = json(d, &["diff", "вал", "--json"]);
+    assert_eq!(diff["data"]["files"][0]["change"], "added", "{diff}");
+    assert_eq!(diff["data"]["to"], serde_json::Value::Null, "{diff}");
+    let lines = json(d, &["files", "вал", "--text", "docs/чертёж.txt", "--json"]);
+    assert_eq!(lines["data"]["lines"][0]["kind"], "added", "{lines}");
+    let material = json(d, &["material", "вал", "Ст3", "--json"]);
+    assert_eq!(material["data"]["mass"]["missing"], "volume", "{material}");
+}
+
+#[test]
+fn describe_lists_commands_and_codes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = json(tmp.path(), &["describe"]);
+    let names: Vec<&str> = out["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"overview") && names.contains(&"part new"),
+        "{names:?}"
+    );
+    let commit = out["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "commit")
+        .unwrap();
+    assert_eq!(commit["json"], true);
+    assert!(commit["args"].to_string().contains("--message"), "{commit}");
+    assert!(out["options"].to_string().contains("NONIUS_AI"), "{out}");
+    assert!(
+        out["errors"].to_string().contains("unknown_version"),
+        "{out}"
+    );
+}
+
 const STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('кронштейн','2026-10-26',('Владимир'),(''),'SwSTEP 2.0','SolidWorks 2020','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
 #[test]

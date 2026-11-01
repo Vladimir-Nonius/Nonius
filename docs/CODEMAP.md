@@ -10,7 +10,8 @@
 |---|---|
 | Новое действие программы (для CLI, окна, MCP) | `nonius-app/src/lib.rs`, файл темы в `nonius-app/src/` |
 | Новая команда `nonius …` | действие в `nonius-app`, затем `nonius-cli/src/args.rs` (команда и справка), `main.rs` (вызов), печать в `commands/` |
-| Изменить вывод команды | `nonius-cli/src/commands/<группа>.rs`, общие мелочи — `format.rs` |
+| Изменить вывод команды | `nonius-cli/src/commands/<группа>.rs`, общие мелочи — `format.rs`; ответ `--json` — `commands/json/` |
+| Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
@@ -190,6 +191,8 @@
 | `commands/files.rs` | `files`, `open` |
 | `commands/compare.rs` | `diff`, `render` |
 | `commands/passport.rs` | `material`, `materials` |
+| `commands/json/mod.rs`, `view.rs` | ответ `--json`, код ошибки, выход; вид данных в JSON |
+| `commands/describe.rs` | `describe`: команды и коды ошибок из разбора команд |
 
 ## Тесты
 
