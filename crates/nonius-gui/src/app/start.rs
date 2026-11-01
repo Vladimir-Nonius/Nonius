@@ -1,5 +1,6 @@
 //! Начальный экран, пока проект не открыт: «Открыть проект…», «Создать
-//! проект…» и перетаскивание папки в окно.
+//! проект…» и перетаскивание папки или моделей в окно: модели предлагают
+//! создать проект.
 
 use eframe::egui::{self, RichText};
 
@@ -9,6 +10,7 @@ use crate::texts::texts;
 /// Нарисовать начальный экран.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
+    new_here(app, ctx);
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.3);
@@ -28,7 +30,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let create = egui::Button::new(RichText::new(t.create_project).size(16.0));
             if ui.add(create).clicked() {
                 if let Some(dir) = choose_folder(&app.path_input) {
-                    app.create(ctx, dir);
+                    app.create(ctx, dir, Vec::new());
                 }
             }
             ui.add_space(6.0);
@@ -55,6 +57,43 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
         });
     });
+}
+
+/// Окошко: создать проект там, откуда бросили модели?
+fn new_here(app: &mut App, ctx: &egui::Context) {
+    let t = texts();
+    let Some((dir, models)) = app.new_here.clone() else {
+        return;
+    };
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::new("new-here")).show(ctx, |ui| {
+        ui.set_width(420.0);
+        ui.heading(t.create_here);
+        ui.add_space(6.0);
+        ui.label(format!("{}: {}", t.models_found, models.len()));
+        ui.label(RichText::new(dir.display().to_string()).weak());
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button(t.create).clicked() {
+                answer = Some(Some(dir.clone()));
+            }
+            if ui.button(t.other_folder).clicked() {
+                answer = choose_folder(&app.path_input).map(Some);
+            }
+            if ui.button(t.cancel).clicked() {
+                answer = Some(None);
+            }
+        });
+    });
+    match answer {
+        Some(Some(dir)) => {
+            app.new_here = None;
+            app.create(ctx, dir, models);
+        }
+        Some(None) => app.new_here = None,
+        None if modal.should_close() => app.new_here = None,
+        None => {}
+    }
 }
 
 #[cfg(windows)]

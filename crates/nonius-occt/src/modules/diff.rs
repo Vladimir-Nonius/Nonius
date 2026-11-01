@@ -1,11 +1,63 @@
 //! Разница двух тел булевыми операциями: добавленный и убранный материал.
 
-use std::path::Path;
+use std::cell::RefCell;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::SystemTime;
 
 use super::{deflection, ANGULAR};
 use crate::render::{colors, render, Image, Layer, LayerKind, Mesh, View};
 use crate::shape::Shape;
 use crate::OcctError;
+
+/// Файл и его состояние: что было посчитано.
+type Seen = (PathBuf, Option<(u64, SystemTime)>);
+/// Какие файлы сравнивали и с каким допуском.
+type DiffKey = (Seen, Seen, u64);
+/// Запомненная разница.
+type Known = Option<(DiffKey, Rc<GeometryDiff>)>;
+
+thread_local! {
+    /// Последняя разница на этом потоке. Сравнение и сцена просят одну и ту
+    /// же пару подряд, а булева операция — самая долгая часть работы. Тела
+    /// OpenCascade нельзя передавать между потоками, поэтому запоминает поток.
+    static LAST: RefCell<Known> = const { RefCell::new(None) };
+}
+
+fn seen(path: &Path) -> Seen {
+    let state = fs::metadata(path)
+        .ok()
+        .and_then(|m| Some((m.len(), m.modified().ok()?)));
+    (path.to_path_buf(), state)
+}
+
+/// Забыть запомненную разницу. Вызывать, пока OpenCascade занят этим потоком:
+/// при выходе потока тела освободились бы рядом с работой другого.
+pub fn forget_diff() {
+    LAST.with(|l| l.borrow_mut().take());
+}
+
+/// Разница двух STEP-файлов; подряд для той же пары считается один раз.
+pub(super) fn shared_diff(
+    before: &Path,
+    after: &Path,
+    tolerance_mm: f64,
+) -> std::result::Result<Rc<GeometryDiff>, OcctError> {
+    let key = (seen(before), seen(after), tolerance_mm.to_bits());
+    let known = LAST.with(|l| {
+        l.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, d)| d.clone())
+    });
+    if let Some(diff) = known {
+        return Ok(diff);
+    }
+    let diff = Rc::new(GeometryDiff::of_files(before, after, tolerance_mm)?);
+    LAST.with(|l| *l.borrow_mut() = Some((key, diff.clone())));
+    Ok(diff)
+}
 
 /// Разница двух тел: что добавлено, что убрано, что осталось.
 pub struct GeometryDiff {

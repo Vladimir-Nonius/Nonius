@@ -138,9 +138,8 @@ impl App {
                     .spawn(ctx, move |_| Done::Programs(kind, project.programs(&path)));
             }
             Some(Ask::ReplaceModel(part)) => {
-                if let Some(file) = super::project_bar::choose_model() {
-                    self.import(ctx, file, Some(part));
-                }
+                let models = super::file_menu::choose_models();
+                self.start_adding(ctx, models, Some(part));
             }
             None => {}
         }

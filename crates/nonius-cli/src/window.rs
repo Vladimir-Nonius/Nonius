@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
+use crate::format::{parse_version, short_date};
+use crate::window_lock::WindowLock;
+use crate::{welcome, window_registry};
+
 use anyhow::{bail, Context, Result};
 use nonius_app::{
     is_text_file, App, CompareOptions, DiffLineKind, FileChangeKind, History, Mass, MaterialChoice,
@@ -16,13 +20,11 @@ use nonius_app::{
 use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
-    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, OpenWay,
-    PartEntry, Pick, ProgramEntry, Progress, ProjectSource, VersionEntry,
+    AddedModel, Comparison, DiffEntry, DiffKind, FileEntry, FileState, Machine, MassEntry,
+    MaterialEntry, OpenWay, PartEntry, Pick, ProgramEntry, Progress, ProjectSource, Readiness,
+    VersionEntry,
 };
 use nonius_scene::Scene;
-
-use crate::format::{parse_version, short_date};
-use crate::{welcome, window_registry};
 
 /// Проект для окна поверх `nonius-app`.
 struct AppSource {
@@ -34,14 +36,19 @@ struct AppSource {
     /// папку детали и git: иначе git спотыкается о свой index.lock, а
     /// сравнение видит полусохранённое.
     files: RwLock<()>,
+    /// Держит проект за этим процессом, пока он открыт.
+    _lock: WindowLock,
 }
 
 impl AppSource {
     fn open(path: &Path) -> Result<Box<dyn ProjectSource>> {
+        let app = App::open(path, window_registry())?;
+        let lock = WindowLock::take(app.project().root())?;
         Ok(Box::new(Self {
-            app: App::open(path, window_registry())?,
+            app,
             busy: Mutex::new(()),
             files: RwLock::new(()),
+            _lock: lock,
         }))
     }
 
@@ -53,6 +60,23 @@ impl AppSource {
             bail!("проект создан, но история версий не включена: {why}");
         }
         Self::open(path)
+    }
+
+    /// Деталь как она есть. Сцены нет — вторым значением идёт причина.
+    fn model_scene(
+        &self,
+        part: &str,
+        pick: Pick,
+        steps: &Steps,
+    ) -> (Option<Scene>, Option<String>) {
+        let files = version(pick).and_then(|at| Ok(self.app.model_view(part, at, steps)?));
+        match files {
+            Ok(files) => read_scene(&files),
+            Err(e) => match e.downcast_ref() {
+                Some(nonius_app::Error::NoRenderer) => (None, None),
+                _ => (None, Some(format!("{e:#}"))),
+            },
+        }
     }
 
     fn reading(&self) -> RwLockReadGuard<'_, ()> {
@@ -74,6 +98,60 @@ impl nonius_app::Progress for Steps<'_> {
 
     fn cancelled(&self) -> bool {
         self.0.cancelled()
+    }
+}
+
+/// Прочитать сцену из файлов отрисовщиков.
+fn read_scene(files: &[PathBuf]) -> (Option<Scene>, Option<String>) {
+    let glb = files
+        .iter()
+        .find(|p| p.file_name().is_some_and(|n| n == nonius_occt::CHANGES_GLB));
+    let Some(glb) = glb else {
+        return (None, None);
+    };
+    match std::fs::read(glb)
+        .map_err(anyhow::Error::from)
+        .and_then(|b| Ok(Scene::from_glb(&b)?))
+    {
+        Ok(s) => (Some(s), None),
+        Err(e) => (None, Some(format!("{e:#}"))),
+    }
+}
+
+/// Сказать словами о том, что в командной строке было бы подсказкой.
+fn in_words(e: nonius_app::Error) -> anyhow::Error {
+    use nonius_app::Error;
+    use nonius_core::Error as Core;
+    match e {
+        Error::Core(Core::NotAProject(path)) => anyhow::anyhow!(
+            "в папке {} нет проекта Nonius. Выберите другую папку или создайте проект",
+            path.display()
+        ),
+        Error::Core(Core::AlreadyExists(path)) => {
+            anyhow::anyhow!("это уже есть: {}", path.display())
+        }
+        Error::Store(nonius_app::StoreError::Identity) => {
+            anyhow::anyhow!("не задано имя автора версий: перезапустите Nonius, он спросит имя")
+        }
+        e => e.into(),
+    }
+}
+
+/// Компьютер для окна: git, LFS, имя автора.
+struct ThisMachine;
+
+impl Machine for ThisMachine {
+    fn readiness(&self) -> Readiness {
+        let r = nonius_app::readiness();
+        Readiness {
+            git: r.git,
+            lfs: r.lfs,
+            author: r.author,
+        }
+    }
+
+    fn set_author(&self, name: &str) -> Result<()> {
+        Ok(nonius_app::set_author(name)?)
     }
 }
 
@@ -134,6 +212,7 @@ impl ProjectSource for AppSource {
                 latest: s.latest.as_ref().map(|v| v.version.to_string()),
                 dirty: !s.changes.is_empty(),
                 model: self.app.model_file(s.item.name.as_str()).ok().flatten(),
+                stamp: self.app.stamp(&s.item),
             })
             .collect())
     }
@@ -162,9 +241,10 @@ impl ProjectSource for AppSource {
         after: Pick,
         progress: &dyn Progress,
     ) -> Result<Comparison> {
-        let Some(from) = version(before)? else {
+        let from = version(before)?;
+        if from.is_none() && before != after {
             bail!("«Было» — это сохранённая версия: сравнивать можно с ней");
-        };
+        }
         let _one_at_a_time = match self.busy.try_lock() {
             Ok(g) => g,
             Err(TryLockError::Poisoned(e)) => e.into_inner(),
@@ -175,16 +255,31 @@ impl ProjectSource for AppSource {
             }
         };
         let _files = self.reading();
+        let steps = Steps(progress);
+        // Сначала деталь: она готова за секунды, цвета считаются дольше.
+        let (model, model_problem) = self.model_scene(part, after, &steps);
+        let Some(from) = from.filter(|_| before != after) else {
+            return Ok(Comparison {
+                scene: model,
+                scene_problem: model_problem,
+                ..Comparison::default()
+            });
+        };
+        if let Some(scene) = &model {
+            progress.model(scene.clone());
+        }
         let options = CompareOptions {
             reports: true,
             render: true,
         };
-        let steps = Steps(progress);
         let to = version(after)?;
-        let c = match self.app.compare(part, Some(from), to, &options, &steps) {
+        let compared = self.app.compare(part, Some(from), to, &options, &steps);
+        // Тела разницы освобождаются, пока OpenCascade занят этой работой.
+        nonius_occt::forget_diff();
+        let c = match compared {
             Ok(c) => c,
-            // 3D не получилось (нет OpenCascade, в STEP нет геометрии) —
-            // числа всё равно покажем, а причину скажем словами.
+            // Цвета не получились (нет OpenCascade, булева операция не
+            // сошлась) — деталь и числа всё равно покажем, а причину скажем.
             Err(nonius_app::Error::Cancelled) => bail!("сравнение отменено"),
             Err(e) => {
                 let problem = match e {
@@ -194,24 +289,17 @@ impl ProjectSource for AppSource {
                 let numbers = CompareOptions::default();
                 let c = self.app.compare(part, Some(from), to, &numbers, &steps)?;
                 return Ok(Comparison {
-                    scene: None,
+                    step_behind: c.step_behind(),
+                    scene: model,
                     scene_problem: problem,
                     reports: c.reports,
                 });
             }
         };
-        let (scene, scene_problem) = match c.file(nonius_occt::CHANGES_GLB) {
-            None => (None, None),
-            Some(glb) => match std::fs::read(glb)
-                .map_err(anyhow::Error::from)
-                .and_then(|b| Ok(Scene::from_glb(&b)?))
-            {
-                Ok(s) => (Some(s), None),
-                Err(e) => (None, Some(format!("{e:#}"))),
-            },
-        };
+        let (scene, scene_problem) = read_scene(&c.files);
         Ok(Comparison {
-            scene,
+            step_behind: c.step_behind(),
+            scene: scene.or(model),
             scene_problem,
             reports: c.reports,
         })
@@ -351,12 +439,22 @@ impl ProjectSource for AppSource {
         Ok(())
     }
 
-    fn import(&self, file: &Path, part: Option<&str>) -> Result<(String, Vec<String>)> {
+    fn add_model(&self, file: &Path, part: &str, message: &str) -> Result<AddedModel> {
         // Импорт читает STEP, а OpenCascade работает по одному.
         let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let _files = self.writing();
-        let imported = self.app.import(file, part)?;
-        Ok((imported.item.name.to_string(), imported.warnings))
+        let imported = self.app.import(file, Some(part))?;
+        let name = imported.item.name.to_string();
+        let version = match self.app.save_version(&name, message) {
+            Ok(v) => Some(v.version.get()),
+            Err(nonius_app::Error::Store(nonius_app::StoreError::NoChanges(_))) => None,
+            Err(e) => return Err(in_words(e)),
+        };
+        Ok(AddedModel {
+            part: name,
+            version,
+            warnings: imported.warnings,
+        })
     }
 }
 
@@ -405,6 +503,12 @@ pub fn open(
     };
     // Не в папке проекта — окно откроет последний проект или начальный экран.
     let source = AppSource::open(&start).ok();
+    let open_project = |p: &Path| {
+        AppSource::open(p).map_err(|e| match e.downcast() {
+            Ok(e) => in_words(e),
+            Err(e) => e,
+        })
+    };
     let pick = |v: Option<&str>| -> Result<Option<Pick>> {
         v.map(|v| Ok(Pick::Version(parse_version(v)?.get())))
             .transpose()
@@ -415,8 +519,9 @@ pub fn open(
     };
     nonius_gui::run(nonius_gui::Options {
         project: source,
-        opener: Arc::new(|p: &Path| AppSource::open(p)),
+        opener: Arc::new(open_project),
         creator: Arc::new(|p: &Path| AppSource::create(p)),
+        machine: Arc::new(ThisMachine),
         part: part.map(str::to_string),
         picks,
     })
@@ -545,14 +650,71 @@ mod tests {
         assert!(src.new_part("корпус", false).is_err(), "имя занято");
         let step = tmp.path().join("пластина.step");
         std::fs::write(&step, STEP).unwrap();
-        let (name, _) = src.import(&step, None).unwrap();
-        assert_eq!(name, "пластина");
-        let (name, _) = src.import(&step, Some("корпус")).unwrap();
-        assert_eq!(name, "корпус");
+        let added = src.add_model(&step, "пластина", "Первая").unwrap();
+        assert_eq!((added.part.as_str(), added.version), ("пластина", Some(1)));
+        let added = src.add_model(&step, "корпус", "Модель").unwrap();
+        assert_eq!((added.part.as_str(), added.version), ("корпус", Some(1)));
         let parts = src.parts().unwrap();
         assert_eq!(parts.len(), 2);
         assert!(parts.iter().all(|p| p.model.is_some()), "{parts:?}");
+        assert!(
+            parts.iter().all(|p| !p.dirty),
+            "версии сохранены: {parts:?}"
+        );
         assert!(parts.iter().any(|p| p.name == "корпус" && p.assembly));
+
+        // Тот же файл ещё раз: регистр не важен, новой версии нет.
+        let added = src.add_model(&step, "ПЛАСТИНА", "Снова").unwrap();
+        assert_eq!((added.part.as_str(), added.version), ("пластина", None));
+        assert_eq!(src.parts().unwrap().len(), 2);
+
+        // Деталь без единой версии видна как есть: сравнивать не требуется.
+        let said = Said::default();
+        src.new_part("пустая", false).unwrap();
+        let shown = src
+            .compare("пустая", Pick::Current, Pick::Current, &said)
+            .unwrap();
+        assert!(shown.reports.is_empty());
+    }
+
+    #[test]
+    fn broken_model_changes_nothing() {
+        for (k, v) in [
+            ("GIT_AUTHOR_NAME", "Тестировщик"),
+            ("GIT_AUTHOR_EMAIL", "test@example.com"),
+            ("GIT_COMMITTER_NAME", "Тестировщик"),
+            ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ] {
+            std::env::set_var(k, v);
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path().join("Станок");
+        std::fs::create_dir(&d).unwrap();
+        let src = AppSource::create(&d).unwrap();
+        let good = tmp.path().join("пластина.step");
+        std::fs::write(&good, STEP).unwrap();
+        src.add_model(&good, "пластина", "Первая").unwrap();
+
+        let bad = tmp.path().join("мусор.step");
+        std::fs::write(&bad, "мусор").unwrap();
+        assert!(src.add_model(&bad, "новая", "Нет").is_err());
+        assert!(src.add_model(&bad, "пластина", "Нет").is_err());
+        let parts = src.parts().unwrap();
+        assert_eq!(parts.len(), 1, "деталь-призрак: {parts:?}");
+        assert!(!parts[0].dirty, "рабочая модель цела");
+        let model = d.join("parts").join("пластина").join("model.step");
+        assert_eq!(std::fs::read_to_string(model).unwrap(), STEP);
+    }
+
+    #[test]
+    fn no_project_inside_a_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        nonius_app::create_project(d, Some("Станок")).unwrap();
+        let inner = d.join("parts");
+        let e = nonius_app::create_project(&inner, None).unwrap_err();
+        assert_eq!(e.code(), "inside_project");
+        assert!(e.to_string().contains("Станок"), "{e}");
     }
 
     #[test]

@@ -99,6 +99,12 @@ impl Comparison {
     pub fn is_empty(&self) -> bool {
         self.reports.iter().all(ChangeReport::is_empty) && self.file_changes.is_empty()
     }
+
+    /// Файл SolidWorks менялся, а STEP нет: форма здесь — старая.
+    pub fn step_behind(&self) -> bool {
+        let changed = |name: &str| self.file_changes.iter().any(|f| f.path == name);
+        !changed("model.step") && (changed("model.sldprt") || changed("model.sldasm"))
+    }
 }
 
 /// Снимки обеих версий для модулей. Готовятся только при промахе кэша:
@@ -168,16 +174,17 @@ impl App {
             tolerance_mm: self.project.config().compare.tolerance_mm,
             ..CompareContext::default()
         };
-        let after_id = match after {
-            Some(v) => format!("версия {}", v.commit),
-            None => format!("текущее {}", cache::dir_fingerprint(&item.dir)?),
+        let key_with = |meta: bool| -> Result<Vec<String>> {
+            Ok(vec![
+                format!("nonius-cache {}", CacheEntry::CURRENT),
+                format!("версия {}", before.commit),
+                match after {
+                    Some(v) => format!("версия {}", v.commit),
+                    None => format!("текущее {}", cache::model_fingerprint(&item.dir, meta)?),
+                },
+                format!("{} {}", ctx.tolerance_mm, ctx.relative_tolerance),
+            ])
         };
-        let key = vec![
-            format!("nonius-cache {}", CacheEntry::CURRENT),
-            format!("версия {}", before.commit),
-            after_id,
-            format!("{} {}", ctx.tolerance_mm, ctx.relative_tolerance),
-        ];
         let sides = Sides {
             app: self,
             item: &item,
@@ -212,6 +219,7 @@ impl App {
         };
 
         if options.reports {
+            let key = key_with(true)?;
             let (entry, _, cached) =
                 self.cached("reports", &key, comparators.clone(), &base, |_| {
                     let (a, b) = sides.get()?;
@@ -231,21 +239,14 @@ impl App {
             // Картинки зависят и от отчётов: в ключе — оба набора модулей.
             let mut modules = comparators;
             modules.extend(self.modules_of(ExtensionPoint::Renderer));
+            let key = key_with(false)?;
             let (entry, dir, cached) = self.cached("files", &key, modules, &base, |dir| {
                 let (a, b) = sides.get()?;
                 let merged = ChangeReport {
                     comparator: "nonius-app".into(),
                     changes: out.reports.iter().flat_map(|r| r.changes.clone()).collect(),
                 };
-                let mut files = Vec::new();
-                for r in self.registry.renderers() {
-                    check()?;
-                    progress.step("Рисую изменения");
-                    let rel_dir = format!("files/{}", r.manifest().id);
-                    for f in r.render(a, b, &merged, &dir.join(&rel_dir))? {
-                        files.push(keep_file(dir, &rel_dir, &f)?);
-                    }
-                }
+                let files = self.render_all(a, b, &merged, dir, progress)?;
                 check()?;
                 Ok((Vec::new(), files))
             })?;
@@ -267,8 +268,31 @@ impl App {
         Ok(out)
     }
 
+    /// Отрисовать пару снимков всеми модулями. Возвращает пути файлов в записи.
+    pub(crate) fn render_all(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
+        report: &ChangeReport,
+        dir: &Path,
+        progress: &dyn Progress,
+    ) -> Result<Vec<String>> {
+        let mut files = Vec::new();
+        for r in self.registry.renderers() {
+            if progress.cancelled() {
+                return Err(Error::Cancelled);
+            }
+            progress.step("Рисую изменения");
+            let rel_dir = format!("files/{}", r.manifest().id);
+            for f in r.render(before, after, report, &dir.join(&rel_dir))? {
+                files.push(keep_file(dir, &rel_dir, &f)?);
+            }
+        }
+        Ok(files)
+    }
+
     /// `id версия` модулей точки — часть ключа кэша.
-    fn modules_of(&self, point: ExtensionPoint) -> Vec<String> {
+    pub(crate) fn modules_of(&self, point: ExtensionPoint) -> Vec<String> {
         self.registry
             .manifests()
             .into_iter()
@@ -279,7 +303,7 @@ impl App {
 
     /// Взять запись из кэша или посчитать `compute` (отчёты, файлы) и
     /// сохранить. Возвращает запись, её папку и признак «из кэша».
-    fn cached(
+    pub(crate) fn cached(
         &self,
         kind: &str,
         key: &[String],

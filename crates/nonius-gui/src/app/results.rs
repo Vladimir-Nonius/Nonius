@@ -10,8 +10,20 @@ use crate::texts::texts;
 use crate::view::Model;
 
 impl App {
+    /// Показать модель: камера остаётся, если это та же деталь.
+    fn put_model(&mut self, name: &str, model: Option<Model>) {
+        let keep = self.framed.as_deref() == Some(name);
+        if model.is_some() {
+            self.framed = Some(name.to_string());
+        }
+        self.viewport.set_model(model, keep);
+    }
+
     pub(super) fn take_results(&mut self, ctx: &egui::Context) {
         let t = texts();
+        if let (Some(scene), Some(name)) = (self.jobs.take_model(), self.part.clone()) {
+            self.put_model(&name, Model::new(&scene));
+        }
         for done in self.jobs.finished() {
             let current = |name: &str| self.part.as_deref() == Some(name);
             match done {
@@ -21,10 +33,15 @@ impl App {
                     break;
                 }
                 Done::Opened(Err(e)) => {
+                    self.after_open.clear();
                     self.message = Some(format!("{}: {e:#}", t.project_open_failed))
                 }
+                Done::Reread(Ok(parts)) => self.got_parts(ctx, parts),
+                Done::Reread(Err(_)) => {}
                 Done::Parts(Ok(parts)) => {
                     self.parts = parts;
+                    let models = std::mem::take(&mut self.after_open);
+                    self.start_adding(ctx, models, None);
                     let want = self.want.as_ref().map(|w| w.0.clone());
                     let only = (self.parts.len() == 1).then(|| self.parts[0].name.clone());
                     if let Some(name) = want.or(only) {
@@ -49,9 +66,8 @@ impl App {
                     }
                 }
                 Done::Compared(name, picks, Ok(c)) if current(&name) && self.picks == picks => {
-                    let same_part = self.shown.as_ref().is_some_and(|s| s.0 == name);
                     let model = c.scene.as_ref().and_then(Model::new);
-                    self.viewport.set_model(model, same_part);
+                    self.put_model(&name, model);
                     self.shown = Some((name, picks));
                     self.comparison = Some(c);
                     self.selected = None;
@@ -148,14 +164,11 @@ impl App {
                     Some(d) => d.failed(format!("{e:#}")),
                     None => self.message = Some(format!("{}: {e:#}", t.error)),
                 },
-                Done::Imported(Ok((name, warnings))) => {
-                    let mut text = format!("{} «{name}»", t.model_added);
-                    if !warnings.is_empty() {
-                        text = format!("{text}. {}", warnings.join("; "));
-                    }
-                    self.reload_on(ctx, name, text);
-                }
-                Done::Imported(Err(e)) => self.message = Some(format!("{}: {e:#}", t.error)),
+                Done::Added(Ok(added)) => self.added(ctx, added),
+                Done::Added(Err(e)) => match self.add.as_mut() {
+                    Some(d) => d.failed(format!("{e:#}")),
+                    None => self.message = Some(format!("{}: {e:#}", t.error)),
+                },
                 Done::Crashed => self.message = Some(t.crashed.to_string()),
                 // Устарело: выбрали другое.
                 Done::Versions(..)
@@ -177,16 +190,7 @@ impl App {
         };
         self.versions = v;
         let picks = wanted.or(defaults).unwrap_or(self.picks);
-        if self.versions.is_empty() {
-            self.picks = picks;
-            self.viewport.set_model(None, false);
-            self.shown = None;
-            self.comparison = None;
-            self.load_masses(ctx);
-            self.load_files(ctx);
-        } else {
-            self.show_picks(ctx, picks);
-        }
+        self.show_picks(ctx, picks);
         if let Some(text) = self.sticky.take() {
             self.notice = Some(text);
         }

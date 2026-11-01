@@ -222,9 +222,10 @@ impl Project {
         })
     }
 
-    /// Найти деталь или сборку по имени. Имена уникальны в проекте.
+    /// Найти деталь или сборку по имени. Имена уникальны в проекте с точностью
+    /// до регистра: на Windows `Вал` и `вал` — одна папка.
     pub fn find_item(&self, name: &PartName) -> Result<Option<Item>> {
-        Ok(self.items()?.into_iter().find(|i| &i.name == name))
+        Ok(self.items()?.into_iter().find(|i| i.name.same_as(name)))
     }
 
     /// Все детали и сборки, отсортированные по виду и имени.

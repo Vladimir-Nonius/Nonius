@@ -5,16 +5,20 @@
 //! результаты — `results.rs`, всё долгое — в фоне (`jobs.rs`).
 
 mod actions;
+mod add_model;
+mod dropped;
+mod file_menu;
 mod files;
+mod first_run;
 mod history;
 mod jobs;
 mod map;
 mod material;
+mod model_names;
 mod new_part;
 mod numbers;
 mod open_menu;
 mod panels;
-mod project_bar;
 mod results;
 mod save;
 mod settings;
@@ -29,7 +33,7 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::source::{
-    Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, Opener, PartEntry, Pick,
+    Comparison, DiffEntry, FileEntry, Machine, MassEntry, MaterialEntry, Opener, PartEntry, Pick,
     ProjectSource, VersionEntry,
 };
 use crate::texts::texts;
@@ -45,6 +49,8 @@ pub struct Options {
     pub opener: Opener,
     /// Как создать проект в папке и открыть его.
     pub creator: Opener,
+    /// Компьютер: есть ли git и имя автора.
+    pub machine: Arc<dyn Machine>,
     /// Сразу выбрать деталь.
     pub part: Option<String>,
     /// И сразу сравнить эти версии.
@@ -64,6 +70,8 @@ pub struct App {
     want: Option<(String, Option<(Pick, Pick)>)>,
     comparison: Option<Comparison>,
     shown: Option<(String, (Pick, Pick))>,
+    /// Деталь, под которую настроена камера: её вид не сбрасывается.
+    framed: Option<String>,
     viewport: Viewport,
     mode: Mode,
     look: Look,
@@ -88,6 +96,18 @@ pub struct App {
     save: Option<save::SaveDialog>,
     /// Открытое окошко «Новая деталь».
     new_part: Option<new_part::NewPart>,
+    /// Открытое окошко «Добавить модель».
+    add: Option<add_model::AddModel>,
+    /// Модели бросили в пустое окно: создать проект в этой папке?
+    new_here: Option<(PathBuf, Vec<PathBuf>)>,
+    /// Что добавить, когда откроется новый проект.
+    after_open: Vec<PathBuf>,
+    /// Окошко первого запуска.
+    first_run: Option<first_run::FirstRun>,
+    /// Окно было в фокусе в прошлом кадре.
+    was_focused: bool,
+    /// Вернулись в окно: перечитать детали, как только оно освободится.
+    reread_wanted: bool,
     /// Ввод своего материала.
     custom: material::Custom,
     /// Материал записывается — список выбора ждёт.
@@ -127,6 +147,7 @@ impl App {
             want: None,
             comparison: None,
             shown: None,
+            framed: None,
             viewport: Viewport::new(render),
             mode: Mode::Changes,
             look,
@@ -142,6 +163,12 @@ impl App {
             masses: None,
             save: None,
             new_part: None,
+            add: None,
+            new_here: None,
+            after_open: Vec::new(),
+            first_run: first_run::FirstRun::check(options.machine),
+            was_focused: true,
+            reread_wanted: false,
             custom: material::Custom::default(),
             material_busy: false,
             tab: Some(tabs::Tab::Files),
@@ -167,12 +194,15 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.take_results(ctx);
         self.take_dropped(ctx);
+        self.notice_focus(ctx);
+        first_run::show(self, ctx);
 
         if self.project.is_none() {
             start::show(self, ctx);
             return;
         }
-        project_bar::show(self, ctx);
+        file_menu::show(self, ctx);
+        panels::error_bar(self, ctx);
         panels::status_bar(self, ctx);
         map::show(self, ctx);
         tree::show(self, ctx);
@@ -180,6 +210,7 @@ impl eframe::App for App {
         tabs::show(self, ctx);
         save::show(self, ctx);
         new_part::show(self, ctx);
+        add_model::show(self, ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -197,37 +228,6 @@ impl eframe::App for App {
                 panels::overlay(self, ui);
             });
         self.remember_look();
-    }
-}
-
-impl App {
-    /// Перетащили в окно: модели идут в проект, папка открывается как
-    /// проект, у другого файла открывается его папка.
-    fn take_dropped(&mut self, ctx: &egui::Context) {
-        let paths: Vec<PathBuf> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .filter_map(|f| f.path.clone())
-                .collect()
-        });
-        let (models, other): (Vec<_>, Vec<_>) = paths
-            .into_iter()
-            .partition(|p| self.project.is_some() && project_bar::is_model(p));
-        if !models.is_empty() {
-            for file in models {
-                self.import(ctx, file, None);
-            }
-        } else if let Some(path) = other.first() {
-            let dir = if path.is_dir() {
-                Some(path.as_path())
-            } else {
-                path.parent()
-            };
-            if let Some(dir) = dir {
-                self.open(ctx, dir.to_path_buf());
-            }
-        }
     }
 }
 

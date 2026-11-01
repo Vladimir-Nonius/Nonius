@@ -31,11 +31,15 @@ use nonius_core::extension::Registry;
 
 #[cfg(nonius_occt)]
 pub use modules::{
-    preview, shape_scene, GeometryComparator, GeometryDiff, HighlightRenderer, OcctStepSource,
-    PreviewExporter, SceneRenderer, CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
+    forget_diff, preview, shape_scene, GeometryComparator, GeometryDiff, HighlightRenderer,
+    OcctStepSource, PreviewExporter, SceneRenderer, CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
 };
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
+
+/// Сборка без OpenCascade ничего не запоминает.
+#[cfg(not(nonius_occt))]
+pub fn forget_diff() {}
 
 /// Идентификатор модуля сцены изменений (`SceneRenderer`). Объявлен и
 /// без OpenCascade, чтобы программа могла спросить реестр, подключён ли он.

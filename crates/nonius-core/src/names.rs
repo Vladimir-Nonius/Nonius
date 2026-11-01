@@ -62,9 +62,38 @@ impl PartName {
         Ok(Self(name))
     }
 
+    /// Годное имя из чего угодно, например из имени файла: запрещённые знаки
+    /// заменяются на `_`, лишнее по краям убирается. `None` — ничего не осталось.
+    pub fn cleaned(raw: &str) -> Option<Self> {
+        let swapped: String = raw
+            .chars()
+            .map(|c| {
+                if FORBIDDEN.contains(&c) || c.is_control() {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .take(120)
+            .collect();
+        let name = swapped.trim_matches(|c: char| c.is_whitespace() || c == '.');
+        if name.is_empty() {
+            return None;
+        }
+        Self::new(name)
+            .or_else(|_| Self::new(format!("{name}_")))
+            .ok()
+    }
+
     /// Имя как строка.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// То же ли это имя с точностью до регистра. На Windows `Вал` и `вал` — одна
+    /// папка, поэтому и деталь одна.
+    pub fn same_as(&self, other: &Self) -> bool {
+        self.0.to_lowercase() == other.0.to_lowercase()
     }
 }
 
@@ -187,6 +216,24 @@ mod tests {
         ] {
             assert!(PartName::new(bad).is_err(), "{bad:?} должно быть отклонено");
         }
+    }
+
+    #[test]
+    fn cleaned_names_are_always_valid() {
+        let name = |raw| PartName::cleaned(raw).map(|n| n.to_string());
+        assert_eq!(name("Деталь #2").as_deref(), Some("Деталь _2"));
+        assert_eq!(name("  план [3]. ").as_deref(), Some("план _3_"));
+        assert_eq!(name("A@B").as_deref(), Some("A_B"));
+        assert_eq!(name("con").as_deref(), Some("con_"));
+        assert_eq!(name("..."), None);
+        assert!(PartName::cleaned(&"я".repeat(300)).is_some());
+    }
+
+    #[test]
+    fn same_name_ignores_case() {
+        let name = |n: &str| PartName::new(n).unwrap();
+        assert!(name("Вал").same_as(&name("вАЛ")));
+        assert!(!name("вал").same_as(&name("вал 2")));
     }
 
     #[test]

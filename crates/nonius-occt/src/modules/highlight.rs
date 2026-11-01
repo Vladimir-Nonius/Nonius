@@ -6,7 +6,7 @@ use nonius_core::compare::{ChangeReport, CompareContext};
 use nonius_core::extension::{ExtensionPoint, Module, ModuleManifest, Renderer, Snapshot};
 use nonius_core::{Error, Result};
 
-use super::{manifest, model_pair, module_err, GeometryDiff, CHANGES_PNG};
+use super::{manifest, model_pair, module_err, shared_diff, CHANGES_PNG};
 use crate::render::View;
 use crate::save_png;
 
@@ -56,7 +56,7 @@ impl Renderer for HighlightRenderer {
         let Some((a, b)) = model_pair(before, after) else {
             return Ok(Vec::new());
         };
-        let diff = GeometryDiff::of_files(&a, &b, CompareContext::default().tolerance_mm)
+        let diff = shared_diff(&a, &b, CompareContext::default().tolerance_mm)
             .map_err(|e| module_err(Self::ID, e))?;
         let img = diff
             .render(&self.view)

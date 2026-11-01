@@ -23,6 +23,8 @@ pub struct PartEntry {
     pub dirty: bool,
     /// Файл модели, который открывает правый щелчок по детали.
     pub model: Option<String>,
+    /// Отпечаток модели и паспорта: изменился — надо показать заново.
+    pub stamp: String,
 }
 
 /// Версия детали.
@@ -56,6 +58,38 @@ pub struct Comparison {
     pub scene_problem: Option<String>,
     /// Отчёты модулей сравнения: числа, материал, форма.
     pub reports: Vec<ChangeReport>,
+    /// Файл SolidWorks менялся, а STEP нет: форма на экране старая.
+    pub step_behind: bool,
+}
+
+/// Что получилось при добавлении модели.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddedModel {
+    /// Деталь.
+    pub part: String,
+    /// Новая версия; `None` — файл такой же, как последняя версия.
+    pub version: Option<u32>,
+    /// Что не получилось, хотя модель добавлена.
+    pub warnings: Vec<String>,
+}
+
+/// Что есть на компьютере для истории версий.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Readiness {
+    /// Установлен git.
+    pub git: bool,
+    /// Установлен Git LFS.
+    pub lfs: bool,
+    /// Имя автора версий задано.
+    pub author: bool,
+}
+
+/// Компьютер, на котором работает окно. Спрашивается при запуске.
+pub trait Machine: Send + Sync {
+    /// Что здесь уже есть.
+    fn readiness(&self) -> Readiness;
+    /// Запомнить имя автора версий.
+    fn set_author(&self, name: &str) -> anyhow::Result<()>;
 }
 
 /// Материал и масса детали в версии или сейчас.
@@ -156,6 +190,10 @@ pub struct DiffEntry {
 pub trait Progress: Sync {
     /// Начался шаг: «Сравниваю…».
     fn step(&self, what: &str);
+    /// Деталь готова, цвета ещё считаются: её можно показать.
+    fn model(&self, scene: Scene) {
+        let _ = scene;
+    }
     /// Человек нажал «Отменить». Работа проверяет это между шагами.
     fn cancelled(&self) -> bool {
         false
@@ -172,10 +210,10 @@ pub trait ProjectSource: Send + Sync {
     fn parts(&self) -> anyhow::Result<Vec<PartEntry>>;
     /// Версии детали, новые первыми.
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>>;
-    /// Сравнить две версии. `before` — всегда сохранённая версия;
-    /// `before == after` — показать одну версию без сравнения.
-    /// `progress` получает короткие сообщения о ходе работы и говорит,
-    /// не отменено ли сравнение.
+    /// Сравнить две версии. `before` — сохранённая версия; `before == after`
+    /// — показать одну версию или текущее состояние без сравнения.
+    /// `progress` получает короткие сообщения о ходе работы и саму деталь,
+    /// пока считаются цвета, и говорит, не отменено ли сравнение.
     fn compare(
         &self,
         part: &str,
@@ -223,9 +261,10 @@ pub trait ProjectSource: Send + Sync {
     fn programs(&self, path: &str) -> Vec<ProgramEntry>;
     /// Создать пустую деталь или сборку.
     fn new_part(&self, name: &str, assembly: bool) -> anyhow::Result<()>;
-    /// Положить файл модели в деталь `part`; `None` — деталь по имени файла.
-    /// Возвращает имя детали и предупреждения.
-    fn import(&self, file: &Path, part: Option<&str>) -> anyhow::Result<(String, Vec<String>)>;
+    /// Положить файл модели в деталь `part` (её может ещё не быть) и сразу
+    /// сохранить новую версию с описанием `message`. Файл, который не
+    /// читается, ничего не меняет.
+    fn add_model(&self, file: &Path, part: &str, message: &str) -> anyhow::Result<AddedModel>;
 }
 
 /// Открывает или создаёт проект по папке: «Открыть проект…», «Создать
@@ -255,6 +294,7 @@ mod tests {
             latest: None,
             dirty,
             model: None,
+            stamp: String::new(),
         }
     }
 

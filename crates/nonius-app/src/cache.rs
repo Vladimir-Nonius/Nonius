@@ -1,8 +1,8 @@
 //! Кэш результатов сравнения: `.git/nonius/cache/<ключ>/`.
 //!
-//! Ключ — хеш обеих версий (коммит или отпечаток текущих файлов), допусков и
-//! версий модулей. Поменялся файл детали или обновился модуль — ключ другой,
-//! и всё считается заново. Хранится `KEEP_ENTRIES` последних записей.
+//! Ключ — хеш обеих версий (коммит или отпечаток файлов модели и паспорта),
+//! допусков и версий модулей. Поменялась модель или обновился модуль — ключ
+//! другой, и всё считается заново; заметка в `docs/` расчёт не сбрасывает. Хранится `KEEP_ENTRIES` последних записей.
 //! В папке записи: `cache.yaml` (описание, `schema: N`) и `files/` (картинки,
 //! сцены). Запись готовится во временной папке и переименовывается целиком,
 //! поэтому недописанных записей не бывает. Незнакомая или битая запись
@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use nonius_core::compare::ChangeReport;
+use nonius_core::project::META_FILE;
 use nonius_core::schema::{self, Versioned};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -61,46 +62,35 @@ pub(crate) fn key(parts: &[String]) -> String {
     hex(&h.finalize())
 }
 
-/// Отпечаток текущего состояния папки детали: путь, размер и время
-/// изменения каждого файла. Файлы не перечитываются: модели бывают по сотне
-/// мегабайт, а сравнивают их часто.
-pub(crate) fn dir_fingerprint(dir: &Path) -> Result<String> {
+/// Отпечаток файлов модели в папке детали: имя, размер и время изменения.
+/// Файлы не перечитываются: модели бывают по сотне мегабайт, а сравнивают их
+/// часто. С `meta` — ещё и паспорт: от него зависят отчёты, но не сцена.
+pub(crate) fn model_fingerprint(dir: &Path, meta: bool) -> Result<String> {
     let mut files = Vec::new();
-    collect(dir, dir, &mut files)?;
+    for entry in fs::read_dir(dir).map_err(|e| Error::io(dir, e))? {
+        let entry = entry.map_err(|e| Error::io(dir, e))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("model.") || (meta && name == META_FILE)) {
+            continue;
+        }
+        let path = entry.path();
+        let info = entry.metadata().map_err(|e| Error::io(&path, e))?;
+        let modified = info
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        files.push((name, info.len(), modified));
+    }
     files.sort();
     let mut h = Sha256::new();
-    for (rel, len, modified) in files {
-        h.update(rel.as_bytes());
+    for (name, len, modified) in files {
+        h.update(name.as_bytes());
         h.update([0]);
         h.update(len.to_le_bytes());
         h.update(modified.to_le_bytes());
     }
     Ok(hex(&h.finalize()))
-}
-
-fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, u64, u128)>) -> Result<()> {
-    let entries = fs::read_dir(dir).map_err(|e| Error::io(dir, e))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| Error::io(dir, e))?;
-        let path = entry.path();
-        let meta = entry.metadata().map_err(|e| Error::io(&path, e))?;
-        if meta.is_dir() {
-            collect(root, &path, out)?;
-            continue;
-        }
-        let modified = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_nanos());
-        let rel = path.strip_prefix(root).unwrap_or(&path);
-        out.push((
-            rel.to_string_lossy().replace('\\', "/"),
-            meta.len(),
-            modified,
-        ));
-    }
-    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -251,11 +241,18 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path().join("docs")).unwrap();
         fs::write(tmp.path().join("model.step"), "a").unwrap();
-        let a = dir_fingerprint(tmp.path()).unwrap();
-        assert_eq!(a, dir_fingerprint(tmp.path()).unwrap());
+        let a = model_fingerprint(tmp.path(), true).unwrap();
+        assert_eq!(a, model_fingerprint(tmp.path(), true).unwrap());
         fs::write(tmp.path().join("docs/x.pdf"), "b").unwrap();
-        let b = dir_fingerprint(tmp.path()).unwrap();
-        assert_ne!(a, b);
+        assert_eq!(a, model_fingerprint(tmp.path(), true).unwrap(), "заметка");
+        fs::write(tmp.path().join(META_FILE), "c").unwrap();
+        let b = model_fingerprint(tmp.path(), true).unwrap();
+        assert_ne!(a, b, "паспорт меняет отчёты");
+        let scene = model_fingerprint(tmp.path(), false).unwrap();
+        fs::write(tmp.path().join(META_FILE), "d").unwrap();
+        assert_eq!(scene, model_fingerprint(tmp.path(), false).unwrap());
+        fs::write(tmp.path().join("model.step"), "aa").unwrap();
+        assert_ne!(scene, model_fingerprint(tmp.path(), false).unwrap());
         assert_ne!(key(&["a".into(), "b".into()]), key(&["ab".into()]));
     }
 }

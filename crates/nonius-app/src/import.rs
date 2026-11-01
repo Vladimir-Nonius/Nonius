@@ -15,6 +15,10 @@ use crate::{App, Error, Result};
 /// `preview.png` для списка деталей.
 pub const PREVIEW_FORMAT: &str = "preview";
 
+/// Файл SolidWorks заменён, а STEP рядом остался старый.
+const STEP_BEHIND: &str =
+    "форма в 3D и масса — по прежнему STEP: чтобы обновить их, добавьте и новый STEP этой детали";
+
 /// Итог импорта.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Imported {
@@ -58,16 +62,29 @@ impl App {
         };
         let name = PartName::new(name.as_str()).map_err(Error::BadItemName)?;
 
-        let item = match self.project.find_item(&name)? {
+        // Сначала прочитать, потом трогать проект: битый файл не создаёт
+        // деталь и не портит рабочую модель.
+        let mut warnings = Vec::new();
+        let read = self.read_geometry(file, &mut warnings)?;
+        let found = self.project.find_item(&name)?;
+        let fresh = found.is_none();
+        let item = match found {
             Some(i) => i,
             None => self.project.create_item(kind, &name)?,
         };
         let dest = item.dir.join(target);
-        fs::copy(file, &dest).map_err(|e| Error::io(&dest, e))?;
+        if let Err(e) = replace_file(file, &dest) {
+            if fresh {
+                let _ = fs::remove_dir_all(&item.dir);
+            }
+            return Err(e);
+        }
 
-        let mut warnings = Vec::new();
         let mut meta = self.project.load_meta(&item)?;
-        if let Some(read) = self.read_geometry(file, &mut warnings)? {
+        if target != "model.step" && item.dir.join("model.step").is_file() {
+            warnings.push(STEP_BEHIND.to_string());
+        }
+        if let Some(read) = read {
             meta.geometry = read.geometry;
             meta.source = read.source;
             if read.material.is_some() && read.material != meta.material {
@@ -136,4 +153,15 @@ impl App {
             }
         }
     }
+}
+
+/// Поставить копию файла на место `dest` целиком: оборвавшееся копирование не
+/// оставит половину модели, а файл можно заменить им же самим.
+fn replace_file(file: &Path, dest: &Path) -> Result<()> {
+    let tmp = dest.with_extension("tmp-import");
+    let done = fs::copy(file, &tmp).and_then(|_| fs::rename(&tmp, dest));
+    done.map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        Error::io(dest, e)
+    })
 }
