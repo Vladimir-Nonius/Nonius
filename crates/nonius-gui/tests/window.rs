@@ -681,6 +681,35 @@ fn dropped_model_asks_and_saves_a_version() {
 }
 
 #[test]
+fn target_is_chosen_from_the_list() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let imported = project.imported.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+
+    drop_file(&mut h, &dir.path().join("совсем другое имя.step"));
+    wait_for(&mut h, "Будет новая деталь «совсем другое имя»");
+    h.run();
+    // Выбор в списке не закрывает окошко.
+    h.get_by_role(egui::accesskit::Role::ComboBox).click();
+    h.run();
+    h.get_all_by_label("кронштейн").last().unwrap().click();
+    h.run();
+    wait_for(&mut h, "Будет версия v3 «кронштейн»");
+    let inputs = h.get_all_by_role(egui::accesskit::Role::TextInput);
+    inputs.last().unwrap().focus();
+    h.run();
+    let inputs = h.get_all_by_role(egui::accesskit::Role::TextInput);
+    inputs.last().unwrap().type_text("Другая форма");
+    h.run();
+    h.get_by_label("Добавить").click();
+    wait_for(&mut h, "Сохранена модель «кронштейн» v1");
+    assert_eq!(imported.lock().unwrap()[0].1, "кронштейн");
+}
+
+#[test]
 fn many_models_and_a_broken_one() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();

@@ -540,12 +540,16 @@ mod tests {
     #[derive(Default)]
     struct Said {
         steps: Mutex<Vec<String>>,
+        models: Mutex<usize>,
         cancel: bool,
     }
 
     impl Progress for Said {
         fn step(&self, what: &str) {
             self.steps.lock().unwrap().push(what.to_string());
+        }
+        fn model(&self, _scene: Scene) {
+            *self.models.lock().unwrap() += 1;
         }
         fn cancelled(&self) -> bool {
             self.cancel
@@ -679,6 +683,84 @@ mod tests {
             .compare("пустая", Pick::Current, Pick::Current, &said)
             .unwrap();
         assert!(shown.reports.is_empty());
+    }
+
+    /// Весь путь на настоящей геометрии: без OpenCascade проверять нечего.
+    #[test]
+    fn model_first_then_colors() {
+        if !nonius_occt::available() {
+            return;
+        }
+        for (k, v) in [
+            ("GIT_AUTHOR_NAME", "Тестировщик"),
+            ("GIT_AUTHOR_EMAIL", "test@example.com"),
+            ("GIT_COMMITTER_NAME", "Тестировщик"),
+            ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ] {
+            std::env::set_var(k, v);
+        }
+        let smoke = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/smoke");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path().join("Станок");
+        std::fs::create_dir(&d).unwrap();
+        let src = AppSource::create(&d).unwrap();
+        let roles = |c: &Comparison| -> Vec<nonius_scene::Role> {
+            let scene = c.scene.as_ref().expect("сцена есть");
+            scene.regions.iter().map(|r| r.role).collect()
+        };
+        use nonius_scene::Role;
+
+        // Модель видна и до первой версии: сравнивать не требуется.
+        src.new_part("плита", false).unwrap();
+        let v1 = smoke.join("plate-v1.step");
+        let added = src.add_model(&v1, "плита", "Первая").unwrap();
+        assert_eq!(added.version, Some(1), "{:?}", added.warnings);
+        let said = Said::default();
+        let one = src
+            .compare("плита", Pick::Version(1), Pick::Version(1), &said)
+            .unwrap();
+        assert_eq!(roles(&one), [Role::After]);
+        assert!(one.reports.is_empty());
+        assert_eq!(*said.models.lock().unwrap(), 0, "цвета не считаются");
+
+        let v2 = smoke.join("plate-v2.step");
+        assert_eq!(
+            src.add_model(&v2, "плита", "Правка").unwrap().version,
+            Some(2)
+        );
+        let said = Said::default();
+        let two = src
+            .compare("плита", Pick::Version(1), Pick::Version(2), &said)
+            .unwrap();
+        assert_eq!(*said.models.lock().unwrap(), 1, "сначала деталь");
+        assert!(roles(&two).contains(&Role::Before), "{:?}", roles(&two));
+        assert!(roles(&two).iter().any(|r| r.is_change()), "цвета есть");
+        assert!(!two.step_behind);
+        assert!(two.reports.iter().any(|r| !r.changes.is_empty()));
+
+        // Заметка не сбрасывает расчёт: результат тот же и из кэша.
+        let docs = d.join("parts").join("плита").join("docs");
+        std::fs::write(docs.join("заметка.md"), "сверлить").unwrap();
+        let said = Said::default();
+        let again = src
+            .compare("плита", Pick::Version(2), Pick::Current, &said)
+            .unwrap();
+        assert_eq!(roles(&again), [Role::After], "форма та же");
+
+        // SLDPRT поверх STEP: форма в окне старая, и окно это говорит.
+        let sw = tmp.path().join("плита.sldprt");
+        std::fs::write(&sw, "файл SolidWorks").unwrap();
+        let added = src.add_model(&sw, "плита", "Из SolidWorks").unwrap();
+        assert!(added.warnings.iter().any(|w| w.contains("STEP")));
+        let behind = src
+            .compare(
+                "плита",
+                Pick::Version(2),
+                Pick::Version(3),
+                &Said::default(),
+            )
+            .unwrap();
+        assert!(behind.step_behind);
     }
 
     #[test]
