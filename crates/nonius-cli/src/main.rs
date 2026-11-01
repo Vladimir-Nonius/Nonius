@@ -129,7 +129,17 @@ fn run(cli: Cli) -> Result<()> {
             part,
             file,
             version,
-        } => files::open(&app()?, part, file, version.as_deref())?,
+            programs,
+            with,
+            folder,
+        } => {
+            if *programs {
+                files::programs(file);
+            } else {
+                let way = files::way(file, with.as_deref(), *folder)?;
+                files::open(&app()?, part, file, version.as_deref(), &way)?;
+            }
+        }
         Command::View { part, from, to } => window::open(
             cli.project.as_deref(),
             part.as_deref(),

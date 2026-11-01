@@ -10,6 +10,7 @@
 //!
 //! Файлы: здесь — [`App`] и создание проекта, `items.rs` — детали и статус,
 //! `history.rs` — версии, `files.rs` — файлы версии и их открытие,
+//! `system/` — программы системы, запуск, показ в папке,
 //! `import.rs` — импорт модели, `passport.rs` — паспорт и масса,
 //! `materials.rs` — справочник плотностей, `compare.rs` — сравнение,
 //! `cache.rs` — кэш сравнений, `error.rs` — ошибки.
@@ -23,6 +24,7 @@ mod import;
 mod items;
 mod materials;
 mod passport;
+mod system;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -38,6 +40,7 @@ pub use import::{Imported, PREVIEW_FORMAT};
 pub use items::{ItemState, ItemStatus};
 pub use materials::{find_material, Material, MATERIALS};
 pub use passport::{Mass, MaterialChoice, Passport};
+pub use system::{programs_for, OpenWay, Program};
 
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.
 pub use nonius_store::{

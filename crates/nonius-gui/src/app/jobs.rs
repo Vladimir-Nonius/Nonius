@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 
 use crate::source::{
-    Comparison, DiffEntry, FileEntry, MassEntry, PartEntry, Pick, Progress, ProjectSource,
-    VersionEntry,
+    Comparison, DiffEntry, FileEntry, MassEntry, PartEntry, Pick, ProgramEntry, Progress,
+    ProjectSource, VersionEntry,
 };
 
 /// Готовый результат.
@@ -39,8 +39,10 @@ pub enum Done {
     VersionFiles(String, (Pick, Pick), anyhow::Result<Vec<FileEntry>>),
     /// Строки текстового файла: деталь, пара версий, файл.
     FileDiff(String, (Pick, Pick), String, anyhow::Result<Vec<DiffEntry>>),
-    /// Файл открыт в своей программе.
-    FileOpened(Pick, anyhow::Result<PathBuf>),
+    /// Файл открыт или показан в папке (`true`).
+    FileOpened(Pick, bool, anyhow::Result<PathBuf>),
+    /// Программы для типа файла.
+    Programs(String, Vec<ProgramEntry>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

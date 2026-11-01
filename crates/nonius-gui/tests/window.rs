@@ -10,8 +10,8 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use nonius_core::compare::{Change, ChangeKind, ChangeReport};
 use nonius_gui::source::{
-    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, PartEntry,
-    Pick, Progress, ProjectSource, VersionEntry,
+    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, OpenWay,
+    PartEntry, Pick, ProgramEntry, Progress, ProjectSource, VersionEntry,
 };
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
@@ -21,7 +21,7 @@ struct Fake {
     /// Что сохранили из окна: деталь и описание.
     saved: Arc<Mutex<Vec<(String, String)>>>,
     /// Что открыли из окна.
-    opened: Arc<Mutex<Vec<String>>>,
+    opened: Arc<Mutex<Vec<(String, OpenWay)>>>,
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -50,12 +50,14 @@ impl ProjectSource for Fake {
                 assembly: false,
                 latest: Some("v2".into()),
                 dirty: false,
+                model: Some("model.step".into()),
             },
             PartEntry {
                 name: "корпус".into(),
                 assembly: true,
                 latest: None,
                 dirty: true,
+                model: None,
             },
         ])
     }
@@ -176,9 +178,26 @@ impl ProjectSource for Fake {
             text: "сверлить Ø8".into(),
         }])
     }
-    fn open_file(&self, _part: &str, _pick: Pick, path: &str) -> anyhow::Result<PathBuf> {
-        self.opened.lock().unwrap().push(path.to_string());
+    fn open_file(
+        &self,
+        _part: &str,
+        _pick: Pick,
+        path: &str,
+        way: &OpenWay,
+    ) -> anyhow::Result<PathBuf> {
+        let opened = (path.to_string(), way.clone());
+        self.opened.lock().unwrap().push(opened);
         Ok(self.root.join(path))
+    }
+    fn programs(&self, _path: &str) -> Vec<ProgramEntry> {
+        vec![program()]
+    }
+}
+
+fn program() -> ProgramEntry {
+    ProgramEntry {
+        name: "Компас".into(),
+        command: "kompas.exe \"%1\"".into(),
     }
 }
 
@@ -206,7 +225,7 @@ fn window(dir: &Path, saved: Arc<Mutex<Vec<(String, String)>>>) -> Harness<'stat
 fn window_with(
     dir: &Path,
     saved: Arc<Mutex<Vec<(String, String)>>>,
-    opened: Arc<Mutex<Vec<String>>>,
+    opened: Arc<Mutex<Vec<(String, OpenWay)>>>,
 ) -> Harness<'static, App> {
     std::env::set_var("NONIUS_CONFIG_DIR", dir);
     let options = Options {
@@ -306,7 +325,10 @@ fn files_and_numbers_tabs() {
     h.get_by_label("Открыть v2").click();
     wait_for(&mut h, "Открыт файл");
     assert!(h.query_by_label_contains("копия").is_some());
-    assert_eq!(*opened.lock().unwrap(), ["docs/заметка.md"]);
+    assert_eq!(
+        *opened.lock().unwrap(),
+        [("docs/заметка.md".to_string(), OpenWay::Default)]
+    );
 
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Числа")
         .click();
@@ -326,4 +348,53 @@ fn files_and_numbers_tabs() {
         .click();
     h.run();
     assert!(h.query_by_label_contains("Параметр").is_none());
+}
+
+#[test]
+fn right_click_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let mut h = window_with(dir.path(), Arc::default(), opened.clone());
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "~ docs/заметка.md");
+
+    // Файл версии: меню предупреждает про копию и показывает программы.
+    h.get_by_label_contains("~ docs/заметка.md")
+        .click_secondary();
+    wait_for(&mut h, "Копия только для чтения");
+    h.get_by_label_contains("Открыть в…").click_accesskit();
+    wait_for(&mut h, "Компас");
+    h.get_by_label("Компас").click();
+    wait_for(&mut h, "Открыт файл");
+
+    h.get_by_label_contains("~ docs/заметка.md")
+        .click_secondary();
+    wait_for(&mut h, "Показать в папке");
+    h.get_by_label("Показать в папке").click();
+    wait_for(&mut h, "Показан в папке");
+
+    // Деталь: всегда «Сейчас», поэтому без предупреждения, файл — модель.
+    h.get_by_label_contains("кронштейн   v2").click_secondary();
+    wait_for(&mut h, "Открыть в…");
+    assert!(h.query_by_label_contains("Копия только").is_none());
+    h.get_by_label("Показать в папке").click();
+    for _ in 0..100 {
+        h.step();
+        if opened.lock().unwrap().len() == 3 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let path = |p: &str| p.to_string();
+    assert_eq!(
+        *opened.lock().unwrap(),
+        [
+            (path("docs/заметка.md"), OpenWay::Program(program())),
+            (path("docs/заметка.md"), OpenWay::Folder),
+            (path("model.step"), OpenWay::Folder),
+        ]
+    );
 }

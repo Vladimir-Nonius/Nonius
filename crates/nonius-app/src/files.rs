@@ -9,10 +9,14 @@ use std::path::{Path, PathBuf};
 use nonius_core::VersionNumber;
 use nonius_store::{DiffLine, VersionFile, VersionInfo};
 
+use crate::system::{self, OpenWay};
 use crate::{App, Error, Result};
 
 /// Папка копий внутри временной папки системы.
 const COPIES_DIR: &str = "nonius-versions";
+
+/// Файл модели детали: сначала исходник CAD, потом STEP.
+const MODEL_FILES: [&str; 3] = ["model.sldasm", "model.sldprt", "model.step"];
 
 impl App {
     /// Файлы версии `to` и что изменилось после `from`. Без `from` — только
@@ -76,16 +80,24 @@ impl App {
         }
     }
 
-    /// Открыть файл в программе, которая назначена в системе для этого типа.
-    /// Возвращает, что именно открыто.
+    /// Файл модели детали сейчас: его открывает правый щелчок по детали.
+    pub fn model_file(&self, name: &str) -> Result<Option<String>> {
+        let item = self.item(name)?;
+        let found = MODEL_FILES.iter().find(|f| item.dir.join(f).is_file());
+        Ok(found.map(|f| f.to_string()))
+    }
+
+    /// Открыть файл программой или показать в папке. Возвращает, что именно
+    /// открыто.
     pub fn open_file(
         &self,
         name: &str,
         version: Option<VersionNumber>,
         path: &str,
+        way: &OpenWay,
     ) -> Result<PathBuf> {
         let file = self.file_path(name, version, path)?;
-        opener::open(&file).map_err(|e| Error::OpenFailed {
+        system::open(&file, way).map_err(|e| Error::OpenFailed {
             path: file.clone(),
             why: e.to_string(),
         })?;

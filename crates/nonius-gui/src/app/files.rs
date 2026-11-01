@@ -5,8 +5,9 @@ use eframe::egui::{self, Color32, RichText};
 
 use super::jobs::Done;
 use super::numbers::size_text;
+use super::open_menu::{self, Programs, Target};
 use super::{pick_label, App};
-use crate::source::{DiffEntry, DiffKind, FileEntry, FileState, Pick};
+use crate::source::{DiffEntry, DiffKind, FileEntry, FileState, OpenWay, Pick};
 use crate::texts::texts;
 
 const GREEN: Color32 = Color32::from_rgb(60, 150, 80);
@@ -16,8 +17,35 @@ const YELLOW: Color32 = Color32::from_rgb(190, 140, 20);
 /// Что человек попросил в этом кадре.
 enum Ask {
     Select(String),
-    Open(Pick, String),
     Refresh,
+}
+
+/// Откуда строим меню правого щелчка.
+struct MenuPlace<'a> {
+    programs: &'a Programs,
+    part: &'a str,
+    picks: (Pick, Pick),
+}
+
+impl MenuPlace<'_> {
+    fn target(&self, pick: Pick, path: &str) -> Target {
+        Target {
+            part: self.part.to_string(),
+            pick,
+            path: path.to_string(),
+            openable: true,
+        }
+    }
+
+    fn attach(
+        &self,
+        response: &egui::Response,
+        pick: Pick,
+        path: &str,
+        asked: &mut Option<open_menu::Ask>,
+    ) {
+        open_menu::attach(response, self.programs, || self.target(pick, path), asked);
+    }
 }
 
 impl App {
@@ -67,18 +95,9 @@ impl App {
         files.iter().find(|f| f.path == path)
     }
 
-    fn open_file(&mut self, ctx: &egui::Context, pick: Pick, path: String) {
-        let (Some(project), Some(part)) = (self.project.clone(), self.part.clone()) else {
-            return;
-        };
-        self.jobs.spawn(ctx, move |_| {
-            let opened = project.open_file(&part, pick, &path);
-            Done::FileOpened(pick, opened)
-        });
-    }
-
     /// Перечитать папку детали: файлы могли появиться, пока окно открыто.
     fn reread(&mut self, ctx: &egui::Context) {
+        self.programs.clear();
         if let Some(part) = self.part.clone() {
             self.want = Some((part, Some(self.picks)));
             self.refresh(ctx);
@@ -94,9 +113,25 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ui.spinner();
         return;
     };
+    let Some(part) = app.part.as_deref() else {
+        return;
+    };
+    let place = MenuPlace {
+        programs: &app.programs,
+        part,
+        picks,
+    };
     let mut ask = None;
+    let mut asked = None;
     ui.columns(2, |columns| {
-        list(&mut columns[0], files, app.file.as_deref(), &mut ask);
+        list(
+            &mut columns[0],
+            files,
+            app.file.as_deref(),
+            &mut ask,
+            &place,
+            &mut asked,
+        );
         let selected = app
             .file
             .as_deref()
@@ -105,9 +140,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             Some(f) => detail(
                 &mut columns[1],
                 f,
-                picks,
                 app.file_text.as_deref(),
-                &mut ask,
+                &place,
+                &mut asked,
             ),
             None => {
                 columns[1].label(RichText::new(t.choose_file).weak());
@@ -117,13 +152,20 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     match ask {
         Some(Ask::Select(path)) => app.select_file(&ctx, path),
-        Some(Ask::Open(pick, path)) => app.open_file(&ctx, pick, path),
         Some(Ask::Refresh) => app.reread(&ctx),
         None => {}
     }
+    app.answer_menu(&ctx, asked);
 }
 
-fn list(ui: &mut egui::Ui, files: &[FileEntry], selected: Option<&str>, ask: &mut Option<Ask>) {
+fn list(
+    ui: &mut egui::Ui,
+    files: &[FileEntry],
+    selected: Option<&str>,
+    ask: &mut Option<Ask>,
+    place: &MenuPlace,
+    asked: &mut Option<open_menu::Ask>,
+) {
     let t = texts();
     if ui.small_button(t.refresh).clicked() {
         *ask = Some(Ask::Refresh);
@@ -143,9 +185,17 @@ fn list(ui: &mut egui::Ui, files: &[FileEntry], selected: Option<&str>, ask: &mu
                     rich = rich.color(c);
                 }
                 let on = selected == Some(f.path.as_str());
-                if ui.selectable_label(on, rich).clicked() && !on {
+                let row = ui.selectable_label(on, rich);
+                if row.clicked() && !on {
                     *ask = Some(Ask::Select(f.path.clone()));
                 }
+                // Удалённого файла в «Стало» нет: меню берёт его из «Было».
+                let pick = if f.after.is_some() {
+                    place.picks.1
+                } else {
+                    place.picks.0
+                };
+                place.attach(&row, pick, &f.path, asked);
             }
         });
 }
@@ -153,9 +203,9 @@ fn list(ui: &mut egui::Ui, files: &[FileEntry], selected: Option<&str>, ask: &mu
 fn detail(
     ui: &mut egui::Ui,
     f: &FileEntry,
-    picks: (Pick, Pick),
     text: Option<&[DiffEntry]>,
-    ask: &mut Option<Ask>,
+    place: &MenuPlace,
+    asked: &mut Option<open_menu::Ask>,
 ) {
     let t = texts();
     ui.label(RichText::new(&f.path).strong());
@@ -167,15 +217,19 @@ fn detail(
                 Pick::Version(_) => t.open_copy_hint,
                 Pick::Current => t.open_real_hint,
             };
-            let button = ui.add_enabled(has, egui::Button::new(label));
-            if button.on_hover_text(hint).clicked() {
-                *ask = Some(Ask::Open(pick, f.path.clone()));
+            let button = ui
+                .add_enabled(has, egui::Button::new(label))
+                .on_hover_text(hint);
+            if button.clicked() {
+                let target = place.target(pick, &f.path);
+                *asked = Some(open_menu::Ask::Open(target, OpenWay::Default));
             }
+            place.attach(&button, pick, &f.path, asked);
         };
-        if picks.0 != picks.1 {
-            side(picks.0, f.before.is_some());
+        if place.picks.0 != place.picks.1 {
+            side(place.picks.0, f.before.is_some());
         }
-        side(picks.1, f.after.is_some());
+        side(place.picks.1, f.after.is_some());
     });
     if !f.text {
         return;

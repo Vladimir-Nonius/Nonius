@@ -10,6 +10,7 @@ mod history;
 mod jobs;
 mod material;
 mod numbers;
+mod open_menu;
 mod panels;
 mod results;
 mod save;
@@ -49,6 +50,7 @@ pub struct App {
     opener: Opener,
     project: Option<Arc<dyn ProjectSource>>,
     parts: Vec<PartEntry>,
+    programs: open_menu::Programs,
     part: Option<String>,
     versions: Vec<VersionEntry>,
     picks: (Pick, Pick),
@@ -102,6 +104,7 @@ impl App {
             opener: options.opener,
             project: None,
             parts: Vec::new(),
+            programs: Default::default(),
             part: None,
             versions: Vec::new(),
             picks: (Pick::Current, Pick::Current),
