@@ -15,7 +15,8 @@ use crate::{workdir, Result, Store, StoreError, VersionInfo};
 impl Store {
     /// Прочитать файл детали из версии. Файлы LFS возвращаются целиком.
     pub fn read_file(&self, item: &Item, version: &VersionInfo, rel: &str) -> Result<Vec<u8>> {
-        let spec = format!("{}:{}/{}", version.commit, self.pathspec(item), rel);
+        let folder = self.folder_at(item, version);
+        let spec = format!("{}:{folder}/{rel}", version.commit);
         self.git.run(&["cat-file", "--filters", &spec])
     }
 
@@ -39,7 +40,7 @@ impl Store {
 
     /// Файлы детали в версии (пути внутри папки детали).
     pub fn files_at(&self, item: &Item, version: &VersionInfo) -> Result<Vec<String>> {
-        let path = self.pathspec(item);
+        let path = self.folder_at(item, version);
         let out = self.git.run(&[
             "ls-tree",
             "-r",

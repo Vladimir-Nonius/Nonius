@@ -71,7 +71,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.label(RichText::new(t.changed_files).weak());
             match &d.files {
                 None => ui.spinner(),
-                Some(f) => ui.add(egui::Label::new(f.join(", ")).wrap()),
+                Some(f) => ui.add(egui::Label::new(own_files(f).join(", ")).wrap()),
             };
             ui.end_row();
         });
@@ -137,6 +137,21 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
 }
 
+/// Изменённые файлы без служебных; если других нет — как есть.
+fn own_files(files: &[String]) -> Vec<&str> {
+    let service = |f: &str| f.ends_with("meta.yaml") || f.ends_with("preview.png");
+    let own: Vec<&str> = files
+        .iter()
+        .map(String::as_str)
+        .filter(|f| !service(f))
+        .collect();
+    if own.is_empty() {
+        files.iter().map(String::as_str).collect()
+    } else {
+        own
+    }
+}
+
 /// Что изменилось с последней версией — если на экране как раз это сравнение.
 fn summary(app: &App, part: &str) -> Option<Vec<(String, Option<Color32>)>> {
     let t = texts();
@@ -156,7 +171,7 @@ fn summary(app: &App, part: &str) -> Option<Vec<(String, Option<Color32>)>> {
                 .sum();
             if volume > 0.0 {
                 let [r, g, b] = role.color();
-                let name = super::panels::role_name(role).to_lowercase();
+                let name = super::legend::role_name(role).to_lowercase();
                 lines.push((
                     format!("{sign} {name} {}", volume_text(volume)),
                     Some(Color32::from_rgb(r, g, b)),

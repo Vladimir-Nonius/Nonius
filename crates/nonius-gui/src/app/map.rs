@@ -1,7 +1,7 @@
 //! Карта версий снизу: кружки на линии слева направо, старые первыми, справа
 //! «Сейчас». Щелчок и правая кнопка — как в истории.
 
-use eframe::egui::{self, Align2, Color32, FontId, RichText, Sense, Stroke};
+use eframe::egui::{self, Align2, Color32, FontId, Sense, Stroke};
 
 use super::history::{self, Act};
 use super::App;
@@ -20,18 +20,18 @@ const PLAIN: Color32 = Color32::from_rgb(150, 155, 165);
 
 /// Нарисовать карту выбранной детали.
 pub fn show(app: &mut App, ctx: &egui::Context) {
-    let t = texts();
-    if app.part.is_none() {
+    // Карта нужна, когда выбирать есть из чего.
+    let count = app.versions.len() + usize::from(app.part_dirty());
+    if app.part.is_none() || count < 2 {
         return;
     }
     let mut act = None;
     egui::TopBottomPanel::bottom("map")
         .resizable(true)
-        .default_height(HEIGHT + 30.0)
-        .height_range(HEIGHT + 24.0..=220.0)
+        .default_height(HEIGHT + 10.0)
+        .height_range(HEIGHT + 8.0..=220.0)
         .show(ctx, |ui| {
             ui.add_space(4.0);
-            ui.label(RichText::new(t.map_title).weak());
             egui::ScrollArea::horizontal()
                 .id_salt("map")
                 .stick_to_right(true)
@@ -46,10 +46,7 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
     let t = texts();
     let dirty = app.part_dirty();
     let count = app.versions.len() + usize::from(dirty);
-    if count == 0 {
-        ui.label(RichText::new(t.no_versions).weak());
-        return;
-    }
+    let latest = app.versions.first().map(|v| v.number);
     let size = egui::vec2(count as f32 * STEP, HEIGHT);
     let (area, _) = ui.allocate_exact_size(size, Sense::hover());
     let center = |k: usize| area.left_top() + egui::vec2((k as f32 + 0.5) * STEP, RADIUS + 3.0);
@@ -66,7 +63,7 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
         if r.clicked() {
             *act = Some(Act::Show(history::version_pair(&app.versions, i)));
         }
-        history::version_menu(&r, me, picks, act);
+        history::version_menu(&r, me, picks, latest, act);
     }
     if dirty {
         let at = center(count - 1);

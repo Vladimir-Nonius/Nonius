@@ -2,12 +2,15 @@
 //! состояния внизу и надписи поверх вида.
 
 use eframe::egui::{self, Color32, RichText};
-use nonius_scene::Role;
+use nonius_core::compare::{ChangeKind, ChangeReport};
 
-use super::numbers::{change_line, volume_text};
+use super::legend::{legend, places};
+use super::numbers::change_line;
 use super::App;
 use crate::texts::texts;
-use crate::view::Model;
+
+/// Модуль сравнения формы: его «добавлено» и «убрано» — те же цвета легенды.
+const GEOMETRY_MODULE: &str = "geometry-occt";
 
 /// Полоса ошибки над окном: не заметить её нельзя, закрывается крестиком.
 pub fn error_bar(app: &mut App, ctx: &egui::Context) {
@@ -63,18 +66,25 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// «Что изменилось» справа: легенда, места изменений, числа, настройки вида.
+/// «Что изменилось» справа: легенда, места изменений, числа.
 pub fn changes(app: &mut App, ctx: &egui::Context) {
     let t = texts();
+    // Без детали и без модели говорить не о чем: 3D занимает всё место.
+    let model = app
+        .parts
+        .iter()
+        .find(|p| Some(&p.name) == app.part.as_ref());
+    if model.is_none_or(|p| p.model.is_none() && !p.assembly) {
+        return;
+    }
     let mut zoom = None;
-    let mut save = false;
     egui::SidePanel::right("changes")
         .default_width(270.0)
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.add_space(6.0);
                 ui.heading(t.what_changed);
-                let single = app.picks.0 == app.picks.1;
+                let single = app.picks.0 == app.picks.1 && app.outside.is_none();
                 if app.jobs.can_cancel() {
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -83,10 +93,11 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                 } else if app.part.is_some() && single {
                     ui.label(RichText::new(t.nothing_to_compare).weak());
                 } else if let (Some(model), Some(_)) = (app.viewport.model(), &app.comparison) {
+                    legend(ui, model, &mut app.look);
                     if model.has_changes {
-                        legend(ui, model, &mut app.look);
                         zoom = places(ui, model, &mut app.selected);
                     } else {
+                        ui.add_space(4.0);
                         ui.label(t.no_shape_changes);
                     }
                 }
@@ -98,7 +109,16 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                     if let Some(why) = c.scene_problem.as_ref().filter(|_| c.scene.is_some()) {
                         ui.label(RichText::new(format!("{}: {why}", t.no_colors)).color(warn));
                     }
-                    let lines: Vec<_> = c.reports.iter().flat_map(|r| &r.changes).collect();
+                    // Что добавлено и убрано, уже сказала легенда.
+                    let shape = |r: &&ChangeReport| r.comparator != GEOMETRY_MODULE;
+                    let parts = c.reports.iter().filter(shape).flat_map(|r| &r.changes);
+                    let form = c
+                        .reports
+                        .iter()
+                        .filter(|r| !shape(r))
+                        .flat_map(|r| &r.changes);
+                    let form = form.filter(|ch| ch.kind == ChangeKind::Modified);
+                    let lines: Vec<_> = form.chain(parts).collect();
                     if !lines.is_empty() {
                         ui.add_space(8.0);
                         ui.label(RichText::new(t.numbers).strong());
@@ -107,108 +127,57 @@ pub fn changes(app: &mut App, ctx: &egui::Context) {
                         }
                     }
                 }
-                super::material::show(app, ui);
-                ui.add_space(8.0);
-                ui.separator();
-                ui.checkbox(&mut app.look.xray, t.xray);
-                ui.checkbox(&mut app.look.edges, t.edges);
-                if ui
-                    .checkbox(&mut app.settings.wheel_reverse, t.wheel_reverse)
-                    .changed()
-                {
-                    app.settings.save();
-                }
-                ui.add_space(8.0);
-                if ui.button(t.save_picture).clicked() {
-                    save = true;
+                if app.outside.is_none() {
+                    super::material::show(app, ui);
                 }
             });
         });
     if let Some(part) = zoom {
         app.viewport.zoom_to(ctx, part);
     }
-    if save {
-        super::toolbar::save_picture(app);
-    }
 }
 
-fn swatch(ui: &mut egui::Ui, role: Role) {
-    let [r, g, b] = role.color();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
-}
-
-/// Цвета с объёмами; галочка прячет роль.
-fn legend(ui: &mut egui::Ui, model: &Model, look: &mut crate::view::Look) {
-    for (role, flag) in [
-        (Role::Added, &mut look.added),
-        (Role::Removed, &mut look.removed),
-        (Role::Moved, &mut look.moved),
-    ] {
-        let volume: f64 = model
-            .parts
-            .iter()
-            .filter(|p| p.role == role)
-            .map(|p| p.volume_mm3)
-            .sum();
-        if !model.parts.iter().any(|p| p.role == role) {
-            continue;
-        }
-        ui.horizontal(|ui| {
-            ui.checkbox(flag, "");
-            swatch(ui, role);
-            ui.label(format!("{}  {}", role_name(role), volume_text(volume)));
-        });
-    }
-}
-
-/// Список мест: ‹ › и щелчок — приблизить. Возвращает кусок для приближения.
-fn places(ui: &mut egui::Ui, model: &Model, selected: &mut Option<usize>) -> Option<usize> {
+/// Пустой проект или деталь без модели: сказать и дать кнопку.
+fn empty_state(app: &mut App, ui: &mut egui::Ui) -> bool {
     let t = texts();
-    let list = model.places();
-    if list.is_empty() {
-        return None;
+    let waiting = app.jobs.busy() || app.add.is_some();
+    let part = app
+        .part
+        .clone()
+        .filter(|p| app.parts.iter().any(|e| e.name == *p && e.model.is_none()));
+    let (text, label) = if app.parts.is_empty() {
+        (t.empty_project, t.add_models)
+    } else if part.is_some() {
+        (t.empty_part, t.add_model)
+    } else {
+        return false;
+    };
+    if waiting {
+        return true;
     }
-    let mut zoom = None;
-    let at = selected.and_then(|s| list.iter().position(|&i| i == s));
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(t.places).strong());
-        let n = list.len();
-        if ui.small_button("‹").clicked() {
-            zoom = Some(list[at.map_or(n - 1, |a| (a + n - 1) % n)]);
-        }
-        let shown = at.map_or("–".to_string(), |a| (a + 1).to_string());
-        ui.label(format!("{shown} {} {n}", t.place_of));
-        if ui.small_button("›").clicked() {
-            zoom = Some(list[at.map_or(0, |a| (a + 1) % n)]);
-        }
-    });
-    for &i in &list {
-        let p = &model.parts[i];
-        ui.horizontal(|ui| {
-            swatch(ui, p.role);
-            let text = format!(
-                "{} {}   {}",
-                role_name(p.role),
-                p.number,
-                volume_text(p.volume_mm3)
-            );
-            if ui.selectable_label(*selected == Some(i), text).clicked() {
-                zoom = Some(i);
+    let rect = ui.max_rect();
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Center)),
+        |ui| {
+            ui.add_space(rect.height() * 0.4);
+            ui.label(RichText::new(text).size(16.0).weak());
+            ui.add_space(8.0);
+            if ui.button(RichText::new(label).size(15.0)).clicked() {
+                app.start_adding(app.chooser.models(), part);
             }
-        });
-    }
-    if zoom.is_some() {
-        *selected = zoom;
-    }
-    zoom
+        },
+    );
+    true
 }
 
 /// Надписи поверх 3D: что выбрать, нечего показать, идёт расчёт.
-pub fn overlay(app: &App, ui: &mut egui::Ui) {
+pub fn overlay(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
+    if empty_state(app, ui) {
+        return;
+    }
     let problem;
     let text = if !app.viewport.has_gpu() {
         Some(t.gpu_missing)
@@ -231,16 +200,5 @@ pub fn overlay(app: &App, ui: &mut egui::Ui) {
                 .layout(layout),
             |ui| ui.add(egui::Label::new(RichText::new(text).size(16.0).weak()).selectable(false)),
         );
-    }
-}
-
-pub(super) fn role_name(role: Role) -> &'static str {
-    let t = texts();
-    match role {
-        Role::After => t.role_after,
-        Role::Before => t.role_before,
-        Role::Added => t.role_added,
-        Role::Removed => t.role_removed,
-        Role::Moved => t.role_moved,
     }
 }

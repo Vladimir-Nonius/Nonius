@@ -13,8 +13,8 @@ use eframe::egui;
 use nonius_scene::Scene;
 
 use crate::source::{
-    AddedModel, Comparison, DiffEntry, FileEntry, MassEntry, PartEntry, Pick, ProgramEntry,
-    Progress, ProjectSource, VersionEntry,
+    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, MassEntry, PartEntry, Pick,
+    ProgramEntry, Progress, ProjectSource, VersionEntry,
 };
 
 /// Готовый результат.
@@ -51,6 +51,22 @@ pub enum Done {
     PartCreated(String, anyhow::Result<()>),
     /// Файл добавлен в деталь и сохранён версией.
     Added(anyhow::Result<AddedModel>),
+    /// Версии раскрытой, но не выбранной детали.
+    Listed(String, anyhow::Result<Vec<VersionEntry>>),
+    /// Деталь переименована: прежнее и новое имя.
+    PartRenamed(String, String, anyhow::Result<()>),
+    /// Деталь удалена.
+    PartDeleted(String, anyhow::Result<()>),
+    /// Список удалённых деталей.
+    DeletedList(anyhow::Result<Vec<DeletedEntry>>),
+    /// Удалённая деталь возвращена.
+    PartRecovered(String, anyhow::Result<()>),
+    /// Деталь возвращена к версии; результат — номер новой.
+    Restored(String, u32, anyhow::Result<u32>),
+    /// Файлы версии выгружены: деталь, версия, папка, сколько файлов.
+    Exported(String, u32, PathBuf, anyhow::Result<usize>),
+    /// Сравнение с файлом или другой деталью: деталь, подпись, результат.
+    ComparedOutside(String, String, anyhow::Result<Comparison>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

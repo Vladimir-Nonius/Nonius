@@ -2,18 +2,54 @@
 //! `Nonius-Item`, `Nonius-Version`, а у версий ИИ ещё `Nonius-AI` и
 //! `Nonius-AI-Model`. Служебным считается только последний абзац: строка
 //! из описания версии не может выдать себя за подпись.
+//!
+//! Переименование, удаление и возврат детали — не версии, а отметки в истории:
+//! `Nonius-Renamed`, `Nonius-Deleted`, `Nonius-Recovered`.
 
+use nonius_core::meta::ItemKind;
 use nonius_core::{PartName, VersionNumber};
 
-use crate::{AiActor, VersionInfo};
+use crate::{AiActor, DeletedItem, VersionInfo};
 
 const ITEM_TRAILER: &str = "Nonius-Item: ";
 const VERSION_TRAILER: &str = "Nonius-Version: ";
 const AI_TRAILER: &str = "Nonius-AI: ";
 const AI_MODEL_TRAILER: &str = "Nonius-AI-Model: ";
+const RENAMED_TRAILER: &str = "Nonius-Renamed: ";
+const DELETED_TRAILER: &str = "Nonius-Deleted: ";
+const RECOVERED_TRAILER: &str = "Nonius-Recovered: ";
+const KIND_TRAILER: &str = "Nonius-Kind: ";
 
-/// Формат `git log`, который понимает [`parse_record`].
+/// Значение `Nonius-Kind` у сборки; у детали строки нет.
+const ASSEMBLY: &str = "assembly";
+
+/// Формат `git log`, который понимает [`parse_event`].
 pub(crate) const LOG_FORMAT: &str = "--format=%H%x1f%an%x1f%cn%x1f%aI%x1f%B";
+
+/// Отбор `git log`: только то, что меняет историю деталей.
+pub(crate) const LOG_EVENTS: [&str; 4] = [
+    "--grep=^Nonius-Version: ",
+    "--grep=^Nonius-Renamed: ",
+    "--grep=^Nonius-Deleted: ",
+    "--grep=^Nonius-Recovered: ",
+];
+
+/// Запись истории проекта.
+pub(crate) enum Event {
+    /// Версия детали.
+    Version(VersionInfo),
+    /// Деталь переименована.
+    Renamed {
+        /// Прежнее имя.
+        from: PartName,
+        /// Новое имя.
+        to: PartName,
+    },
+    /// Деталь удалена.
+    Deleted(DeletedItem),
+    /// Удалённая деталь возвращена.
+    Recovered(PartName),
+}
 
 pub(crate) fn commit_message(
     item: &PartName,
@@ -42,8 +78,79 @@ pub(crate) fn commit_message(
     text
 }
 
-pub(crate) fn parse_record(record: &str, item: &PartName) -> Option<VersionInfo> {
-    parse_any_record(record).filter(|v| &v.item == item)
+/// Подпись ИИ в конце сообщения отметки.
+fn signed(mut text: String, ai: Option<&AiActor>) -> String {
+    if let Some(ai) = ai {
+        text.push_str(&format!("{AI_TRAILER}{}\n", ai.name()));
+        if let Some(model) = ai.model() {
+            text.push_str(&format!("{AI_MODEL_TRAILER}{model}\n"));
+        }
+    }
+    text
+}
+
+/// Сообщение отметки «деталь переименована».
+pub(crate) fn renamed_message(from: &PartName, to: &PartName, ai: Option<&AiActor>) -> String {
+    let text =
+        format!("{from} → {to}: новое имя детали\n\n{RENAMED_TRAILER}{from}\n{ITEM_TRAILER}{to}\n");
+    signed(text, ai)
+}
+
+/// Сообщение отметки «деталь удалена».
+pub(crate) fn deleted_message(item: &PartName, kind: ItemKind, ai: Option<&AiActor>) -> String {
+    let mut text = format!("{item}: деталь удалена\n\n{DELETED_TRAILER}{item}\n");
+    if kind == ItemKind::Assembly {
+        text.push_str(&format!("{KIND_TRAILER}{ASSEMBLY}\n"));
+    }
+    signed(text, ai)
+}
+
+/// Сообщение отметки «деталь возвращена».
+pub(crate) fn recovered_message(item: &PartName, ai: Option<&AiActor>) -> String {
+    signed(
+        format!("{item}: деталь возвращена\n\n{RECOVERED_TRAILER}{item}\n"),
+        ai,
+    )
+}
+
+/// Запись `git log` → событие истории; `None` — обычный коммит.
+pub(crate) fn parse_event(record: &str) -> Option<Event> {
+    if let Some(v) = parse_any_record(record) {
+        return Some(Event::Version(v));
+    }
+    let record = record.trim_start_matches('\n');
+    let mut fields = record.splitn(5, '\u{1f}');
+    let commit = fields.next()?.trim().to_string();
+    let author = fields.next()?.to_string();
+    let _committer = fields.next()?;
+    let date = fields.next()?.to_string();
+    let (_, block) = fields.next()?.trim_end().rsplit_once("\n\n")?;
+    let value = |trailer: &str| {
+        let found = block.lines().find_map(|l| l.strip_prefix(trailer))?;
+        PartName::new(found.trim()).ok()
+    };
+    if let Some(from) = value(RENAMED_TRAILER) {
+        let to = value(ITEM_TRAILER)?;
+        return Some(Event::Renamed { from, to });
+    }
+    if let Some(name) = value(RECOVERED_TRAILER) {
+        return Some(Event::Recovered(name));
+    }
+    let name = value(DELETED_TRAILER)?;
+    let assembly = block
+        .lines()
+        .any(|l| l.strip_prefix(KIND_TRAILER).map(str::trim) == Some(ASSEMBLY));
+    Some(Event::Deleted(DeletedItem {
+        name,
+        kind: if assembly {
+            ItemKind::Assembly
+        } else {
+            ItemKind::Part
+        },
+        commit,
+        author,
+        date,
+    }))
 }
 
 /// Запись `git log` → версия любой детали; `None` — коммит не версия.
@@ -88,6 +195,7 @@ pub(crate) fn parse_any_record(record: &str) -> Option<VersionInfo> {
     Some(VersionInfo {
         item,
         version,
+        folder: String::new(),
         commit,
         author,
         committer,
@@ -110,15 +218,41 @@ mod tests {
         let record = format!(
             "abc123\u{1f}Владимир\u{1f}Владимир\u{1f}2026-10-26T12:00:00+03:00\u{1f}{text}"
         );
-        let info = parse_record(&record, &item).unwrap();
+        let info = parse_any_record(&record).unwrap();
+        assert_eq!(info.item, item);
         assert_eq!(info.version, v);
         assert_eq!(info.author, "Владимир");
         assert_eq!(info.message, "Фаска 1×45\n\nПод подшипник 6204.");
         assert_eq!(info.summary(), "Фаска 1×45");
 
-        let other = PartName::new("вал").unwrap();
-        assert!(parse_record(&record, &other).is_none(), "чужая деталь");
-        assert!(parse_record("abc\u{1f}a\u{1f}a\u{1f}d\u{1f}просто коммит", &item).is_none());
+        assert!(parse_any_record("abc\u{1f}a\u{1f}a\u{1f}d\u{1f}просто коммит").is_none());
+    }
+
+    #[test]
+    fn marks_round_trip() {
+        let a = PartName::new("вал").unwrap();
+        let b = PartName::new("ось").unwrap();
+        let ai = AiActor::new("Claude", None).unwrap();
+        let renamed = record("Claude", &renamed_message(&a, &b, Some(&ai)));
+        assert!(
+            matches!(parse_event(&renamed), Some(Event::Renamed { from, to }) if from == a && to == b)
+        );
+        let deleted = record("Я", &deleted_message(&a, ItemKind::Assembly, None));
+        match parse_event(&deleted) {
+            Some(Event::Deleted(d)) => {
+                assert_eq!(d.name, a);
+                assert_eq!(d.kind, ItemKind::Assembly);
+            }
+            _ => panic!("не отметка удаления"),
+        }
+        let back = record("Я", &recovered_message(&a, None));
+        assert!(matches!(parse_event(&back), Some(Event::Recovered(n)) if n == a));
+        // Строка в описании версии отметкой не становится.
+        let text = commit_message(&a, VersionNumber::FIRST, "x\n\nNonius-Deleted: вал", None);
+        assert!(matches!(
+            parse_event(&record("Я", &text)),
+            Some(Event::Version(_))
+        ));
     }
 
     fn record(author: &str, text: &str) -> String {

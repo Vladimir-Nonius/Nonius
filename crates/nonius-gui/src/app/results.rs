@@ -4,6 +4,7 @@
 use eframe::egui;
 
 use super::jobs::Done;
+use super::part_dialogs::Dialog;
 use super::App;
 use crate::source::{default_picks, Pick, VersionEntry};
 use crate::texts::texts;
@@ -39,7 +40,7 @@ impl App {
                 Done::Reread(Ok(parts)) => self.got_parts(ctx, parts),
                 Done::Reread(Err(_)) => {}
                 Done::Parts(Ok(parts)) => {
-                    self.parts = parts;
+                    self.set_parts(ctx, parts);
                     let models = std::mem::take(&mut self.after_open);
                     self.start_adding(models, None);
                     let want = self.want.as_ref().map(|w| w.0.clone());
@@ -52,7 +53,7 @@ impl App {
                 }
                 Done::Versions(name, Ok(v)) if current(&name) => self.got_versions(ctx, &name, v),
                 Done::Refreshed(parts, name, versions) => {
-                    self.parts = parts;
+                    self.set_parts(ctx, parts);
                     match versions {
                         Ok(v) if self.part.as_deref() == Some(&name) => {
                             // «Сохранена версия …» остаётся видна и после
@@ -169,8 +170,61 @@ impl App {
                     Some(d) => d.failed(format!("{e:#}")),
                     None => self.message = Some(format!("{}: {e:#}", t.error)),
                 },
+                Done::Listed(name, Ok(v)) => {
+                    self.listed.insert(name, v);
+                }
+                Done::Listed(_, Err(e)) => self.message = Some(format!("{}: {e:#}", t.error)),
+                Done::PartRenamed(old, new, Ok(())) => self.renamed(ctx, &old, new),
+                Done::PartDeleted(name, Ok(())) => self.part_gone(ctx, &name),
+                Done::PartRecovered(name, Ok(())) => {
+                    self.dialog = None;
+                    let text = format!("«{name}» {}", t.part_recovered);
+                    self.reload_on(ctx, name, text);
+                }
+                Done::Restored(name, version, Ok(n)) => {
+                    self.dialog = None;
+                    self.notice = Some(format!("«{name}» {} v{version}: v{n}", t.restored_to));
+                    self.refresh(ctx);
+                }
+                Done::PartRenamed(_, _, Err(e))
+                | Done::PartDeleted(_, Err(e))
+                | Done::PartRecovered(_, Err(e))
+                | Done::Restored(_, _, Err(e)) => match self.dialog.as_mut() {
+                    Some(d) => d.failed(format!("{e:#}")),
+                    None => self.message = Some(format!("{}: {e:#}", t.error)),
+                },
+                Done::DeletedList(result) => match (self.dialog.as_mut(), result) {
+                    (Some(Dialog::Deleted(list, _)), Ok(found)) => *list = Some(found),
+                    (Some(d), Err(e)) => d.failed(format!("{e:#}")),
+                    _ => {}
+                },
+                Done::Exported(name, version, dest, result) => match result {
+                    Ok(n) => {
+                        let place = dest.display();
+                        self.notice =
+                            Some(format!("«{name}» v{version}: {} {n}: {place}", t.exported));
+                    }
+                    Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
+                },
+                Done::ComparedOutside(name, label, result)
+                    if current(&name) && self.outside.as_ref() == Some(&label) =>
+                {
+                    match result {
+                        Ok(c) => {
+                            let model = c.scene.as_ref().and_then(Model::new);
+                            self.put_model(&name, model);
+                            self.comparison = Some(c);
+                            self.selected = None;
+                        }
+                        Err(e) => {
+                            self.message = Some(format!("{}: {e:#}", t.error));
+                            self.close_outside(ctx);
+                        }
+                    }
+                }
                 Done::Crashed => self.message = Some(t.crashed.to_string()),
                 // Устарело: выбрали другое.
+                Done::ComparedOutside(..) => {}
                 Done::Versions(..)
                 | Done::Compared(..)
                 | Done::Masses(..)

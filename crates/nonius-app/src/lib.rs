@@ -13,8 +13,8 @@
 //! `system/` — программы системы, запуск, показ в папке,
 //! `import.rs` — импорт модели, `passport.rs` — паспорт и масса,
 //! `materials.rs` — справочник плотностей, `compare.rs` — сравнение,
-//! `model_view.rs` — показ детали без сравнения, `cache.rs` — кэш сравнений,
-//! `error.rs` — ошибки.
+//! `model_view.rs` — показ детали без сравнения, `outside.rs` — сравнение с
+//! файлом или другой деталью, `cache.rs` — кэш сравнений, `error.rs` — ошибки.
 
 mod cache;
 mod compare;
@@ -25,6 +25,7 @@ mod import;
 mod items;
 mod materials;
 mod model_view;
+mod outside;
 mod passport;
 mod system;
 
@@ -41,13 +42,14 @@ pub use error::{Error, Result, ERROR_CODES};
 pub use import::{Imported, PREVIEW_FORMAT};
 pub use items::{ItemState, ItemStatus};
 pub use materials::{find_material, Material, MATERIALS};
+pub use outside::{Other, Outside};
 pub use passport::{Mass, MaterialChoice, Passport};
 pub use system::{programs_for, OpenWay, Program};
 
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.
 pub use nonius_store::workdir::work_dir;
 pub use nonius_store::{
-    is_text_file, readiness, set_author, AiActor, DiffLine, DiffLineKind, FileChange,
+    is_text_file, readiness, set_author, AiActor, DeletedItem, DiffLine, DiffLineKind, FileChange,
     FileChangeKind, GitOptions, Readiness, StoreError, VersionFile, VersionInfo,
 };
 

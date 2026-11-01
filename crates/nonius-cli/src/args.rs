@@ -98,6 +98,20 @@ pub enum Command {
         /// По какую версию (по умолчанию текущее состояние).
         to: Option<String>,
     },
+    /// Сравнить деталь с файлом STEP или с другой деталью, ничего не сохраняя.
+    Compare {
+        /// Деталь.
+        part: String,
+        /// Какую версию детали взять (по умолчанию текущее состояние).
+        #[arg(long)]
+        version: Option<String>,
+        /// Файл STEP на диске.
+        #[arg(long, required_unless_present = "with", conflicts_with = "with")]
+        file: Option<PathBuf>,
+        /// Другая деталь, как она есть сейчас.
+        #[arg(long)]
+        with: Option<String>,
+    },
     /// Вернуть деталь к старой версии (создаётся новая версия, история сохраняется).
     Restore {
         /// Деталь.
@@ -195,5 +209,24 @@ pub enum PartCommand {
         /// Это сборка.
         #[arg(long)]
         assembly: bool,
+    },
+    /// Переименовать деталь: версии остаются при ней.
+    Rename {
+        /// Нынешнее имя.
+        name: String,
+        /// Новое имя.
+        new: String,
+    },
+    /// Удалить деталь: она остаётся в истории, вернёт её `part recover`.
+    Delete {
+        /// Деталь.
+        name: String,
+    },
+    /// Удалённые детали, которые можно вернуть.
+    Deleted,
+    /// Вернуть удалённую деталь.
+    Recover {
+        /// Деталь.
+        name: String,
     },
 }

@@ -6,12 +6,14 @@
 
 mod actions;
 mod add_model;
+mod choose;
 mod dropped;
 mod file_menu;
 mod files;
 mod first_run;
 mod history;
 mod jobs;
+mod legend;
 mod map;
 mod material;
 mod model_names;
@@ -19,6 +21,8 @@ mod new_part;
 mod numbers;
 mod open_menu;
 mod panels;
+mod part_actions;
+mod part_dialogs;
 mod results;
 mod save;
 mod settings;
@@ -27,17 +31,19 @@ mod tabs;
 mod toolbar;
 mod tree;
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui;
 
 use crate::source::{
-    Comparison, DiffEntry, FileEntry, Machine, MassEntry, MaterialEntry, Opener, PartEntry, Pick,
-    ProjectSource, VersionEntry,
+    Chooser, Comparison, DiffEntry, FileEntry, Machine, MassEntry, MaterialEntry, Opener,
+    PartEntry, Pick, ProjectSource, VersionEntry,
 };
 use crate::texts::texts;
 use crate::view::{Look, Mode, Viewport, ViewportEvent};
+pub use choose::SystemChooser;
 use jobs::Jobs;
 pub use settings::Settings;
 
@@ -51,6 +57,8 @@ pub struct Options {
     pub creator: Opener,
     /// Компьютер: есть ли git и имя автора.
     pub machine: Arc<dyn Machine>,
+    /// Окна выбора файла и папки.
+    pub chooser: Arc<dyn Chooser>,
     /// Сразу выбрать деталь.
     pub part: Option<String>,
     /// И сразу сравнить эти версии.
@@ -61,6 +69,7 @@ pub struct Options {
 pub struct App {
     opener: Opener,
     creator: Opener,
+    chooser: Arc<dyn Chooser>,
     project: Option<Arc<dyn ProjectSource>>,
     parts: Vec<PartEntry>,
     programs: open_menu::Programs,
@@ -87,8 +96,14 @@ pub struct App {
     path_input: String,
     /// Строка поиска в дереве.
     search: String,
-    /// История выбранной детали раскрыта.
-    tree_open: bool,
+    /// Раскрытые в дереве детали.
+    expanded: BTreeSet<String>,
+    /// Версии раскрытых деталей, кроме выбранной.
+    listed: HashMap<String, Vec<VersionEntry>>,
+    /// С чем сравнивается деталь вне истории: имя файла или детали.
+    outside: Option<String>,
+    /// Открытое окошко действия над деталью.
+    dialog: Option<part_dialogs::Dialog>,
     materials: Vec<MaterialEntry>,
     /// Материал и масса для пары версий: «Было», «Стало», сейчас.
     masses: Option<((Pick, Pick), [MassEntry; 3])>,
@@ -141,6 +156,7 @@ impl App {
         let mut app = Self {
             opener: options.opener,
             creator: options.creator,
+            chooser: options.chooser,
             project: None,
             parts: Vec::new(),
             programs: Default::default(),
@@ -161,7 +177,10 @@ impl App {
             sticky: None,
             path_input: String::new(),
             search: String::new(),
-            tree_open: true,
+            expanded: BTreeSet::new(),
+            listed: HashMap::new(),
+            outside: None,
+            dialog: None,
             materials: Vec::new(),
             masses: None,
             save: None,
@@ -175,7 +194,7 @@ impl App {
             reread_wanted: false,
             custom: material::Custom::default(),
             material_busy: false,
-            tab: Some(tabs::Tab::Files),
+            tab: None,
             files: None,
             file: None,
             file_text: None,
@@ -215,8 +234,11 @@ impl eframe::App for App {
         save::show(self, ctx);
         new_part::show(self, ctx);
         add_model::show(self, ctx);
+        part_dialogs::show(self, ctx);
+        // Заливка нужна: зазор между полосой и 3D иначе показывает чёрный фон.
+        let fill = ctx.style().visuals.panel_fill;
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(fill))
             .show(ctx, |ui| {
                 toolbar::show(self, ui);
                 let event = self.viewport.show(

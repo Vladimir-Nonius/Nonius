@@ -23,14 +23,10 @@ pub fn same_name<'a>(name: &str, parts: &'a [PartEntry]) -> Option<&'a PartEntry
 }
 
 /// Деталь, новой версией которой выглядит файл: то же имя или то же без
-/// хвоста версии, как `Test V1` и `Test V2`.
+/// хвоста версии, как `Test V1` и `Test V2`, `плита` и `плита v2`.
 pub fn guess<'a>(name: &str, parts: &'a [PartEntry]) -> Option<&'a PartEntry> {
-    same_name(name, parts).or_else(|| {
-        let base = without_version(name)?;
-        parts
-            .iter()
-            .find(|p| without_version(&p.name).as_deref() == Some(base.as_str()))
-    })
+    let base = |text: &str| without_version(text).unwrap_or_else(|| text.to_lowercase());
+    same_name(name, parts).or_else(|| parts.iter().find(|p| base(&p.name) == base(name)))
 }
 
 /// Имя без хвоста версии: `Test V2`, `вал_rev.3`, `плита ред2`, `кожух (2)`.
@@ -127,6 +123,8 @@ mod tests {
         assert_eq!(found("Test V2"), Some("Test V1"));
         assert_eq!(found("TEST v1"), Some("Test V1"));
         assert_eq!(found("втулка 30"), None);
+        assert_eq!(found("втулка 20 v2"), Some("втулка 20"));
+        assert_eq!(found("Test"), Some("Test V1"));
         assert_eq!(next_version("Test V1", &parts), "v2");
         assert_eq!(next_version("втулка 20", &parts), "v1");
     }

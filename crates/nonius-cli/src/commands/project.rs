@@ -50,6 +50,39 @@ pub fn part_new(app: &App, name: &str, assembly: bool) -> Result<()> {
     Ok(())
 }
 
+/// `nonius part rename`.
+pub fn part_rename(app: &App, name: &str, new: &str) -> Result<()> {
+    let item = app.rename_item(name, new)?;
+    println!("«{name}» теперь «{}», версии остались при ней", item.name);
+    Ok(())
+}
+
+/// `nonius part delete`.
+pub fn part_delete(app: &App, name: &str) -> Result<()> {
+    app.delete_item(name)?;
+    println!("Удалено: {name}. Вернуть: nonius part recover {name}");
+    Ok(())
+}
+
+/// `nonius part deleted`.
+pub fn part_deleted(app: &App) -> Result<()> {
+    let list = app.deleted_items()?;
+    if list.is_empty() {
+        println!("Удалённых деталей нет.");
+    }
+    for d in list {
+        println!("{}  {}  {}", short_date(&d.date), d.author, d.name);
+    }
+    Ok(())
+}
+
+/// `nonius part recover`.
+pub fn part_recover(app: &App, name: &str) -> Result<()> {
+    let item = app.recover_item(name)?;
+    println!("Возвращено: {}", item.name);
+    Ok(())
+}
+
 /// `nonius list`.
 pub fn list(app: &App) -> Result<()> {
     let items = app.item_list()?;

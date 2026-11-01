@@ -100,6 +100,12 @@ fn run(cli: Cli) -> Result<()> {
         Command::Part(PartCommand::New { name, assembly }) => {
             project::part_new(&app()?, name, *assembly)?
         }
+        Command::Part(PartCommand::Rename { name, new }) => {
+            project::part_rename(&app()?, name, new)?
+        }
+        Command::Part(PartCommand::Delete { name }) => project::part_delete(&app()?, name)?,
+        Command::Part(PartCommand::Deleted) => project::part_deleted(&app()?)?,
+        Command::Part(PartCommand::Recover { name }) => project::part_recover(&app()?, name)?,
         Command::List => project::list(&app()?)?,
         Command::Info => project::info(&app()?)?,
         Command::Overview { changed } => project::overview(&app()?, *changed)?,
@@ -113,6 +119,15 @@ fn run(cli: Cli) -> Result<()> {
         Command::Log { part } => history::log(&app()?, part)?,
         Command::Diff { part, from, to } => {
             compare::diff(&app()?, part, from.as_deref(), to.as_deref())?
+        }
+        Command::Compare {
+            part,
+            version,
+            file,
+            with,
+        } => {
+            let other = compare::other(file.as_deref(), with.as_deref())?;
+            compare::compare(&app()?, part, version.as_deref(), other)?
         }
         Command::Render {
             part,

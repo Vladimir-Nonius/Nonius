@@ -65,7 +65,10 @@ impl Store {
         let Some(from) = from else {
             return self.whole_text(item, to, rel, DiffLineKind::Same);
         };
-        let file = literal(&format!("{}/{rel}", self.pathspec(item)));
+        if self.moved_between(item, from, to) {
+            return self.moved_text_diff(item, from, to, rel);
+        }
+        let file = literal(&format!("{}/{rel}", self.folder_at(item, from)));
         let mut args = vec!["diff", "--no-color", "--no-ext-diff", "--no-renames"];
         args.push(&from.commit);
         if let Some(to) = to {
@@ -77,6 +80,48 @@ impl Store {
         if out.is_empty() && to.is_none() && !self.files_at(item, from)?.iter().any(|f| f == rel) {
             return self.whole_text(item, None, rel, DiffLineKind::Added);
         }
+        Ok(parse_diff(&String::from_utf8_lossy(&out)))
+    }
+
+    /// Деталь переименовали между этими версиями: пути в них разные.
+    fn moved_between(&self, item: &Item, from: &VersionInfo, to: Option<&VersionInfo>) -> bool {
+        let end = to.map_or_else(|| self.pathspec(item), |v| self.folder_at(item, v).into());
+        self.folder_at(item, from) != end
+    }
+
+    /// Разница текста через переименование.
+    fn moved_text_diff(
+        &self,
+        item: &Item,
+        from: &VersionInfo,
+        to: Option<&VersionInfo>,
+        rel: &str,
+    ) -> Result<Vec<DiffLine>> {
+        let was = self.files_at(item, from)?.iter().any(|f| f == rel);
+        let is = match to {
+            Some(v) => self.files_at(item, v)?.iter().any(|f| f == rel),
+            None => rel
+                .split('/')
+                .fold(item.dir.clone(), |p, s| p.join(s))
+                .is_file(),
+        };
+        match (was, is) {
+            (false, false) => return Ok(Vec::new()),
+            (false, true) => return self.whole_text(item, to, rel, DiffLineKind::Added),
+            (true, false) => return self.whole_text(item, Some(from), rel, DiffLineKind::Removed),
+            (true, true) => {}
+        }
+        let old = format!("{}:{}/{rel}", from.commit, self.folder_at(item, from));
+        let new = match to {
+            Some(v) => format!("{}:{}/{rel}", v.commit, self.folder_at(item, v)),
+            None => format!("{}/{rel}", self.pathspec(item)),
+        };
+        let mut args = vec!["diff", "--no-color", "--no-ext-diff", &old];
+        if to.is_none() {
+            args.push("--");
+        }
+        args.push(&new);
+        let out = self.git.run(&args)?;
         Ok(parse_diff(&String::from_utf8_lossy(&out)))
     }
 
@@ -105,7 +150,10 @@ impl Store {
 
     /// Размеры файлов версии или папки детали сейчас.
     fn sizes(&self, item: &Item, version: Option<&VersionInfo>) -> Result<BTreeMap<String, u64>> {
-        let path = self.pathspec(item);
+        let path = match version {
+            Some(v) => self.folder_at(item, v).into_owned(),
+            None => self.pathspec(item),
+        };
         let prefix = format!("{path}/");
         let rel = |f: &str| f.strip_prefix(&prefix).unwrap_or(f).to_string();
         let mut sizes = BTreeMap::new();
@@ -167,7 +215,10 @@ impl Store {
         from: &VersionInfo,
         to: Option<&VersionInfo>,
     ) -> Result<BTreeMap<String, FileChangeKind>> {
-        let path = self.pathspec(item);
+        if self.moved_between(item, from, to) {
+            return self.changed_through_rename(item, from, to);
+        }
+        let path = self.folder_at(item, from);
         let spec = literal(&path);
         let mut args = vec!["diff", "--name-status", "--no-renames", "-z"];
         args.push(&from.commit);
@@ -176,19 +227,9 @@ impl Store {
         }
         args.extend(["--", &spec]);
         let out = self.git.run(&args)?;
-        let text = String::from_utf8_lossy(&out);
         let prefix = format!("{path}/");
         let rel = |f: &str| f.strip_prefix(&prefix).unwrap_or(f).to_string();
-        let mut changed = BTreeMap::new();
-        let mut fields = text.split('\0');
-        while let (Some(status), Some(file)) = (fields.next(), fields.next()) {
-            let kind = match status {
-                "A" => FileChangeKind::Added,
-                "D" => FileChangeKind::Deleted,
-                _ => FileChangeKind::Modified,
-            };
-            changed.insert(rel(file), kind);
-        }
+        let mut changed = parse_name_status(&out, rel);
         if to.is_none() {
             let out = self.git.run(&[
                 "ls-files",
@@ -206,6 +247,58 @@ impl Store {
         }
         Ok(changed)
     }
+
+    /// Что изменилось через переименование. Деревья двух папок сравниваются
+    /// напрямую, а текущее состояние — с последней версией, поверх этого.
+    fn changed_through_rename(
+        &self,
+        item: &Item,
+        from: &VersionInfo,
+        to: Option<&VersionInfo>,
+    ) -> Result<BTreeMap<String, FileChangeKind>> {
+        let old = format!("{}:{}", from.commit, self.folder_at(item, from));
+        let new = match to {
+            Some(v) => format!("{}:{}", v.commit, self.folder_at(item, v)),
+            None => format!("HEAD:{}", self.pathspec(item)),
+        };
+        let args = ["diff", "--name-status", "--no-renames", "-z", &old, &new];
+        let mut changed = parse_name_status(&self.git.run(&args)?, str::to_string);
+        if to.is_some() {
+            return Ok(changed);
+        }
+        for now in self.changes(item)? {
+            use FileChangeKind::{Added, Deleted, Modified};
+            match (changed.get(&now.path).copied(), now.kind) {
+                (Some(Added), Deleted) => {
+                    changed.remove(&now.path);
+                }
+                (Some(Added), _) => {}
+                (Some(Deleted), Added) => {
+                    changed.insert(now.path, Modified);
+                }
+                (_, kind) => {
+                    changed.insert(now.path, kind);
+                }
+            }
+        }
+        Ok(changed)
+    }
+}
+
+/// Вывод `git diff --name-status -z` → путь и вид изменения.
+fn parse_name_status(out: &[u8], rel: impl Fn(&str) -> String) -> BTreeMap<String, FileChangeKind> {
+    let text = String::from_utf8_lossy(out);
+    let mut changed = BTreeMap::new();
+    let mut fields = text.split('\0');
+    while let (Some(status), Some(file)) = (fields.next(), fields.next()) {
+        let kind = match status {
+            "A" => FileChangeKind::Added,
+            "D" => FileChangeKind::Deleted,
+            _ => FileChangeKind::Modified,
+        };
+        changed.insert(rel(file), kind);
+    }
+    changed
 }
 
 /// Размер из указателя LFS.

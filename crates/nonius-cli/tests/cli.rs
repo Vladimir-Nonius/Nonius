@@ -510,3 +510,263 @@ fn files_between_versions() {
     assert!(!ok);
     assert!(out.contains("нет файла"), "{out}");
 }
+
+/// Настоящая модель из `packaging/smoke`.
+fn sample(dir: &std::path::Path, source: &str, name: &str) -> String {
+    let smoke = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/smoke");
+    let path = dir.join(name);
+    std::fs::copy(smoke.join(source), &path).unwrap();
+    path.display().to_string()
+}
+
+const HELLO: fn() -> serde_json::Value = || {
+    serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "protocolVersion": "2025-06-18", "clientInfo": { "name": "Claude" } },
+    })
+};
+
+/// Весь путь детали так, как его проходит ИИ: сервер MCP, ответ на каждый шаг.
+#[test]
+fn ai_way_of_a_part_through_mcp() {
+    use serde_json::json;
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path().join("проект");
+    std::fs::create_dir(&d).unwrap();
+    assert!(nonius(&d, &["init"]).0);
+    let one = sample(tmp.path(), "plate-v1.step", "первая.step");
+    let two = sample(tmp.path(), "plate-v2.step", "вторая.step");
+
+    let out = mcp(
+        &d,
+        &["--write"],
+        &[
+            HELLO(),
+            call(2, "import", json!({ "file": one, "part": "плита" })),
+            call(3, "commit", json!({ "part": "плита", "message": "первая" })),
+            call(4, "import", json!({ "file": two, "part": "плита" })),
+            call(5, "commit", json!({ "part": "плита", "message": "вторая" })),
+            call(
+                6,
+                "part_rename",
+                json!({ "name": "плита", "new": "основание" }),
+            ),
+            call(7, "log", json!({ "part": "основание" })),
+            call(
+                8,
+                "diff",
+                json!({ "part": "основание", "from": "v1", "to": "v2" }),
+            ),
+            call(
+                9,
+                "compare",
+                json!({ "part": "основание", "version": "v2", "file": one }),
+            ),
+            call(
+                10,
+                "restore",
+                json!({ "part": "основание", "version": "v1" }),
+            ),
+            call(11, "part_delete", json!({ "name": "основание" })),
+            call(12, "overview", json!({})),
+            call(13, "part_deleted", json!({})),
+            call(14, "part_recover", json!({ "name": "основание" })),
+            call(15, "log", json!({ "part": "основание" })),
+        ],
+    );
+    assert_eq!(out.len(), 15, "{out:?}");
+    let ok = |reply: &serde_json::Value| {
+        let answer = tool_answer(reply);
+        assert_eq!(answer["ok"], true, "{answer}");
+        answer["data"].clone()
+    };
+    for reply in &out[1..6] {
+        ok(reply);
+    }
+    let log = ok(&out[6]);
+    let versions = log["versions"].as_array().unwrap();
+    assert_eq!(versions.len(), 2, "{log}");
+    assert_eq!(versions[0]["item"], "основание", "имя нынешнее: {log}");
+    assert_eq!(versions[0]["ai"]["name"], "Claude", "{log}");
+    assert_eq!(ok(&out[7])["item"], "основание");
+    ok(&out[8]);
+    assert_eq!(ok(&out[9])["version"], "v3");
+    assert_eq!(ok(&out[10])["deleted"], "основание");
+    assert_eq!(ok(&out[11])["items"], json!([]));
+    assert_eq!(ok(&out[12])["items"][0]["name"], "основание");
+    ok(&out[13]);
+    assert_eq!(ok(&out[14])["versions"].as_array().unwrap().len(), 3);
+
+    // Форму видно только с OpenCascade.
+    let modules = json(&d, &["--json", "modules"]);
+    if !modules["data"]["opencascade"].is_null() {
+        assert_eq!(ok(&out[8])["empty"], false, "модели разные: {}", out[8]);
+        let same = mcp(
+            &d,
+            &[],
+            &[
+                HELLO(),
+                call(2, "compare", json!({ "part": "основание", "file": one })),
+            ],
+        );
+        assert_eq!(ok(&same[1])["empty"], true, "та же модель: {}", same[1]);
+    }
+
+    // Подпись стоит в самой истории, а не только в ответе.
+    let git = Command::new("git")
+        .args([
+            "-C",
+            &d.display().to_string(),
+            "log",
+            "-3",
+            "--format=%an|%b",
+        ])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&git.stdout);
+    assert!(text.contains("Claude|"), "{text}");
+    assert!(text.contains("Nonius-Recovered: основание"), "{text}");
+    assert!(text.contains("Nonius-AI: Claude"), "{text}");
+}
+
+#[test]
+fn mcp_without_write_changes_nothing() {
+    use serde_json::json;
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    let names = [
+        "part_new",
+        "part_rename",
+        "part_delete",
+        "part_recover",
+        "import",
+        "commit",
+        "restore",
+        "export",
+        "agents",
+    ];
+    let mut messages = vec![
+        HELLO(),
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+    ];
+    for (i, name) in names.iter().enumerate() {
+        let args = json!({ "name": "вал", "new": "ось" });
+        messages.push(call(3 + i as u32, name, args));
+    }
+    let out = mcp(d, &[], &messages);
+    let tools = out[1]["result"]["tools"].to_string();
+    for name in names {
+        assert!(!tools.contains(&format!("\"{name}\"")), "{name}: {tools}");
+    }
+    assert!(tools.contains("part_deleted"), "чтение есть: {tools}");
+    assert!(tools.contains("\"compare\""), "чтение есть: {tools}");
+    for (reply, name) in out[2..].iter().zip(names) {
+        let answer = tool_answer(reply);
+        assert_eq!(answer["error"]["code"], "unknown_tool", "{name}: {answer}");
+        assert_eq!(reply["result"]["isError"], true);
+    }
+    assert!(d.join("parts").join("вал").is_dir(), "деталь на месте");
+}
+
+#[test]
+fn json_part_actions_have_stable_codes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    assert!(nonius(d, &["part", "new", "ось"]).0);
+    let code = |args: &[&str]| json(d, args)["error"]["code"].clone();
+    assert!(nonius(d, &["commit", "вал", "-m", "первая"]).0);
+
+    assert_eq!(
+        code(&["--json", "part", "rename", "вал", "ОСЬ"]),
+        "already_exists"
+    );
+    assert_eq!(
+        code(&["--json", "part", "rename", "нет", "да"]),
+        "unknown_item"
+    );
+    assert_eq!(
+        code(&["--json", "part", "rename", "вал", "а/б"]),
+        "invalid_name"
+    );
+    assert_eq!(
+        code(&["--json", "part", "recover", "вал"]),
+        "already_exists"
+    );
+    assert_eq!(code(&["--json", "part", "recover", "нет"]), "not_deleted");
+    assert_eq!(code(&["--json", "part", "delete", "нет"]), "unknown_item");
+    let note = d.join("parts").join("вал").join("docs").join("н.md");
+    std::fs::write(&note, "текст").unwrap();
+    assert_eq!(code(&["--json", "part", "rename", "вал", "ось2"]), "dirty");
+    assert_eq!(code(&["--json", "restore", "вал", "v1"]), "dirty");
+
+    let text = d.join("текст.txt");
+    std::fs::write(&text, "x").unwrap();
+    let file = text.display().to_string();
+    assert_eq!(
+        code(&["--json", "compare", "вал", "--file", &file]),
+        "not_step"
+    );
+    let missing = d.join("нет.step").display().to_string();
+    assert_eq!(
+        code(&["--json", "compare", "вал", "--file", &missing]),
+        "file_not_found"
+    );
+    assert_eq!(code(&["--json", "compare", "вал"]), "usage");
+    assert_eq!(
+        code(&["--json", "compare", "вал", "--with", "нет"]),
+        "unknown_item"
+    );
+
+    // Удаление не теряет несохранённое.
+    let gone = json(d, &["--json", "part", "delete", "вал"]);
+    assert_eq!(gone["ok"], true, "{gone}");
+    assert!(!note.exists());
+    assert!(json(d, &["--json", "part", "recover", "вал"])["ok"] == true);
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "текст");
+
+    // Описание команд и кодов знает новое.
+    let described = json(d, &["--json", "describe"]);
+    let text = described.to_string();
+    for word in [
+        "part delete",
+        "compare",
+        "in_use",
+        "not_deleted",
+        "not_step",
+    ] {
+        assert!(text.contains(word), "{word}: {text}");
+    }
+    let agents = std::fs::read_to_string(d.join("AGENTS.md")).unwrap();
+    assert!(agents.contains("nonius part rename"), "{agents}");
+}
+
+/// Окно читает проект, пока ИИ сохраняет версии: никто никому не мешает.
+#[test]
+fn versions_are_saved_while_project_is_read() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    let stop = AtomicBool::new(false);
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            while !stop.load(Ordering::Relaxed) {
+                assert!(nonius(d, &["--json", "overview"]).0);
+            }
+        });
+        let note = d.join("parts").join("вал").join("docs").join("н.md");
+        for i in 0..6 {
+            std::fs::write(&note, format!("правка {i}")).unwrap();
+            let (ok, out) = nonius(d, &["commit", "вал", "-m", "правка"]);
+            assert!(ok, "{out}");
+        }
+        stop.store(true, Ordering::Relaxed);
+    });
+    let log = json(d, &["--json", "log", "вал"]);
+    assert_eq!(log["data"]["versions"].as_array().unwrap().len(), 6);
+}

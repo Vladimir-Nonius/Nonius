@@ -16,10 +16,13 @@
 //!
 //! Поэтому историю можно смотреть и обычным `git log`, а бинарные файлы
 //! (STEP, SLDPRT, PDF) хранятся через Git LFS по `.gitattributes` проекта.
-//! Ничего не удаляется: откат создаёт новую версию.
+//! Ничего не удаляется: откат создаёт новую версию, удалённая деталь остаётся
+//! в истории и возвращается, а версии переименованной детали следуют за ней.
 //!
 //! Файлы: здесь — открытие хранилища, `history.rs` — версии, фиксация и
-//! откат, `overview.rs` — история всего проекта за один проход, `files.rs` — файлы версии и снимки, `message.rs` — сообщение
+//! откат, `items.rs` — удалить, вернуть, переименовать деталь, `lineage.rs` —
+//! чья какая версия, `overview.rs` — история всего проекта за один проход,
+//! `files.rs` — файлы версии и снимки, `message.rs` — сообщение
 //! коммита, `version.rs` — типы версий, `git.rs` — запуск git, `workdir.rs` —
 //! служебная папка `.git/nonius` и запись в неё целыми папками.
 
@@ -28,6 +31,8 @@ mod error;
 mod files;
 mod git;
 mod history;
+mod items;
+mod lineage;
 mod machine;
 mod message;
 mod overview;
@@ -43,7 +48,8 @@ use git::{git_path, Git};
 pub use machine::{readiness, set_author, Readiness};
 pub use overview::ItemHistory;
 pub use version::{
-    AiActor, DiffLine, DiffLineKind, FileChange, FileChangeKind, VersionFile, VersionInfo,
+    AiActor, DeletedItem, DiffLine, DiffLineKind, FileChange, FileChangeKind, VersionFile,
+    VersionInfo,
 };
 
 /// Настройки доступа к git.
@@ -131,5 +137,14 @@ impl Store {
 
     fn pathspec(&self, item: &Item) -> String {
         git_path(self.project.root(), &item.dir)
+    }
+
+    /// Папка детали в этой версии: после переименования она другая.
+    fn folder_at<'a>(&self, item: &Item, version: &'a VersionInfo) -> std::borrow::Cow<'a, str> {
+        if version.folder.is_empty() {
+            self.pathspec(item).into()
+        } else {
+            version.folder.as_str().into()
+        }
     }
 }

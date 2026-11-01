@@ -77,26 +77,40 @@ fn numbers(app: &App, ui: &mut egui::Ui) {
         ui.label(RichText::new(t.no_numbers).weak());
         return;
     }
+    // Одна версия: столбцов «Было» и «Стало» нет, сравнивать не с чем.
+    let single = app.picks.0 == app.picks.1 && app.outside.is_none();
+    let (before, after) = match &app.outside {
+        Some(other) => (pick_label(app.picks.1), other.clone()),
+        None => (pick_label(app.picks.0), pick_label(app.picks.1)),
+    };
     egui::ScrollArea::vertical()
         .id_salt("numbers-tab")
         .auto_shrink(false)
         .show(ui, |ui| {
             egui::Grid::new("numbers-table")
-                .num_columns(4)
+                .num_columns(if single { 2 } else { 4 })
                 .striped(true)
                 .min_col_width(110.0)
                 .show(ui, |ui| {
                     let head = |ui: &mut egui::Ui, s: &str| ui.label(RichText::new(s).strong());
                     head(ui, t.parameter);
-                    head(ui, &format!("{} ({})", t.before, pick_label(app.picks.0)));
-                    head(ui, &format!("{} ({})", t.after, pick_label(app.picks.1)));
-                    head(ui, t.difference);
+                    if single {
+                        head(ui, &after);
+                    } else {
+                        head(ui, &format!("{} ({before})", t.before));
+                        head(ui, &format!("{} ({after})", t.after));
+                        head(ui, t.difference);
+                    }
                     ui.end_row();
                     for r in rows {
                         ui.label(r.name);
-                        ui.label(r.before);
+                        if !single {
+                            ui.label(r.before);
+                        }
                         ui.label(r.after);
-                        ui.label(r.delta);
+                        if !single {
+                            ui.label(r.delta);
+                        }
                         ui.end_row();
                     }
                 });
@@ -107,7 +121,8 @@ fn numbers(app: &App, ui: &mut egui::Ui) {
 fn rows(app: &App) -> Vec<Row> {
     let t = texts();
     let mut rows = Vec::new();
-    if let Some((_, [before, after, _])) = app.masses.as_ref().filter(|m| m.0 == app.picks) {
+    let masses = app.masses.as_ref().filter(|m| m.0 == app.picks);
+    if let Some((_, [before, after, _])) = masses.filter(|_| app.outside.is_none()) {
         let material = |m: &MassEntry| m.material.clone().unwrap_or_else(|| "—".to_string());
         rows.push(Row {
             name: t.material.to_string(),

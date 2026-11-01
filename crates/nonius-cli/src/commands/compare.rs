@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use nonius_app::{App, CompareOptions, FileChangeKind, NoProgress};
+use nonius_app::{App, CompareOptions, FileChangeKind, NoProgress, Other, Outside};
 use nonius_core::VersionNumber;
 
 use crate::format::{marker, parse_version};
@@ -37,6 +37,34 @@ pub fn diff(app: &App, part: &str, from: Option<&str>, to: Option<&str>) -> Resu
         println!("  {word} {}", f.path);
     }
     if c.is_empty() {
+        println!("  изменений нет");
+    }
+    Ok(())
+}
+
+/// С чем сравнить: файл или другая деталь.
+pub fn other<'a>(file: Option<&'a Path>, with: Option<&'a str>) -> Result<Other<'a>> {
+    match (file, with) {
+        (Some(path), _) => Ok(Other::File(path)),
+        (None, Some(part)) => Ok(Other::Part(part)),
+        (None, None) => bail!("укажите --file или --with"),
+    }
+}
+
+/// Сравнить с файлом или деталью, только числа.
+pub fn outside(app: &App, part: &str, version: Option<&str>, other: Other) -> Result<Outside> {
+    let at = version.map(parse_version).transpose()?;
+    Ok(app.compare_outside(part, at, other, &CompareOptions::default(), &NoProgress)?)
+}
+
+/// `nonius compare`.
+pub fn compare(app: &App, part: &str, version: Option<&str>, other: Other) -> Result<()> {
+    let done = outside(app, part, version, other)?;
+    let changes: Vec<_> = done.reports.iter().flat_map(|r| &r.changes).collect();
+    for ch in &changes {
+        println!("  {} {ch}", marker(ch.kind));
+    }
+    if changes.is_empty() {
         println!("  изменений нет");
     }
     Ok(())

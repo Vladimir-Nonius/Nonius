@@ -119,7 +119,11 @@ impl App {
 
     /// Прочитать паспорт подходящим модулем. Если первый модуль не справился
     /// (пустой или повреждённый STEP), пробуем следующий и предупреждаем.
-    fn read_geometry(&self, file: &Path, warnings: &mut Vec<String>) -> Result<Option<PartMeta>> {
+    pub(crate) fn read_geometry(
+        &self,
+        file: &Path,
+        warnings: &mut Vec<String>,
+    ) -> Result<Option<PartMeta>> {
         let mut last_err = None;
         for src in self.registry.geometry_sources_for(file) {
             match src.read(file) {

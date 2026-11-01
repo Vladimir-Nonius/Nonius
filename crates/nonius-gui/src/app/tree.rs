@@ -1,7 +1,8 @@
-//! Дерево слева: поиск, детали проекта, внутри выбранной — её история.
+//! Дерево слева: поиск, детали проекта, внутри раскрытых — их история.
 
 use eframe::egui::{self, Color32, RichText};
 
+use super::jobs::Done;
 use super::open_menu::{self, Target};
 use super::App;
 use crate::source::{PartEntry, Pick};
@@ -15,6 +16,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
     let mut clicked = None;
     let mut asked = None;
+    let mut unfolded = None;
     egui::SidePanel::left("parts")
         .default_width(250.0)
         .show(ctx, |ui| {
@@ -22,7 +24,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 ui.add_space(6.0);
                 ui.heading(p.title());
             }
-            ui.label(RichText::new(t.parts).strong());
             let search = egui::TextEdit::singleline(&mut app.search)
                 .hint_text(t.search_parts)
                 .desired_width(f32::INFINITY);
@@ -46,23 +47,27 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .show(ui, |ui| {
                     for p in &found {
                         let selected = app.part.as_ref() == Some(&p.name);
-                        let open = selected && app.tree_open;
+                        let open = app.expanded.contains(&p.name);
                         ui.horizontal(|ui| {
                             let arrow = if open { "▾" } else { "▸" };
                             let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
                             let r = part_row(ui, p, selected);
-                            if toggle && selected {
-                                app.tree_open = !open;
-                            } else if toggle || r.clicked() {
-                                app.tree_open = true;
+                            if toggle && open {
+                                app.expanded.remove(&p.name);
+                            } else if toggle {
+                                app.expanded.insert(p.name.clone());
                                 if !selected {
-                                    clicked = Some(p.name.clone());
+                                    unfolded = Some(p.name.clone());
                                 }
+                            } else if r.clicked() && selected {
+                                app.expanded.insert(p.name.clone());
+                            } else if r.clicked() {
+                                clicked = Some(p.name.clone());
                             }
                             open_menu::attach(&r, &app.programs, || target(p), &mut asked);
                         });
                         if open {
-                            ui.indent("history", |ui| super::history::show(app, ui));
+                            ui.indent(&p.name, |ui| super::history::show(app, ui, p));
                         }
                     }
                 });
@@ -70,7 +75,46 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if let Some(name) = clicked {
         app.select_part(ctx, &name);
     }
+    if let Some(name) = unfolded {
+        app.list_versions(ctx, &name);
+    }
     app.answer_menu(ctx, asked);
+}
+
+impl App {
+    /// Раскрыть деталь в дереве, не выбирая её.
+    pub(super) fn list_versions(&mut self, ctx: &egui::Context, name: &str) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let name = name.to_string();
+        self.jobs.spawn(ctx, move |_| {
+            let v = project.versions(&name);
+            Done::Listed(name, v)
+        });
+    }
+
+    /// Новый список деталей: раскрытые, что изменились, перечитать.
+    pub(super) fn set_parts(&mut self, ctx: &egui::Context, parts: Vec<PartEntry>) {
+        let old = std::mem::replace(&mut self.parts, parts);
+        let names = self.parts.iter().map(|p| p.name.clone());
+        let names: std::collections::BTreeSet<String> = names.collect();
+        self.expanded.retain(|n| names.contains(n));
+        self.listed.retain(|n, _| names.contains(n));
+        let stale: Vec<String> = self
+            .expanded
+            .iter()
+            .filter(|n| Some(*n) != self.part.as_ref())
+            .filter(|n| {
+                let entry = |list: &[PartEntry]| list.iter().find(|p| p.name == **n).cloned();
+                entry(&old) != entry(&self.parts)
+            })
+            .cloned()
+            .collect();
+        for name in stale {
+            self.list_versions(ctx, &name);
+        }
+    }
 }
 
 /// Подходит ли деталь под поиск: без учёта регистра.

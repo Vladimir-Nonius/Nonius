@@ -1,17 +1,22 @@
-//! История выбранной детали внутри дерева: «Сейчас» (несохранённое), версии
-//! с метками «было» и «стало», кнопка «Сохранить версию». Что значит щелчок
-//! и правая кнопка — общее с картой снизу.
+//! История детали внутри дерева: «Сейчас» (несохранённое), версии с метками
+//! «было» и «стало», кнопка «Сохранить версию». Щелчок по версии другой
+//! детали выбирает её. Что значит щелчок и правая кнопка — общее с картой снизу.
 
 use eframe::egui::{self, Color32, RichText};
 
+use super::part_actions::old_version;
 use super::App;
-use crate::source::{Pick, VersionEntry};
+use crate::source::{PartEntry, Pick, VersionEntry};
 use crate::texts::texts;
 
 /// Что попросили в истории или на карте.
 pub enum Act {
     Show((Pick, Pick)),
+    /// Выбрать другую деталь и показать у неё эту пару.
+    Open(String, (Pick, Pick)),
     Save,
+    Restore(u32),
+    Export(u32),
 }
 
 /// Метка версии в выбранной паре.
@@ -25,7 +30,13 @@ pub struct Mark {
 /// «Было» или «Стало», если версия в паре.
 pub fn mark(me: Pick, picks: (Pick, Pick)) -> Option<Mark> {
     let t = texts();
-    if picks.1 == me {
+    if picks.0 == me && picks.1 == me {
+        Some(Mark {
+            text: t.badge_shown,
+            color: Color32::from_rgb(60, 110, 190),
+            fill: Color32::from_rgb(232, 239, 250),
+        })
+    } else if picks.1 == me {
         Some(Mark {
             text: t.badge_after,
             color: Color32::from_rgb(31, 158, 70),
@@ -55,8 +66,14 @@ pub fn now_pair(versions: &[VersionEntry]) -> Option<(Pick, Pick)> {
     Some((Pick::Version(latest.number), Pick::Current))
 }
 
-/// Правая кнопка по версии.
-pub fn version_menu(r: &egui::Response, me: Pick, picks: (Pick, Pick), act: &mut Option<Act>) {
+/// Правая кнопка по версии выбранной детали. `latest` вернуть незачем.
+pub fn version_menu(
+    r: &egui::Response,
+    me: Pick,
+    picks: (Pick, Pick),
+    latest: Option<u32>,
+    act: &mut Option<Act>,
+) {
     let t = texts();
     r.context_menu(|ui| {
         if ui.button(t.make_before).clicked() {
@@ -65,6 +82,19 @@ pub fn version_menu(r: &egui::Response, me: Pick, picks: (Pick, Pick), act: &mut
         }
         if ui.button(t.make_after).clicked() {
             *act = Some(Act::Show((picks.0, me)));
+            ui.close();
+        }
+        ui.separator();
+        let old = old_version(me, latest);
+        if ui
+            .add_enabled(old.is_some(), egui::Button::new(t.restore_version))
+            .clicked()
+        {
+            *act = old.map(Act::Restore);
+            ui.close();
+        }
+        if let (Pick::Version(n), true) = (me, ui.button(t.export_version).clicked()) {
+            *act = Some(Act::Export(n));
             ui.close();
         }
     });
@@ -85,8 +115,16 @@ impl App {
     /// Выполнить то, что попросили в истории или на карте.
     pub(super) fn apply(&mut self, ctx: &egui::Context, act: Option<Act>) {
         match act {
-            Some(Act::Show(p)) if p != self.picks => self.show_picks(ctx, p),
+            Some(Act::Show(p)) if p != self.picks || self.outside.is_some() => {
+                self.show_picks(ctx, p)
+            }
+            Some(Act::Open(part, picks)) => {
+                self.want = Some((part.clone(), Some(picks)));
+                self.select_part(ctx, &part);
+            }
             Some(Act::Save) => self.start_save(ctx),
+            Some(Act::Restore(n)) => self.ask_restore(Some(n)),
+            Some(Act::Export(n)) => self.export_version(ctx, Some(n)),
             _ => {}
         }
     }
@@ -99,43 +137,58 @@ impl App {
     }
 }
 
-/// Нарисовать историю выбранной детали.
-pub fn show(app: &mut App, ui: &mut egui::Ui) {
+/// Нарисовать историю детали `part`.
+pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
     let t = texts();
-    let picks = app.picks;
-    let latest = app.versions.first().map(|v| v.number);
-    let mut act = None;
-    if app.part_dirty() {
-        let r = row(ui, Pick::Current, picks, [t.now, t.not_saved, ""]);
-        if let (true, Some(p)) = (r.clicked(), now_pair(&app.versions)) {
-            act = Some(Act::Show(p));
+    let chosen = app.part.as_ref() == Some(&part.name);
+    let empty = Vec::new();
+    let versions = if chosen {
+        &app.versions
+    } else {
+        app.listed.get(&part.name).unwrap_or(&empty)
+    };
+    let picks = chosen.then_some(app.picks);
+    let latest = versions.first().map(|v| v.number);
+    let go = |pair: (Pick, Pick)| {
+        if chosen {
+            Act::Show(pair)
+        } else {
+            Act::Open(part.name.clone(), pair)
         }
-        if latest.is_some() {
+    };
+    let mut act = None;
+    if part.dirty {
+        let r = row(ui, Pick::Current, picks, [t.now, t.not_saved, ""]);
+        if r.clicked() {
+            let pair = now_pair(versions).unwrap_or((Pick::Current, Pick::Current));
+            act = Some(go(pair));
+        }
+        if let (Some(picks), Some(_)) = (picks, latest) {
             now_menu(&r, picks, &mut act);
         }
-        let label = match latest {
-            Some(n) => format!("{} v{}…", t.save_version, n + 1),
-            None => format!("{}…", t.save_first),
-        };
-        let busy = app.save.is_some();
-        if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
-            act = Some(Act::Save);
+        if chosen {
+            let label = match latest {
+                Some(n) => format!("{} v{}…", t.save_version, n + 1),
+                None => format!("{}…", t.save_first),
+            };
+            let busy = app.save.is_some();
+            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                act = Some(Act::Save);
+            }
         }
         ui.add_space(4.0);
     }
-    for (i, v) in app.versions.iter().enumerate() {
+    for (i, v) in versions.iter().enumerate() {
         let me = Pick::Version(v.number);
         let title = format!("v{}", v.number);
         let sub = format!("{} · {}", v.date, v.author);
         let r = row(ui, me, picks, [&title, &sub, &v.summary]);
         if r.clicked() {
-            act = Some(Act::Show(version_pair(&app.versions, i)));
+            act = Some(go(version_pair(versions, i)));
         }
-        version_menu(&r, me, picks, &mut act);
-    }
-    if !app.versions.is_empty() {
-        ui.add_space(6.0);
-        ui.label(RichText::new(t.history_hint).weak());
+        if let Some(picks) = picks {
+            version_menu(&r, me, picks, latest, &mut act);
+        }
     }
     let ctx = ui.ctx().clone();
     app.apply(&ctx, act);
@@ -147,10 +200,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 fn row(
     ui: &mut egui::Ui,
     me: Pick,
-    picks: (Pick, Pick),
+    picks: Option<(Pick, Pick)>,
     [title, sub, summary]: [&str; 3],
 ) -> egui::Response {
-    let badge = mark(me, picks);
+    let badge = picks.and_then(|p| mark(me, p));
     let inner = egui::Frame::NONE
         .fill(badge.map_or(Color32::TRANSPARENT, |m| m.fill))
         .corner_radius(4.0)

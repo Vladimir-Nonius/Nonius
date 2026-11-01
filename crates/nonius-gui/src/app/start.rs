@@ -22,14 +22,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
             let open = egui::Button::new(RichText::new(t.open_project).size(16.0));
             if ui.add(open).clicked() {
-                if let Some(dir) = choose_folder(&app.path_input) {
+                if let Some(dir) = app.chooser.folder(&app.path_input) {
                     app.open(ctx, dir);
                 }
             }
             ui.add_space(6.0);
             let create = egui::Button::new(RichText::new(t.create_project).size(16.0));
             if ui.add(create).clicked() {
-                if let Some(dir) = choose_folder(&app.path_input) {
+                if let Some(dir) = app.chooser.folder(&app.path_input) {
                     app.create(ctx, dir, Vec::new());
                 }
             }
@@ -78,7 +78,7 @@ fn new_here(app: &mut App, ctx: &egui::Context) {
                 answer = Some(Some(dir.clone()));
             }
             if ui.button(t.other_folder).clicked() {
-                answer = choose_folder(&app.path_input).map(Some);
+                answer = app.chooser.folder(&app.path_input).map(Some);
             }
             if ui.button(t.cancel).clicked() {
                 answer = Some(None);
@@ -94,15 +94,4 @@ fn new_here(app: &mut App, ctx: &egui::Context) {
         None if modal.should_close() => app.new_here = None,
         None => {}
     }
-}
-
-#[cfg(windows)]
-pub(super) fn choose_folder(_typed: &str) -> Option<std::path::PathBuf> {
-    rfd::FileDialog::new().pick_folder()
-}
-
-/// Без системного окна выбора: путь из поля ввода.
-#[cfg(not(windows))]
-pub(super) fn choose_folder(typed: &str) -> Option<std::path::PathBuf> {
-    looks_like_dir(typed).then(|| typed.trim().into())
 }
