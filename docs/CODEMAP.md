@@ -21,6 +21,7 @@
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
 | Программы для файла, запуск, показ в папке | `nonius-app/src/system/` (`windows.rs`, запасной `other.rs`) |
 | Меню правого щелчка | `nonius-gui/src/app/open_menu.rs` |
+| Сервер MCP | `nonius-cli/src/commands/mcp.rs`; новый инструмент — команда в `commands/json/mod.rs` (`COMMANDS`) |
 | Правила для ИИ в проекте | `nonius-core/src/project/agents.rs` |
 | Формат сообщения коммита, подпись ИИ | `nonius-store/src/message.rs`, `version.rs` (`AiActor`) |
 | Статус всего проекта одним проходом | `nonius-store/src/overview.rs`, `nonius-app/src/items.rs` |
@@ -194,6 +195,7 @@
 | `commands/compare.rs` | `diff`, `render` |
 | `commands/passport.rs` | `material`, `materials` |
 | `commands/json/mod.rs`, `view.rs` | ответ `--json`, код ошибки, выход; вид данных в JSON |
+| `commands/mcp.rs` | `mcp`: сервер MCP, вызов инструмента — это команда с `--json` |
 | `commands/describe.rs` | `describe`: команды и коды ошибок из разбора команд |
 
 ## Тесты

@@ -1,7 +1,7 @@
 //! `nonius` — командная строка и окно Nonius.
 //!
 //! Тонкая обёртка: разбирает команду, вызывает действие из `nonius-app` и
-//! печатает итог. Те же действия вызывают окно и (позже) MCP для ИИ.
+//! печатает итог. Те же действия вызывают окно и сервер MCP для ИИ.
 //!
 //! Файлы: здесь — запуск и выбор команды, набор модулей; `args.rs` — команды
 //! и справка, `commands/` — печать итогов и ответ в JSON, `format.rs` — мелочи вывода,
@@ -23,7 +23,7 @@ use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
 use args::{Cli, Command, PartCommand};
-use commands::{compare, describe, files, history, import, json, passport, project};
+use commands::{compare, describe, files, history, import, json, mcp, passport, project};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
@@ -103,6 +103,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Overview { changed } => project::overview(&app()?, *changed)?,
         Command::Modules => project::modules(&registry()),
         Command::Agents => project::agents(&app()?)?,
+        Command::Mcp { write } => mcp::serve(&cli, *write)?,
         Command::Describe => println!("{}", describe::describe()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
         Command::Status { part } => history::status(&app()?, part.as_deref())?,

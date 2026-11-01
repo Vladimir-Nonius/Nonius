@@ -161,6 +161,116 @@ fn agents_update_old_project_and_keep_people_text() {
     assert!(ok && !out.contains("nonius agents"), "{out}");
 }
 
+/// Отправить серверу MCP сообщения и получить ответы.
+fn mcp(
+    dir: &std::path::Path,
+    args: &[&str],
+    messages: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_nonius"))
+        .current_dir(dir)
+        .arg("mcp")
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "Тестировщик")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Тестировщик")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for m in messages {
+        writeln!(stdin, "{m}").unwrap();
+    }
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+fn call(id: u32, name: &str, arguments: serde_json::Value) -> serde_json::Value {
+    let params = serde_json::json!({ "name": name, "arguments": arguments });
+    serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params })
+}
+
+fn tool_answer(reply: &serde_json::Value) -> serde_json::Value {
+    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+    serde_json::from_str(text).unwrap()
+}
+
+#[test]
+fn mcp_reads_by_default_and_signs_writes() {
+    use serde_json::json;
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    let hello = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "protocolVersion": "2025-03-26", "clientInfo": { "name": "Claude Code" } },
+    });
+    let inited = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
+    let list = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
+
+    let out = mcp(
+        d,
+        &[],
+        &[
+            hello.clone(),
+            inited.clone(),
+            list.clone(),
+            call(3, "overview", json!({})),
+            call(4, "commit", json!({ "part": "вал", "message": "нельзя" })),
+            call(5, "material", json!({ "part": "вал", "material": "Ст3" })),
+            call(6, "log", json!({ "part": "нет" })),
+            call(7, "diff", json!({ "part": "вал", "to": "v2" })),
+            json!({ "jsonrpc": "2.0", "id": 8, "method": "нет" }),
+        ],
+    );
+    assert_eq!(out.len(), 8, "на уведомление ответа нет: {out:?}");
+    assert_eq!(out[0]["result"]["protocolVersion"], "2025-03-26");
+    let tools = out[1]["result"]["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(
+        names.contains(&"overview") && !names.contains(&"commit"),
+        "{names:?}"
+    );
+    let log = tools.iter().find(|t| t["name"] == "log").unwrap();
+    assert_eq!(log["inputSchema"]["required"], json!(["part"]), "{log}");
+    assert_eq!(tool_answer(&out[2])["data"]["new"], 1, "{}", out[2]);
+    let code = |r: &serde_json::Value| tool_answer(r)["error"]["code"].clone();
+    assert_eq!(code(&out[3]), "unknown_tool");
+    assert_eq!(code(&out[4]), "read_only");
+    assert_eq!(code(&out[5]), "unknown_item");
+    assert_eq!(out[5]["result"]["isError"], true);
+    assert_eq!(code(&out[6]), "usage");
+    assert_eq!(out[7]["error"]["code"], -32601);
+
+    let out = mcp(
+        d,
+        &["--write"],
+        &[
+            hello,
+            list,
+            call(3, "commit", json!({ "part": "вал", "message": "--json" })),
+            call(4, "log", json!({ "part": "вал", "лишний": 1 })),
+        ],
+    );
+    let tools = out[1]["result"]["tools"].to_string();
+    assert!(tools.contains("commit"), "{tools}");
+    let saved = tool_answer(&out[2]);
+    assert_eq!(saved["data"]["ai"]["name"], "Claude Code", "{saved}");
+    assert_eq!(saved["data"]["committer"], "Тестировщик", "{saved}");
+    assert_eq!(saved["data"]["summary"], "--json", "{saved}");
+    assert_eq!(tool_answer(&out[3])["error"]["code"], "usage");
+}
+
 fn json(dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
     let (_, out) = nonius(dir, args);
     serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{e}: {out}"))
