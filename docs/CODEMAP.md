@@ -18,6 +18,8 @@
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
+| Программы для файла, запуск, показ в папке | `nonius-app/src/system/` (`windows.rs`, запасной `other.rs`) |
+| Меню правого щелчка | `nonius-gui/src/app/open_menu.rs` |
 | Формат сообщения коммита | `nonius-store/src/message.rs` |
 | Новый модуль (крейт) | `nonius-core/src/extension/traits.rs`, `extension/manifest.rs`, `contract.rs`; пример — `nonius-step/src/lib.rs` |
 | Поле в `meta.yaml` / `tree.yaml` / `project.yaml` | `nonius-core/src/meta.rs` / `tree.rs` / `project/mod.rs` + `schema.rs` (миграция) |
@@ -131,6 +133,7 @@
 | `app/save.rs` | окошко «Сохранить версию»: что изменилось и описание |
 | `app/tabs.rs` | вкладки под 3D, таблица «Числа» |
 | `app/files.rs` | вкладка «Файлы»: список, разница текста, «Открыть» |
+| `app/open_menu.rs` | меню правого щелчка: «Открыть», «Открыть в…», «Показать в папке» |
 | `app/material.rs` | «Материал и масса»: справочник, свой материал, масса «было → стало» |
 | `app/toolbar.rs` | «Было» / «Стало», режимы, кнопки видов, сохранение картинки |
 | `app/start.rs` | начальный экран: открыть папку проекта |
@@ -160,6 +163,7 @@
 | `items.rs` | новая деталь, список, `ItemStatus` и `ItemState` |
 | `history.rs` | версии, `save_version`, `restore`, `export` |
 | `files.rs` | файлы версии, разница, копия и открытие файла |
+| `system/` | программы для типа файла, запуск, «Открыть с помощью», показ в папке; Windows только в `windows.rs` |
 | `import.rs` | `import`: файл модели в деталь, паспорт, превью |
 | `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
 | `materials.rs` | справочник материалов с плотностью |

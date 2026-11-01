@@ -1,7 +1,7 @@
 //! Файлы детали: `files`, `open`.
 
-use anyhow::Result;
-use nonius_app::{App, DiffLineKind, FileChangeKind};
+use anyhow::{bail, Result};
+use nonius_app::{programs_for, App, DiffLineKind, FileChangeKind, OpenWay};
 
 use crate::format::parse_version;
 
@@ -48,12 +48,37 @@ pub fn files(
 }
 
 /// `nonius open`.
-pub fn open(app: &App, part: &str, file: &str, version: Option<&str>) -> Result<()> {
+pub fn open(app: &App, part: &str, file: &str, version: Option<&str>, way: &OpenWay) -> Result<()> {
     let version = version.map(parse_version).transpose()?;
-    let opened = app.open_file(part, version, file)?;
+    let opened = app.open_file(part, version, file, way)?;
     println!("Открыт {}", opened.display());
     if version.is_some() {
         println!("Это копия: правки в ней не попадут в историю.");
     }
     Ok(())
+}
+
+/// `nonius open --programs`.
+pub fn programs(file: &str) {
+    let found = programs_for(file);
+    if found.is_empty() {
+        println!("Система не знает программ для этого файла.");
+    }
+    for program in found {
+        println!("{}", program.name);
+    }
+}
+
+/// Чем открыть файл по ключам `--with` и `--folder`.
+pub fn way(file: &str, with: Option<&str>, folder: bool) -> Result<OpenWay> {
+    if folder {
+        return Ok(OpenWay::Folder);
+    }
+    let Some(name) = with else {
+        return Ok(OpenWay::Default);
+    };
+    match programs_for(file).into_iter().find(|p| p.name == name) {
+        Some(program) => Ok(OpenWay::Program(program)),
+        None => bail!("программы «{name}» нет в списке: nonius open … --programs"),
+    }
 }

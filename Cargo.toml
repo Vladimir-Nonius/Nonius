@@ -36,6 +36,7 @@ anyhow = "1"
 tempfile = "3"
 sha2 = "0.10"
 opener = "0.8"
+winreg = "0.55"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

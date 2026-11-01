@@ -16,8 +16,8 @@ use nonius_app::{
 use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
-    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, PartEntry,
-    Pick, Progress, ProjectSource, VersionEntry,
+    Comparison, DiffEntry, DiffKind, FileEntry, FileState, MassEntry, MaterialEntry, OpenWay,
+    PartEntry, Pick, ProgramEntry, Progress, ProjectSource, VersionEntry,
 };
 use nonius_scene::Scene;
 
@@ -123,6 +123,7 @@ impl ProjectSource for AppSource {
                 assembly: s.item.kind == ItemKind::Assembly,
                 latest: s.latest.as_ref().map(|v| v.version.to_string()),
                 dirty: !s.changes.is_empty(),
+                model: self.app.model_file(s.item.name.as_str()).ok().flatten(),
             })
             .collect())
     }
@@ -305,9 +306,28 @@ impl ProjectSource for AppSource {
             .collect())
     }
 
-    fn open_file(&self, part: &str, pick: Pick, path: &str) -> Result<PathBuf> {
+    fn open_file(&self, part: &str, pick: Pick, path: &str, way: &OpenWay) -> Result<PathBuf> {
+        let way = match way {
+            OpenWay::Default => nonius_app::OpenWay::Default,
+            OpenWay::Program(p) => nonius_app::OpenWay::Program(nonius_app::Program {
+                name: p.name.clone(),
+                command: p.command.clone(),
+            }),
+            OpenWay::Choose => nonius_app::OpenWay::Choose,
+            OpenWay::Folder => nonius_app::OpenWay::Folder,
+        };
         let _files = self.reading();
-        Ok(self.app.open_file(part, version(pick)?, path)?)
+        Ok(self.app.open_file(part, version(pick)?, path, &way)?)
+    }
+
+    fn programs(&self, path: &str) -> Vec<ProgramEntry> {
+        nonius_app::programs_for(path)
+            .into_iter()
+            .map(|p| ProgramEntry {
+                name: p.name,
+                command: p.command,
+            })
+            .collect()
     }
 }
 

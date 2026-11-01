@@ -73,7 +73,10 @@ impl App {
                         Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
                     }
                 }
-                Done::FileOpened(pick, Ok(path)) => {
+                Done::FileOpened(_, true, Ok(path)) => {
+                    self.notice = Some(format!("{}: {}", t.folder_shown, path.display()));
+                }
+                Done::FileOpened(pick, false, Ok(path)) => {
                     let copy = if matches!(pick, Pick::Version(_)) {
                         t.opened_copy
                     } else {
@@ -81,7 +84,12 @@ impl App {
                     };
                     self.notice = Some(format!("{}: {}{copy}", t.file_opened, path.display()));
                 }
-                Done::FileOpened(_, Err(e)) => self.message = Some(format!("{}: {e:#}", t.error)),
+                Done::FileOpened(_, _, Err(e)) => {
+                    self.message = Some(format!("{}: {e:#}", t.error))
+                }
+                Done::Programs(kind, list) => {
+                    self.programs.insert(kind, Some(list));
+                }
                 Done::Files(name, files) => {
                     if let Some(d) = self.save.as_mut().filter(|d| d.part == name) {
                         match files {

@@ -5,9 +5,14 @@ use eframe::egui::{self, Color32, RichText};
 use nonius_scene::Role;
 
 use super::numbers::{change_line, volume_text};
+use super::open_menu::{self, Target};
 use super::App;
+use crate::source::Pick;
 use crate::texts::texts;
 use crate::view::Model;
+
+/// Паспорт детали: он есть всегда, даже без файла модели.
+const META_FILE: &str = nonius_core::project::META_FILE;
 
 /// Строка состояния: ход работы и «Отменить», ошибка, что получилось или
 /// подсказка по мыши.
@@ -45,6 +50,7 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
 pub fn parts(app: &mut App, ctx: &egui::Context) {
     let t = texts();
     let mut clicked = None;
+    let mut asked = None;
     egui::SidePanel::left("parts")
         .default_width(220.0)
         .show(ctx, |ui| {
@@ -81,6 +87,14 @@ pub fn parts(app: &mut App, ctx: &egui::Context) {
                         if r.clicked() && !selected {
                             clicked = Some(p.name.clone());
                         }
+                        let target = || Target {
+                            part: p.name.clone(),
+                            pick: Pick::Current,
+                            // Папку детали можно показать и без файла модели.
+                            path: p.model.clone().unwrap_or_else(|| META_FILE.to_string()),
+                            openable: p.model.is_some(),
+                        };
+                        open_menu::attach(&r, &app.programs, target, &mut asked);
                     }
                 });
             super::history::show(app, ui);
@@ -88,6 +102,7 @@ pub fn parts(app: &mut App, ctx: &egui::Context) {
     if let Some(name) = clicked {
         app.select_part(ctx, &name);
     }
+    app.answer_menu(ctx, asked);
 }
 
 /// «Что изменилось» справа: легенда, места изменений, числа, настройки вида.

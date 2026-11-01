@@ -21,6 +21,8 @@ pub struct PartEntry {
     /// Есть что сохранить: файлы изменены после последней версии или у новой
     /// детали ещё нет ни одной версии.
     pub dirty: bool,
+    /// Файл модели, который открывает правый щелчок по детали.
+    pub model: Option<String>,
 }
 
 /// Версия детали.
@@ -106,6 +108,28 @@ pub struct FileEntry {
     pub text: bool,
 }
 
+/// Программа, которая умеет открывать файл.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramEntry {
+    /// Название для показа.
+    pub name: String,
+    /// Строка запуска из настроек системы.
+    pub command: String,
+}
+
+/// Чем открыть файл.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenWay {
+    /// Программой, назначенной в системе.
+    Default,
+    /// Этой программой.
+    Program(ProgramEntry),
+    /// Спросить в окне системы «Открыть с помощью».
+    Choose,
+    /// Не открывать, а показать в папке.
+    Folder,
+}
+
 /// Вид строки в разнице текста.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffKind {
@@ -186,9 +210,17 @@ pub trait ProjectSource: Send + Sync {
         after: Pick,
         path: &str,
     ) -> anyhow::Result<Vec<DiffEntry>>;
-    /// Открыть файл в его программе. Файл версии открывается копией.
+    /// Открыть файл или показать в папке. Файл версии открывается копией.
     /// Возвращает, что именно открыто.
-    fn open_file(&self, part: &str, pick: Pick, path: &str) -> anyhow::Result<PathBuf>;
+    fn open_file(
+        &self,
+        part: &str,
+        pick: Pick,
+        path: &str,
+        way: &OpenWay,
+    ) -> anyhow::Result<PathBuf>;
+    /// Программы, которые система знает для такого файла.
+    fn programs(&self, path: &str) -> Vec<ProgramEntry>;
 }
 
 /// Открывает проект по папке (для «Открыть папку проекта…» и перетаскивания).
@@ -216,6 +248,7 @@ mod tests {
             assembly: false,
             latest: None,
             dirty,
+            model: None,
         }
     }
 
