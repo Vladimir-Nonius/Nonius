@@ -4,7 +4,7 @@
 //! ближайшем шаге, и его результат никуда не попадает.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -96,6 +96,9 @@ pub struct Jobs {
     model: Arc<Mutex<Option<Scene>>>,
     /// Работа, которую можно отменить, и её флажок.
     cancellable: Option<(Id, Arc<AtomicBool>)>,
+    /// Потоки, которые ещё не закончились, в том числе забытые и
+    /// отменённые: пока они живы, они держат проект открытым.
+    alive: Arc<AtomicUsize>,
 }
 
 impl Default for Jobs {
@@ -109,6 +112,7 @@ impl Default for Jobs {
             progress: Arc::default(),
             model: Arc::default(),
             cancellable: None,
+            alive: Arc::default(),
         }
     }
 }
@@ -186,9 +190,13 @@ impl Jobs {
             cancel: cancel.clone(),
         };
         let tx = self.tx.clone();
+        let alive = self.alive.clone();
+        alive.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
             // Паника в работе не должна оставить окно в вечном ожидании.
             let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&reporter)));
+            // Работа отдала всё, что держала (и проект тоже), — поток свободен.
+            alive.fetch_sub(1, Ordering::SeqCst);
             let _ = tx.send((id, done.unwrap_or(Done::Crashed)));
             reporter.ctx.request_repaint();
         });
@@ -253,6 +261,11 @@ impl Jobs {
     /// Идёт ли работа.
     pub fn busy(&self) -> bool {
         !self.running.is_empty()
+    }
+
+    /// Закончились ли все потоки, даже те, чьих результатов окно уже не ждёт.
+    pub fn all_finished(&self) -> bool {
+        self.alive.load(Ordering::SeqCst) == 0
     }
 
     /// Последнее сообщение о ходе работы.

@@ -22,6 +22,7 @@ nonius-gui.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
+trash = "5"
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,7 +1,8 @@
 //! Черновик: работать можно сразу, без папки проекта. Новый проект живёт во
 //! временной папке программы, пока его не сохранят: «Сохранить проект как…»
 //! переносит его целиком, с историей, в выбранную папку. Закрыть
-//! несохранённый черновик с деталями — только после вопроса.
+//! несохранённый черновик с деталями — только после вопроса; «Не сохранять»
+//! отправляет его в Корзину.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -66,7 +67,9 @@ impl App {
 
     /// Перенести черновик, как только вкладка свободна.
     pub(super) fn move_when_free(&mut self, ctx: &egui::Context) {
-        if self.tab.save_to.is_none() || self.tab.jobs.busy() {
+        // Ждём и отменённые работы: их потоки ещё держат файлы проекта.
+        let free = !self.tab.jobs.busy() && self.tab.jobs.all_finished();
+        if self.tab.save_to.is_none() || !free {
             return;
         }
         let (Some(to), Some(project)) = (self.tab.save_to.take(), self.tab.project.take()) else {
@@ -78,26 +81,14 @@ impl App {
         self.tab = ProjectTab::default();
         let (mover, opener) = (self.mover.clone(), self.opener.clone());
         let drafts = self.drafts.clone();
-        self.tab.jobs.spawn(ctx, move |_| {
-            // Поток прошлой работы мог ещё не отпустить файлы: ждём немного.
-            let mut moved = mover(&from, &to);
-            for _ in 0..20 {
-                let full = std::fs::read_dir(&to).is_ok_and(|mut d| d.next().is_some());
-                if moved.is_ok() || !from.exists() || full {
-                    break;
+        self.tab.jobs.spawn(ctx, move |_| match mover(&from, &to) {
+            Ok(()) => {
+                if let Some(stamp) = from.parent().filter(|p| Some(*p) != drafts.as_deref()) {
+                    let _ = std::fs::remove_dir(stamp);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                moved = mover(&from, &to);
+                Done::Moved(opener(&to), None)
             }
-            match moved {
-                Ok(()) => {
-                    if let Some(stamp) = from.parent().filter(|p| Some(*p) != drafts.as_deref()) {
-                        let _ = std::fs::remove_dir(stamp);
-                    }
-                    Done::Moved(opener(&to), None)
-                }
-                Err(e) => Done::Moved(opener(&from), Some(format!("{e:#}"))),
-            }
+            Err(e) => Done::Moved(opener(&from), Some(format!("{e:#}"))),
         });
     }
 
@@ -115,7 +106,7 @@ impl App {
         let draft = self.is_draft(tab).then(|| root_of(tab));
         self.close_tab(ctx, i);
         if let Some(Some(root)) = draft {
-            self.forget_draft(&root);
+            self.forget_draft(&root, false);
         }
     }
 
@@ -138,28 +129,34 @@ impl App {
         }
     }
 
-    /// Удалить папку черновика вместе с папкой-меткой времени.
-    fn forget_draft(&self, root: &Path) {
+    /// Убрать папку черновика вместе с папкой-меткой времени. Черновик с
+    /// деталями уходит в Корзину, откуда его можно вернуть; пустой
+    /// стирается: в нём нечего терять.
+    fn forget_draft(&self, root: &Path, had_parts: bool) {
         let Some(drafts) = &self.drafts else {
             return;
         };
         let stamp = root.parent().filter(|p| *p != drafts.as_path());
         if let Some(dir) = stamp.filter(|p| p.starts_with(drafts)) {
-            let _ = std::fs::remove_dir_all(dir);
+            if had_parts {
+                let _ = (self.discard)(dir);
+            } else {
+                let _ = std::fs::remove_dir_all(dir);
+            }
         }
     }
 
-    /// Закрыть вкладку и стереть черновик в ней.
+    /// Закрыть вкладку и убрать черновик в ней.
     fn drop_draft(&mut self, ctx: &egui::Context, i: usize) {
         let tab = if i == self.at {
             &self.tab
         } else {
             &self.tabs[i]
         };
-        let root = root_of(tab);
+        let (root, had_parts) = (root_of(tab), !tab.parts.is_empty());
         self.close_tab(ctx, i);
         if let Some(root) = root {
-            self.forget_draft(&root);
+            self.forget_draft(&root, had_parts);
         }
     }
 }

@@ -411,6 +411,7 @@ fn window_with(
         picks: None,
         drafts: None,
         mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
+        discard: Arc::new(|d| Ok(std::fs::remove_dir_all(d)?)),
     };
     build(options)
 }
@@ -624,6 +625,7 @@ fn window_on(dir: &Path, project: Fake) -> Harness<'static, App> {
         picks: None,
         drafts: None,
         mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
+        discard: Arc::new(|d| Ok(std::fs::remove_dir_all(d)?)),
     })
 }
 
@@ -669,6 +671,7 @@ fn start_screen_opens_and_creates() {
         picks: None,
         drafts: None,
         mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
+        discard: Arc::new(|d| Ok(std::fs::remove_dir_all(d)?)),
     });
     h.run();
     assert!(h.query_by_label("Открыть проект…").is_some());
@@ -954,6 +957,7 @@ fn first_start_asks_the_name() {
         picks: None,
         drafts: None,
         mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
+        discard: Arc::new(|d| Ok(std::fs::remove_dir_all(d)?)),
     });
     wait_for(&mut h, "Как вас подписывать?");
     h.run();
@@ -1189,6 +1193,7 @@ fn draft_without_a_folder_is_saved_later() {
         picks: None,
         drafts: Some(drafts.clone()),
         mover: Arc::new(|from, to| Ok(std::fs::rename(from, to)?)),
+        discard: Arc::new(|d| Ok(std::fs::remove_dir_all(d)?)),
     });
 
     // Сразу черновик: работать можно, папку никто не спрашивал.

@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use eframe::egui;
 
-use crate::source::{Chooser, Machine, Mover, Opener, Pick, ProjectSource};
+use crate::source::{Chooser, Discard, Machine, Mover, Opener, Pick, ProjectSource};
 use crate::texts::texts;
 use crate::view::{Look, Mode, Viewport, ViewportEvent};
 pub use choose::SystemChooser;
@@ -66,6 +66,8 @@ pub struct Options {
     pub drafts: Option<PathBuf>,
     /// Как перенести черновик в настоящую папку.
     pub mover: Mover,
+    /// Как убрать черновик, который решили не сохранять.
+    pub discard: Discard,
 }
 
 /// Состояние окна.
@@ -94,6 +96,7 @@ pub struct App {
     /// Папка черновиков.
     drafts: Option<PathBuf>,
     mover: Mover,
+    discard: Discard,
     /// Создать черновик, как только окно будет готово.
     draft_wanted: bool,
     /// Окошко «Проект не сохранён».
@@ -133,6 +136,7 @@ impl App {
             was_focused: true,
             drafts: options.drafts,
             mover: options.mover,
+            discard: options.discard,
             draft_wanted: false,
             closing: None,
             may_close: false,

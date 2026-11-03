@@ -92,6 +92,7 @@ impl Desk {
             mover: Arc::new(|from: &Path, to: &Path| {
                 nonius_app::move_project(from, to).map_err(|e| plainly(e.into()))
             }),
+            discard: Arc::new(|d: &Path| Ok(std::fs::remove_dir_all(d)?)),
         };
         let h = Harness::builder()
             .with_size([1280.0, 800.0])
