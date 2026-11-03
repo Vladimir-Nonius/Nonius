@@ -52,6 +52,10 @@ nonius open кронштейн docs/чертёж.pdf --version v2   # откры
 nonius open кронштейн model.step --programs          # чем система умеет открывать файл
 nonius open кронштейн model.step --with Компас       # открыть в этой программе
 nonius open кронштейн model.step --folder            # показать файл в папке
+nonius file add кронштейн технология.md              # свой файл в docs/ детали
+nonius show кронштейн docs/технология.md             # текстовый файл целиком
+nonius file remove кронштейн docs/технология.md      # убрать файл, в версиях он есть
+nonius hide кронштейн v1                             # убрать старую версию с карты (unhide — вернуть)
 ```
 
 Каждая версия — коммит git, который трогает только папку детали; модели хранятся через Git LFS. Историю видно и в обычном `git log`.
