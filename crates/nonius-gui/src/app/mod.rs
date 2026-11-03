@@ -8,6 +8,7 @@ mod actions;
 mod add_model;
 mod bottom;
 mod choose;
+mod draft;
 mod dropped;
 mod file_menu;
 mod files;
@@ -38,12 +39,12 @@ use std::sync::Arc;
 
 use eframe::egui;
 
-use crate::source::{Chooser, Machine, Opener, Pick, ProjectSource};
+use crate::source::{Chooser, Machine, Mover, Opener, Pick, ProjectSource};
 use crate::texts::texts;
 use crate::view::{Look, Mode, Viewport, ViewportEvent};
 pub use choose::SystemChooser;
 use project_tab::ProjectTab;
-pub use settings::Settings;
+pub use settings::{drafts_dir, Settings};
 
 /// С чем открыть окно.
 pub struct Options {
@@ -61,6 +62,10 @@ pub struct Options {
     pub part: Option<String>,
     /// И сразу сравнить эти версии.
     pub picks: Option<(Pick, Pick)>,
+    /// Папка черновиков; `None` — без черновиков, начальный экран.
+    pub drafts: Option<PathBuf>,
+    /// Как перенести черновик в настоящую папку.
+    pub mover: Mover,
 }
 
 /// Состояние окна.
@@ -86,6 +91,15 @@ pub struct App {
     no_lfs: bool,
     /// Окно было в фокусе в прошлом кадре.
     was_focused: bool,
+    /// Папка черновиков.
+    drafts: Option<PathBuf>,
+    mover: Mover,
+    /// Создать черновик, как только окно будет готово.
+    draft_wanted: bool,
+    /// Окошко «Проект не сохранён».
+    closing: Option<draft::Closing>,
+    /// Пользователь согласился потерять черновики: окно закрывается.
+    may_close: bool,
 }
 
 impl App {
@@ -117,12 +131,18 @@ impl App {
             first_run: first_run::FirstRun::check(options.machine, ready),
             no_lfs: ready.git && !ready.lfs,
             was_focused: true,
+            drafts: options.drafts,
+            mover: options.mover,
+            draft_wanted: false,
+            closing: None,
+            may_close: false,
             settings,
         };
         app.restore_tabs(ctx);
         if let Some(p) = options.project {
             app.got_project(ctx, p);
         }
+        app.draft_wanted = app.drafts.is_some() && app.tab.project.is_none();
         app.tab.want = options.part.map(|p| (p, options.picks));
         app
     }
@@ -134,7 +154,14 @@ impl eframe::App for App {
         self.take_dropped(ctx);
         self.notice_focus(ctx);
         first_run::show(self, ctx);
+        self.watch_window_close(ctx);
+        if self.draft_wanted && self.first_run.is_none() && !self.tab.jobs.busy() {
+            self.draft_wanted = false;
+            self.new_draft(ctx);
+        }
         strip::show(self, ctx);
+        draft::bar(self, ctx);
+        draft::ask(self, ctx);
 
         if self.tab.project.is_none() {
             start::show(self, ctx);

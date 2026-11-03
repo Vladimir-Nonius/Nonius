@@ -83,6 +83,8 @@ impl Desk {
             chooser: answers.clone(),
             part: None,
             picks: None,
+            drafts: None,
+            mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
         };
         let h = Harness::builder()
             .with_size([1280.0, 800.0])

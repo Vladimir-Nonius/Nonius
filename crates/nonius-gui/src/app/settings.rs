@@ -95,6 +95,20 @@ impl Settings {
     }
 }
 
+/// Папка черновиков: `%LOCALAPPDATA%/Nonius/drafts` — не в перемещаемом
+/// профиле, проекты бывают большими.
+pub fn drafts_dir() -> Option<PathBuf> {
+    let env = |k| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let dir = env("NONIUS_CONFIG_DIR")
+        .or_else(|| env("LOCALAPPDATA").map(|d| d.join("Nonius")))
+        .or_else(|| file().and_then(|f| f.parent().map(PathBuf::from)))?;
+    Some(dir.join("drafts"))
+}
+
 /// Путь к файлу настроек. `NONIUS_CONFIG_DIR` — для тестов и переносной установки.
 fn file() -> Option<PathBuf> {
     let env = |k| {

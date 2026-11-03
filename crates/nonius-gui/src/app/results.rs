@@ -33,7 +33,12 @@ impl App {
                     // Остальное в этой пачке — от прошлого проекта.
                     break;
                 }
-                Done::Opened(Err(e)) => {
+                Done::Moved(Ok(p), error) => {
+                    self.got_project(ctx, p);
+                    self.tab.message = error;
+                    break;
+                }
+                Done::Moved(Err(e), _) | Done::Opened(Err(e)) => {
                     self.tab.after_open.clear();
                     self.tab.message = Some(format!("{}: {e:#}", t.project_open_failed))
                 }

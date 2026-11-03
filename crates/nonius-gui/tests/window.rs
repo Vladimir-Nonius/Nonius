@@ -409,6 +409,8 @@ fn window_with(
         chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
+        drafts: None,
+        mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
     };
     build(options)
 }
@@ -620,6 +622,8 @@ fn window_on(dir: &Path, project: Fake) -> Harness<'static, App> {
         chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
+        drafts: None,
+        mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
     })
 }
 
@@ -663,6 +667,8 @@ fn start_screen_opens_and_creates() {
         chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
+        drafts: None,
+        mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
     });
     h.run();
     assert!(h.query_by_label("Открыть проект…").is_some());
@@ -946,6 +952,8 @@ fn first_start_asks_the_name() {
         chooser: Arc::new(NoDialogs),
         part: None,
         picks: None,
+        drafts: None,
+        mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
     });
     wait_for(&mut h, "Как вас подписывать?");
     h.run();
@@ -1138,4 +1146,92 @@ fn version_leaves_the_map_and_comes_back() {
     h.get_by_label("Вернуть на карту").click();
     wait_for(&mut h, "v1 «кронштейн» снова на карте");
     wait_for(&mut h, "Карта v1");
+}
+
+/// Окна выбора: папка всегда эта.
+struct FolderIs(PathBuf);
+
+impl Chooser for FolderIs {
+    fn folder(&self, _typed: &str) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+    fn models(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn files(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn step(&self) -> Option<PathBuf> {
+        None
+    }
+    fn picture(&self, _name: &str) -> Option<PathBuf> {
+        None
+    }
+}
+
+#[test]
+fn draft_without_a_folder_is_saved_later() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("NONIUS_CONFIG_DIR", dir.path());
+    let drafts = dir.path().join("drafts");
+    let target = dir.path().join("Мастерская");
+    let mut h = build(Options {
+        project: None,
+        opener: Arc::new(|p| Ok(Box::new(self::fake(p, "Мастерская")))),
+        creator: Arc::new(|p| {
+            std::fs::create_dir_all(p)?;
+            Ok(Box::new(self::fake(p, "Без имени")))
+        }),
+        machine: Arc::new(Pc::default()),
+        chooser: Arc::new(FolderIs(target.clone())),
+        part: None,
+        picks: None,
+        drafts: Some(drafts.clone()),
+        mover: Arc::new(|from, to| Ok(std::fs::rename(from, to)?)),
+    });
+
+    // Сразу черновик: работать можно, папку никто не спрашивал.
+    wait_for(&mut h, "Черновик: проект пока во временной папке");
+    wait_for(&mut h, "кронштейн");
+    assert!(h.query_by_label("Без имени ●").is_some());
+    let draft = std::fs::read_dir(&drafts)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+
+    // Крестик у черновика с деталями — сначала вопрос; «Отмена» оставляет всё.
+    h.get_by_label("×").click();
+    wait_for(&mut h, "Проект не сохранён");
+    h.run();
+    h.get_by_label("Отмена").click();
+    h.run();
+    assert!(h.query_by_label("Проект не сохранён").is_none());
+    assert!(h.query_by_label("Без имени ●").is_some());
+
+    // «Сохранить проект как…»: черновик переезжает в выбранную папку.
+    h.get_by_label("Сохранить проект как…").click();
+    wait_for(&mut h, "Мастерская");
+    h.run();
+    assert!(h.query_by_label_contains("Черновик").is_none());
+    assert!(target.is_dir());
+    assert!(!draft.exists(), "папка черновика убрана");
+    assert_eq!(Settings::load().tabs, vec![target.clone()]);
+
+    // Новый черновик рядом и «Не сохранять»: вкладка и папка пропадают.
+    h.get_by_label("+").click();
+    h.run();
+    h.get_by_label("Новый проект").click();
+    wait_for(&mut h, "Без имени ●");
+    wait_for(&mut h, "Черновик");
+    h.query_all_by_label("×").nth(1).unwrap().click();
+    wait_for(&mut h, "Проект не сохранён");
+    h.run();
+    h.get_by_label("Не сохранять").click();
+    h.run();
+    assert!(h.query_by_label("Без имени ●").is_none());
+    assert_eq!(std::fs::read_dir(&drafts).unwrap().count(), 0);
+    assert_eq!(Settings::load().tabs, vec![target]);
 }

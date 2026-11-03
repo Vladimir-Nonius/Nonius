@@ -24,7 +24,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             for i in 0..app.tabs.len() {
                 let tab = app.tab_at(i);
                 let active = i == app.at;
-                let title = tab_title(tab);
+                let mut title = tab_title(tab);
+                if app.is_draft(tab) {
+                    title.push_str(" ●");
+                }
                 let busy = tab.jobs.busy() && tab.project.is_none();
                 ui.group(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
@@ -46,6 +49,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 });
             }
             ui.menu_button(RichText::new("+").strong(), |ui| {
+                if app.drafts.is_some() && ui.button(t.new_project).clicked() {
+                    ui.close();
+                    app.new_draft(ctx);
+                }
                 if ui.button(t.open_project).clicked() {
                     ui.close();
                     if let Some(dir) = app.chooser.folder(&app.path_input) {
@@ -67,7 +74,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         app.switch_to(ctx, i);
     }
     if let Some(i) = close {
-        app.close_tab(ctx, i);
+        app.ask_close_tab(ctx, i);
     }
 }
 

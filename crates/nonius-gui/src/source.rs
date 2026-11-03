@@ -338,6 +338,9 @@ pub trait ProjectSource: Send + Sync {
 /// проект…», перетаскивание.
 pub type Opener = Arc<dyn Fn(&Path) -> anyhow::Result<Box<dyn ProjectSource>> + Send + Sync>;
 
+/// Переносит закрытый проект из первой папки во вторую: «Сохранить проект как…».
+pub type Mover = Arc<dyn Fn(&Path, &Path) -> anyhow::Result<()> + Send + Sync>;
+
 /// Что сравнить по умолчанию: изменённое — с последней версией; иначе —
 /// последнюю с предпоследней; одна версия — её саму. Версий нет — сравнивать
 /// не с чем, окно просит сохранить первую.

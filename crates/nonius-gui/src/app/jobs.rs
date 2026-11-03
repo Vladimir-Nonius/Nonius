@@ -74,6 +74,9 @@ pub enum Done {
     FileRemoved(String, String, anyhow::Result<bool>),
     /// Версия убрана с карты (`true`) или возвращена: деталь, версия.
     HiddenSet(String, u32, bool, anyhow::Result<()>),
+    /// Черновик перенесён: проект в новой папке (или прежний, если перенос
+    /// не удался) и ошибка переноса.
+    Moved(anyhow::Result<Box<dyn ProjectSource>>, Option<String>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }
