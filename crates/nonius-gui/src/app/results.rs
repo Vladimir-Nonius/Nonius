@@ -29,7 +29,7 @@ impl App {
             let current = |name: &str| self.tab.part.as_deref() == Some(name);
             match done {
                 Done::Opened(Ok(p)) => {
-                    self.set_project(ctx, p);
+                    self.got_project(ctx, p);
                     // Остальное в этой пачке — от прошлого проекта.
                     break;
                 }

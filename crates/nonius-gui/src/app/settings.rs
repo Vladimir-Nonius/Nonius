@@ -1,16 +1,19 @@
-//! Что окно помнит между запусками: последний проект и переключатели вида.
+//! Что окно помнит между запусками: открытые вкладки проектов и переключатели
+//! вида.
 //!
 //! Файл `window.txt` в папке настроек пользователя (Windows — `%APPDATA%\Nonius`),
 //! строки `ключ=значение`. Испорченный или чужой файл не мешает запуску:
 //! непонятные строки пропускаются.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Настройки окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
-    /// Последний открытый проект.
-    pub last_project: Option<PathBuf>,
+    /// Папки открытых вкладок по порядку.
+    pub tabs: Vec<PathBuf>,
+    /// Какая вкладка была открыта.
+    pub active: usize,
     /// Серую деталь прозрачной.
     pub xray: bool,
     /// Рисовать рёбра.
@@ -22,7 +25,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            last_project: None,
+            tabs: Vec::new(),
+            active: 0,
             xray: true,
             edges: true,
             wheel_reverse: false,
@@ -40,8 +44,11 @@ impl Settings {
             };
             let flag = value.trim() == "1";
             match key.trim() {
-                "last_project" if !value.trim().is_empty() => {
-                    s.last_project = Some(PathBuf::from(value.trim()))
+                "tab" if !value.trim().is_empty() => s.tabs.push(PathBuf::from(value.trim())),
+                "active" => s.active = value.trim().parse().unwrap_or(0),
+                // Так писала v0.3: один последний проект.
+                "last_project" if !value.trim().is_empty() && s.tabs.is_empty() => {
+                    s.tabs.push(PathBuf::from(value.trim()))
                 }
                 "xray" => s.xray = flag,
                 "edges" => s.edges = flag,
@@ -55,12 +62,14 @@ impl Settings {
     /// Текст файла.
     pub fn render(&self) -> String {
         let flag = |b: bool| if b { "1" } else { "0" };
+        let tabs: String = self
+            .tabs
+            .iter()
+            .map(|p| format!("tab={}\n", p.to_string_lossy()))
+            .collect();
         format!(
-            "last_project={}\nxray={}\nedges={}\nwheel_reverse={}\n",
-            self.last_project
-                .as_deref()
-                .map(Path::to_string_lossy)
-                .unwrap_or_default(),
+            "{tabs}active={}\nxray={}\nedges={}\nwheel_reverse={}\n",
+            self.active,
             flag(self.xray),
             flag(self.edges),
             flag(self.wheel_reverse),
@@ -107,12 +116,22 @@ mod tests {
     #[test]
     fn round_trip_and_garbage() {
         let s = Settings {
-            last_project: Some(PathBuf::from(r"C:\Users\Vova\Проект")),
+            tabs: vec![
+                PathBuf::from(r"C:\Users\Vova\Проект"),
+                PathBuf::from(r"D:\Станок"),
+            ],
+            active: 1,
             xray: false,
             edges: true,
             wheel_reverse: true,
         };
         assert_eq!(Settings::parse(&s.render()), s);
         assert_eq!(Settings::parse("мусор\n=\nxray\n"), Settings::default());
+    }
+
+    #[test]
+    fn old_last_project_becomes_a_tab() {
+        let s = Settings::parse("last_project=C:\\Проект\nxray=1\n");
+        assert_eq!(s.tabs, vec![PathBuf::from("C:\\Проект")]);
     }
 }

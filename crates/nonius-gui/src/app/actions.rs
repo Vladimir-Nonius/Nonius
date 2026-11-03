@@ -34,8 +34,6 @@ impl App {
     }
 
     pub(super) fn set_project(&mut self, ctx: &egui::Context, project: Box<dyn ProjectSource>) {
-        self.settings.last_project = Some(project.root().to_path_buf());
-        self.settings.save();
         let project: Arc<dyn ProjectSource> = Arc::from(project);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
             "{} — {}",
@@ -64,6 +62,7 @@ impl App {
         self.tab
             .jobs
             .spawn(ctx, move |_| Done::Parts(project.parts()));
+        self.remember_tabs();
     }
 
     /// Выбрать деталь: прочитать её версии, потом сравнить.

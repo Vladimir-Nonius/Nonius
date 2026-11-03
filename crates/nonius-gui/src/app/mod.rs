@@ -29,6 +29,7 @@ mod results;
 mod save;
 mod settings;
 mod start;
+mod strip;
 mod toolbar;
 mod tree;
 
@@ -69,8 +70,8 @@ pub struct App {
     chooser: Arc<dyn Chooser>,
     /// Открытая вкладка проекта.
     tab: ProjectTab,
-    /// Остальные вкладки по порядку; открытая стоит на месте `at`.
-    others: Vec<ProjectTab>,
+    /// Все вкладки по порядку; на месте открытой (`at`) — пустышка.
+    tabs: Vec<ProjectTab>,
     at: usize,
     viewport: Viewport,
     mode: Mode,
@@ -106,7 +107,7 @@ impl App {
             creator: options.creator,
             chooser: options.chooser,
             tab: ProjectTab::default(),
-            others: Vec::new(),
+            tabs: vec![ProjectTab::default()],
             at: 0,
             viewport: Viewport::new(render),
             mode: Mode::Changes,
@@ -118,13 +119,9 @@ impl App {
             was_focused: true,
             settings,
         };
-        match options.project {
-            Some(p) => app.set_project(ctx, p),
-            None => {
-                if let Some(last) = app.settings.last_project.clone().filter(|p| p.is_dir()) {
-                    app.open(ctx, last);
-                }
-            }
+        app.restore_tabs(ctx);
+        if let Some(p) = options.project {
+            app.got_project(ctx, p);
         }
         app.tab.want = options.part.map(|p| (p, options.picks));
         app
@@ -137,6 +134,7 @@ impl eframe::App for App {
         self.take_dropped(ctx);
         self.notice_focus(ctx);
         first_run::show(self, ctx);
+        strip::show(self, ctx);
 
         if self.tab.project.is_none() {
             start::show(self, ctx);

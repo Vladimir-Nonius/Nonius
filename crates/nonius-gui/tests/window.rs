@@ -366,7 +366,7 @@ fn program() -> ProgramEntry {
 fn wait_for(h: &mut Harness<'_, App>, text: &str) {
     for _ in 0..300 {
         h.step();
-        if h.query_by_label_contains(text).is_some() {
+        if h.query_all_by_label_contains(text).next().is_some() {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -465,7 +465,7 @@ fn choose_part_and_see_places() {
 
     // Настройки запомнились во временной папке.
     let saved = std::fs::read_to_string(dir.path().join("window.txt")).unwrap();
-    assert!(saved.contains("last_project="), "{saved}");
+    assert!(saved.contains("tab="), "{saved}");
 }
 
 #[test]
@@ -677,11 +677,11 @@ fn start_screen_opens_and_creates() {
     h.run();
     h.get_by_label("Создать").click();
     wait_for(&mut h, "Будет новая деталь «плита»");
-    assert!(h.query_by_label("Новый").is_some());
+    assert!(h.query_all_by_label("Новый").next().is_some());
 }
 
 #[test]
-fn another_project_replaces_everything() {
+fn another_project_opens_in_its_own_tab() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let second = dir.path().join("второй");
@@ -694,15 +694,36 @@ fn another_project_replaces_everything() {
 
     drop_file(&mut h, &second);
     wait_for(&mut h, "Второй");
-    assert!(h.query_by_label("Стенд").is_none());
+    assert!(
+        h.query_all_by_label("Стенд").next().is_some(),
+        "первая вкладка"
+    );
     assert!(
         h.query_by_label_contains("Добавлено 1").is_none(),
-        "старое сравнение"
+        "сравнение первого проекта"
     );
     assert!(
         h.query_by_label_contains("версия 1").is_none(),
-        "старая история"
+        "история первого проекта"
     );
+
+    // Тот же проект второй раз не открывается: окно переходит к нему.
+    drop_file(&mut h, &second);
+    h.run();
+    assert_eq!(h.query_all_by_label("×").count(), 2);
+
+    // Назад к первому: его деталь и сравнение снова на месте.
+    h.query_all_by_label("Стенд").next().unwrap().click();
+    wait_for(&mut h, "Добавлено 1");
+    let saved = Settings::load();
+    assert_eq!(saved.tabs, vec![dir.path().to_path_buf(), second.clone()]);
+    assert_eq!(saved.active, 0);
+
+    // Закрыть первую: остаётся вторая.
+    h.query_all_by_label("×").next().unwrap().click();
+    h.run();
+    assert!(h.query_by_label("Стенд").is_none());
+    assert_eq!(Settings::load().tabs, vec![second]);
 }
 
 #[test]
