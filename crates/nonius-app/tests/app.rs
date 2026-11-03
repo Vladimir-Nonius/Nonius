@@ -198,13 +198,16 @@ fn mass_only_with_material() {
     assert_eq!(p.meta.material.as_deref(), Some("Ст3"));
     assert!((p.mass.kg().unwrap() - 1.57).abs() < 1e-9, "{p:?}");
 
+    // Нет в справочнике и плотность не задана: отказ с похожими, паспорт прежний.
     let unknown = MaterialChoice {
-        name: "Унобтаниум".into(),
+        name: "Сталь".into(),
         density_kg_m3: None,
     };
-    let p = f.app.set_material("пластина", Some(unknown)).unwrap();
-    assert!(matches!(p.mass, Mass::NoDensity { .. }), "{p:?}");
-    assert_eq!(p.meta.geometry.mass_kg, None, "старая масса стёрта");
+    let e = f.app.set_material("пластина", Some(unknown)).unwrap_err();
+    assert_eq!(e.code(), "unknown_material");
+    assert!(e.to_string().contains("Ст3, Сталь 20"), "{e}");
+    let p = f.app.passport("пластина", None).unwrap();
+    assert_eq!(p.meta.material.as_deref(), Some("Ст3"));
 
     let own = MaterialChoice {
         name: "Унобтаниум".into(),
@@ -212,6 +215,7 @@ fn mass_only_with_material() {
     };
     let p = f.app.set_material("пластина", Some(own)).unwrap();
     assert!((p.mass.kg().unwrap() - 0.2).abs() < 1e-9, "{p:?}");
+    assert!(p.meta.geometry.mass_kg.is_some(), "масса нового материала");
 
     // Тот же материал без плотности — плотность остаётся прежней.
     let again = MaterialChoice {

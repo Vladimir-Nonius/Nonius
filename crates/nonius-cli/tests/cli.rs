@@ -452,8 +452,15 @@ fn material_sets_mass_only_when_known() {
     assert!(meta.contains("material: 09Г2С"), "{meta}");
 
     let (ok, out) = nonius(d, &["material", "кронштейн", "Сплав-Х"]);
+    assert!(!ok && out.contains("нет в справочнике"), "{out}");
+    let (ok, out) = nonius(
+        d,
+        &["material", "кронштейн", "Сплав-Х", "--density", "2700"],
+    );
     assert!(ok, "{out}");
     assert!(out.contains("Материал: Сплав-Х"), "{out}");
+    let out = json(d, &["material", "кронштейн", "сталь", "--json"]);
+    assert_eq!(out["error"]["code"], "unknown_material", "{out}");
 
     let (ok, out) = nonius(d, &["material", "кронштейн", "Сплав-Х", "--density", "0"]);
     assert!(!ok && out.contains("больше нуля"), "{out}");

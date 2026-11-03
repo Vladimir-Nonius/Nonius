@@ -57,6 +57,15 @@ pub enum Error {
     #[error("плотность {0} кг/м³ не подходит: нужно число больше нуля")]
     BadDensity(f64),
 
+    /// Материала нет в справочнике, плотность не задана.
+    #[error("«{name}» нет в справочнике: укажите плотность в кг/м³ или выберите материал из справочника{}", if similar.is_empty() { String::new() } else { format!(": {similar}") })]
+    UnknownMaterial {
+        /// Как назвали материал.
+        name: String,
+        /// Похожие из справочника через запятую.
+        similar: String,
+    },
+
     /// В этой версии детали нет такого файла.
     #[error("в «{item}» нет файла {path}")]
     UnknownFile {
@@ -147,6 +156,10 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("no_versions", "у детали ещё нет версий"),
     ("no_renderer", "сборка без подсветки изменений"),
     ("bad_density", "неверная плотность"),
+    (
+        "unknown_material",
+        "материала нет в справочнике, нужна плотность",
+    ),
     ("unknown_file", "в версии нет такого файла"),
     ("open_failed", "система не смогла открыть файл"),
     ("cancelled", "расчёт отменён"),
@@ -175,6 +188,7 @@ impl Error {
             Self::NoVersions(_) => "no_versions",
             Self::NoRenderer => "no_renderer",
             Self::BadDensity(_) => "bad_density",
+            Self::UnknownMaterial { .. } => "unknown_material",
             Self::UnknownFile { .. } => "unknown_file",
             Self::FileExists { .. } => "already_exists",
             Self::ProtectedFile { .. } => "protected_file",

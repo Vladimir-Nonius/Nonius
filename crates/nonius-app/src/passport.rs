@@ -9,7 +9,7 @@ use nonius_core::meta::PartMeta;
 use nonius_core::project::META_FILE;
 use nonius_core::{schema, PartName, VersionNumber};
 
-use crate::materials::find_material;
+use crate::materials::{find_material, similar_materials};
 use crate::{App, Error, Result};
 
 /// Паспорт детали в версии или в текущем состоянии.
@@ -148,6 +148,13 @@ impl App {
                         .map(|m| m.density_kg_m3)
                         .or(meta.density_kg_m3.filter(|_| same)),
                 };
+                // Без плотности масса не посчитается, а человек этого не заметит.
+                if density.is_none() {
+                    return Err(Error::UnknownMaterial {
+                        name: material.to_string(),
+                        similar: similar_materials(material).join(", "),
+                    });
+                }
                 if !same {
                     // Старая масса относилась к другому материалу.
                     meta.geometry.mass_kg = None;

@@ -41,7 +41,7 @@ pub use compare::{CompareOptions, Comparison, NoProgress, Progress};
 pub use error::{Error, Result, ERROR_CODES};
 pub use import::{Imported, PREVIEW_FORMAT};
 pub use items::{ItemState, ItemStatus};
-pub use materials::{find_material, Material, MATERIALS};
+pub use materials::{find_material, similar_materials, Material, MATERIALS};
 pub use outside::{Other, Outside};
 pub use passport::{Mass, MaterialChoice, Passport};
 pub use system::{programs_for, OpenWay, Program};
