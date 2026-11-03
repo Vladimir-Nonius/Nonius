@@ -7,6 +7,7 @@ pub mod files;
 pub mod history;
 pub mod import;
 pub mod json;
+pub mod layout;
 pub mod mcp;
 pub mod passport;
 pub mod project;

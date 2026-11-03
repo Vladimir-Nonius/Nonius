@@ -17,7 +17,16 @@ pub(super) fn in_words(e: nonius_app::Error) -> anyhow::Error {
         Error::Core(Core::AlreadyExists(path)) if path.ends_with(PROJECT_FILE) => {
             anyhow::anyhow!("в этой папке уже есть проект: откройте его")
         }
+        Error::Core(Core::AlreadyExists(path)) if !path.join("meta.yaml").is_file() => {
+            anyhow::anyhow!(
+                "папка {} уже есть: переименуйте или уберите её и повторите",
+                path.display()
+            )
+        }
         Error::Core(Core::AlreadyExists(_)) => anyhow::anyhow!("такая деталь уже есть"),
+        Error::Core(Core::OldLayout(_)) => {
+            anyhow::anyhow!("проект старого формата: менять его можно после обновления (кнопка «Обновить» вверху)")
+        }
         Error::Store(nonius_app::StoreError::Identity) => {
             anyhow::anyhow!("не задано имя автора версий: перезапустите Nonius, он спросит имя")
         }

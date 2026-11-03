@@ -10,11 +10,11 @@ use nonius_app::{App, CompareOptions, ItemState, NoProgress, StoreError, MATERIA
 use nonius_core::meta::ItemKind;
 use serde_json::{json, Value};
 
-use crate::args::{Cli, Command, FileCommand, PartCommand};
-use crate::commands::{compare, describe, files, passport, project};
+use crate::args::{Cli, Command, FileCommand, FolderCommand, PartCommand};
+use crate::commands::{compare, describe, files, layout, passport, project};
 use crate::format::parse_version;
 
-mod view;
+pub(crate) mod view;
 
 use view::{change, item, kind, mass, version};
 
@@ -26,6 +26,10 @@ pub const COMMANDS: &[&str] = &[
     "part delete",
     "part deleted",
     "part recover",
+    "part move",
+    "folder new",
+    "map",
+    "upgrade",
     "list",
     "info",
     "overview",
@@ -119,9 +123,31 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
                 "warning": warning,
             })
         }
-        Command::Part(PartCommand::New { name, assembly }) => {
-            let item = app()?.new_item(name, project::kind_of(*assembly))?;
+        Command::Part(PartCommand::New {
+            name,
+            assembly,
+            folder,
+        }) => {
+            let folder = folder.as_deref().unwrap_or(std::path::Path::new(""));
+            let item = app()?.new_item_in(name, project::kind_of(*assembly), folder)?;
             json!({ "name": item.name.as_str(), "kind": kind(item.kind) })
+        }
+        Command::Part(PartCommand::Move { name, folder }) => {
+            let app = app()?;
+            app.move_item(name, folder)?;
+            layout::map_json(&app)?
+        }
+        Command::Folder(FolderCommand::New { path }) => {
+            let app = app()?;
+            app.new_folder(path)?;
+            layout::map_json(&app)?
+        }
+        Command::Map => layout::map_json(&app()?)?,
+        Command::Upgrade => {
+            let app = app()?;
+            let upgraded = app.is_old_layout();
+            app.upgrade()?;
+            json!({ "upgraded": upgraded })
         }
         Command::Part(PartCommand::Rename { name, new }) => {
             let item = app()?.rename_item(name, new)?;
@@ -305,6 +331,7 @@ fn info(app: &App) -> Result<Value> {
         "parts": parts,
         "assemblies": list.len() - parts,
         "tolerance_mm": p.config().compare.tolerance_mm,
+        "old_layout": p.is_old_layout(),
     }))
 }
 

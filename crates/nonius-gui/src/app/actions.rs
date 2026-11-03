@@ -41,6 +41,8 @@ impl App {
             texts().app_title
         )));
         self.tab.materials = project.materials();
+        self.tab.ask_upgrade = project.old_layout();
+        self.tab.upgrading = false;
         self.tab.project = Some(project.clone());
         // Всё от прошлого проекта: и работы, и то, что на экране.
         self.tab.jobs.forget_all();

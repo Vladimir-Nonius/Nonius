@@ -18,6 +18,7 @@
 | Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Удалить, вернуть, переименовать деталь, убрать версию с карты | `nonius-store/src/items.rs`, чьи версии — `lineage.rs`, отметки в истории — `message.rs` |
+| Папки проекта: где детали, папки-группы, перенос детали, обновление старого проекта | обход — `nonius-core/src/project/layout.rs`; перенос и `upgrade` — `nonius-store/src/layout.rs`; действия и карта — `nonius-app/src/layout.rs`; команды `map`, `folder new`, `part move`, `upgrade` — `nonius-cli/src/commands/layout.rs`; окошко и полоса — `nonius-gui/src/app/upgrade.rs` |
 | Сравнить с файлом или другой деталью | `nonius-app/src/outside.rs`; в окне — `compare_with` в `nonius-gui/src/app/part_actions.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
@@ -67,7 +68,8 @@
 | `schema.rs` | `schema: N` в файлах данных, чтение, запись, миграции |
 | `meta.rs` | `meta.yaml` — паспорт версии: геометрия, материал, свойства |
 | `tree.rs` | `tree.yaml` — дерево построения |
-| `project/mod.rs` | папка проекта, `project.yaml`, детали и сборки |
+| `project/mod.rs` | папка проекта, `project.yaml` (схема 2), создание деталей, старый формат |
+| `project/layout.rs` | обход папок: детали (папки с `meta.yaml`) и папки-группы, создание папки |
 | `project/templates.rs` | `.gitattributes` нового проекта |
 | `project/agents.rs` | `AGENTS.md` проекта: правила для ИИ, обновление блока между метками |
 | `extension/manifest.rs` | манифест модуля, точки расширения, права, версия API |
@@ -86,7 +88,8 @@
 | `lib.rs` | `Store`: открытие, первый коммит, поиск детали |
 | `history.rs` | список версий, изменения, `commit`, `restore` |
 | `items.rs` | удалить, вернуть, переименовать деталь |
-| `lineage.rs` | чья какая версия после переименований и удалений, список удалённых |
+| `lineage.rs` | чья какая версия и в какой папке она лежала, список удалённых |
+| `layout.rs` | перенос детали в папку, перевод старого проекта на папки |
 | `files.rs` | файлы версии, `export`, кэш версий, `snapshot` |
 | `diff.rs` | разница между версиями: файлы, размеры, строки текста |
 | `overview.rs` | история и изменения всех деталей за один проход |
@@ -167,6 +170,7 @@
 | `app/bottom.rs` | вкладки под 3D, таблица «Числа» |
 | `app/project_tab.rs` | вкладка проекта: всё, что окно знает об одном проекте, своя очередь работ |
 | `app/strip.rs` | полоса вкладок проектов: «+», крестик, переключение, память между запусками |
+| `app/upgrade.rs` | проект старого формата: окошко «Обновить?», жёлтая полоса, обновление |
 | `app/draft.rs` | «Новый проект»: черновик во временной папке, жёлтая полоса, перенос, вопрос при закрытии, «Не сохранять» — в Корзину |
 | `app/files.rs` | вкладка «Файлы»: список, разница текста, «Открыть» |
 | `app/open_menu.rs` | меню правого щелчка: «Открыть», «Открыть в…», «Показать в папке», «Заменить модель…», «Переименовать…», «Удалить…» |
@@ -197,6 +201,7 @@
 |---|---|
 | `lib.rs` | `App` (проект + реестр + хранилище), `create_project` |
 | `items.rs` | новая деталь, список, `ItemStatus` и `ItemState` |
+| `layout.rs` | карта проекта, папки, перенос детали, обновление старого проекта |
 | `history.rs` | версии, `save_version`, `restore`, `export` |
 | `files.rs` | файлы версии, разница, копия и открытие файла |
 | `system/` | программы для типа файла, запуск, «Открыть с помощью», показ в папке; Windows только в `windows.rs` |
@@ -225,6 +230,7 @@
 | `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `agents`, `modules` |
+| `commands/layout.rs` | `map`, `folder new`, `part move`, `upgrade` |
 | `commands/import.rs` | `import` |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `hide`, `unhide`, `export` |
 | `commands/files.rs` | `files`, `show`, `file add`, `file remove`, `open` |
@@ -241,6 +247,7 @@
 | `#[cfg(test)] mod tests` в файле | мелкие функции этого файла |
 | `nonius-core/tests/project.rs` | папка проекта целиком |
 | `nonius-store/tests/store.rs` | версии на настоящем git |
+| `nonius-store/tests/layout.rs` | перенос детали, возврат в свою папку, обновление старого проекта с историей |
 | `nonius-occt/tests/occt.rs`, `without_occt.rs` | геометрия с OpenCascade и сборка без него |
 | `nonius-occt/tests/scene.rs` | сцена изменений на настоящем OpenCascade |
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
@@ -249,5 +256,6 @@
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, кэш STEP |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
+| `nonius-cli/tests/folders.rs` | `folder new`, `part move`, `map --json`, `upgrade` |
 
 Карту обновляет тот, кто добавляет, переносит или удаляет файл, — в том же pull request.

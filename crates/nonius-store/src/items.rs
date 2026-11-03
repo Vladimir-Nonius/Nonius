@@ -6,10 +6,10 @@
 use std::fs;
 use std::path::Path;
 
-use nonius_core::project::{Item, DOCS_DIR};
+use nonius_core::project::{old_item_path, Item, DOCS_DIR};
 use nonius_core::{Error as CoreError, PartName, VersionNumber};
 
-use crate::git::{git_path, literal};
+use crate::git::literal;
 use crate::message::{deleted_message, hidden_message, recovered_message, renamed_message};
 use crate::{workdir, AiActor, DeletedItem, Result, Store, StoreError};
 
@@ -22,7 +22,7 @@ const FILE_HELD: [i32; 3] = [5, 32, 33];
 
 impl Store {
     /// Записать подготовленный индекс в отметку истории.
-    fn commit_mark(&self, message: &str, paths: &[String]) -> Result<()> {
+    pub(crate) fn commit_mark(&self, message: &str, paths: &[String]) -> Result<()> {
         let author = self.ai.as_ref().map(AiActor::git_author);
         let mut args = vec!["commit", "-q", "-F", "-"];
         if let Some(author) = &author {
@@ -38,6 +38,7 @@ impl Store {
     /// остаются в истории; отметка — пустой коммит, чужое в индексе не
     /// попадает.
     pub fn set_hidden(&self, item: &Item, version: VersionNumber, hidden: bool) -> Result<()> {
+        self.project.writable()?;
         let v = self.version(item, version)?;
         if v.hidden == hidden {
             return Ok(());
@@ -53,7 +54,7 @@ impl Store {
     }
 
     /// Сдвинуть папку детали целиком.
-    fn move_dir(&self, item: &PartName, from: &Path, to: &Path) -> Result<()> {
+    pub(crate) fn move_dir(&self, item: &PartName, from: &Path, to: &Path) -> Result<()> {
         fs::rename(from, to).map_err(|e| {
             if cfg!(windows) && e.raw_os_error().is_some_and(|c| FILE_HELD.contains(&c)) {
                 StoreError::InUse(item.clone())
@@ -70,6 +71,7 @@ impl Store {
     /// ([`Store::recover`]). Несохранённое сначала сохраняется версией: иначе
     /// вернуть его было бы неоткуда.
     pub fn delete(&self, item: &Item) -> Result<()> {
+        self.project.writable()?;
         if !self.changes(item)?.is_empty() {
             self.commit(item, BEFORE_DELETE)?;
         }
@@ -82,7 +84,7 @@ impl Store {
             })?;
         self.move_dir(&item.name, &item.dir, &aside)?;
         let spec = literal(&path);
-        let message = deleted_message(&item.name, item.kind, self.ai.as_ref());
+        let message = deleted_message(&item.name, item.kind, &path, self.ai.as_ref());
         let done = self
             .git
             .run(&["rm", "-r", "-q", "--cached", "--", &spec])
@@ -97,8 +99,10 @@ impl Store {
         Ok(())
     }
 
-    /// Вернуть удалённую деталь такой, какой она была перед удалением.
+    /// Вернуть удалённую деталь такой, какой она была перед удалением, туда,
+    /// где она лежала. Удалённая до перехода на папки возвращается в корень.
     pub fn recover(&self, name: &PartName) -> Result<Item> {
+        self.project.writable()?;
         if let Some(existing) = self.project.find_item(name)? {
             return Err(CoreError::AlreadyExists(existing.dir).into());
         }
@@ -107,12 +111,51 @@ impl Store {
             .iter()
             .find(|d| d.name.same_as(name))
             .ok_or_else(|| StoreError::NotDeleted(name.clone()))?;
-        let dir = self.project.item_dir(found.kind, &found.name);
-        let path = git_path(self.project.root(), &dir);
-        let spec = literal(&path);
+        let root = self.project.root();
+        let (path, dir, moved) = match &found.folder {
+            Some(folder) => (folder.clone(), root.join(folder), None),
+            None => {
+                let old = old_item_path(found.kind, &found.name);
+                (
+                    found.name.to_string(),
+                    root.join(found.name.as_str()),
+                    Some(old),
+                )
+            }
+        };
+        if dir.exists() {
+            return Err(CoreError::AlreadyExists(dir).into());
+        }
         let parent = format!("{}^", found.commit);
-        self.git.run(&["checkout", &parent, "--", &spec])?;
-        let message = recovered_message(&found.name, self.ai.as_ref());
+        let spec = literal(&path);
+        match &moved {
+            None => {
+                self.git.run(&["checkout", &parent, "--", &spec])?;
+            }
+            Some(old) => {
+                // Файлы встают на старое место, а оттуда — в корень.
+                let old_spec = literal(old);
+                self.git.run(&["checkout", &parent, "--", &old_spec])?;
+                let old_dir = root.join(old);
+                let done = self
+                    .move_dir(&found.name, &old_dir, &dir)
+                    .and_then(|_| {
+                        self.git
+                            .run(&["rm", "-r", "-q", "--cached", "--", &old_spec])
+                    })
+                    .and_then(|_| self.git.run(&["add", "-A", "--", &spec]));
+                if let Err(e) = done {
+                    let _ = self.git.run(&["reset", "-q", "--", &old_spec, &spec]);
+                    let _ = fs::remove_dir_all(&old_dir);
+                    let _ = fs::remove_dir_all(&dir);
+                    return Err(e);
+                }
+                if let Some(base) = old_dir.parent() {
+                    let _ = fs::remove_dir(base);
+                }
+            }
+        }
+        let message = recovered_message(&found.name, moved.as_deref(), self.ai.as_ref());
         self.commit_mark(&message, &[spec])?;
         let docs = dir.join(DOCS_DIR);
         fs::create_dir_all(&docs).map_err(|e| StoreError::Io {
@@ -130,6 +173,7 @@ impl Store {
     /// ней. Несохранённое не должно смешаться с отметкой, поэтому его сначала
     /// надо сохранить. У детали без версий просто меняется папка.
     pub fn rename(&self, item: &Item, new: &PartName) -> Result<Item> {
+        self.project.writable()?;
         if let Some(other) = self.project.find_item(new)? {
             if other.dir != item.dir {
                 return Err(CoreError::AlreadyExists(other.dir).into());
@@ -138,7 +182,7 @@ impl Store {
         let renamed = Item {
             name: new.clone(),
             kind: item.kind,
-            dir: self.project.item_dir(item.kind, new),
+            dir: item.dir.with_file_name(new.as_str()),
         };
         if *new == item.name {
             return Ok(renamed);

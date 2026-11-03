@@ -189,7 +189,7 @@ fn mass_only_with_material() {
         "плотность из справочника"
     );
     assert!((p.mass.kg().unwrap() - 0.785).abs() < 1e-9, "{p:?}");
-    let saved = std::fs::read_to_string(f.root.join("parts/пластина/meta.yaml")).unwrap();
+    let saved = std::fs::read_to_string(f.root.join("пластина/meta.yaml")).unwrap();
     assert!(saved.contains("density_kg_m3: 7850"), "{saved}");
 
     // Новый объём — масса пересчитывается, материал остаётся.

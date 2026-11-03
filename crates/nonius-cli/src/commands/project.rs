@@ -1,7 +1,7 @@
 //! Проект целиком: `init`, `part new`, `list`, `info`, `overview`, `agents`,
 //! `modules`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use nonius_app::{create_project, App, Created, History, ItemState, ItemStatus};
@@ -60,9 +60,9 @@ pub fn kind_of(assembly: bool) -> ItemKind {
 }
 
 /// `nonius part new`.
-pub fn part_new(app: &App, name: &str, assembly: bool) -> Result<()> {
+pub fn part_new(app: &App, name: &str, assembly: bool, folder: Option<&Path>) -> Result<()> {
     let kind = kind_of(assembly);
-    let item = app.new_item(name, kind)?;
+    let item = app.new_item_in(name, kind, folder.unwrap_or(Path::new("")))?;
     println!("Добавлено: {} ({})", item.name, kind_word(kind));
     Ok(())
 }
@@ -123,6 +123,11 @@ pub fn info(app: &App) -> Result<()> {
     println!("Деталей:   {parts}");
     println!("Сборок:    {}", items.len() - parts);
     println!("Допуск:    {} мм", c.compare.tolerance_mm);
+    if p.is_old_layout() {
+        println!(
+            "Формат:    старый (parts/, assemblies/), только просмотр. Обновить: nonius upgrade"
+        );
+    }
     for m in &c.members {
         println!("Участник:  {} ({:?})", m.name, m.role);
     }

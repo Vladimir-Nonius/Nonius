@@ -9,6 +9,7 @@
 //! вызывающий и передаёт в [`App::open`].
 //!
 //! Файлы: здесь — [`App`] и создание проекта, `items.rs` — детали и статус,
+//! `layout.rs` — папки, карта проекта, перенос детали, обновление старого проекта,
 //! `history.rs` — версии, `files.rs` — файлы версии и их открытие,
 //! `system/` — программы системы, запуск, показ в папке,
 //! `import.rs` — импорт модели, `passport.rs` — паспорт и масса,
@@ -23,6 +24,7 @@ mod files;
 mod history;
 mod import;
 mod items;
+mod layout;
 mod materials;
 mod model_view;
 mod moving;
@@ -42,6 +44,7 @@ pub use compare::{CompareOptions, Comparison, NoProgress, Progress};
 pub use error::{Error, Result, ERROR_CODES};
 pub use import::{Imported, PREVIEW_FORMAT};
 pub use items::{ItemState, ItemStatus};
+pub use layout::{MapItem, ProjectMap};
 pub use materials::{find_material, similar_materials, Material, MATERIALS};
 pub use moving::move_project;
 pub use outside::{Other, Outside};

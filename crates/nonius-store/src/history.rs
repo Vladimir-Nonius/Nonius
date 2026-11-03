@@ -85,6 +85,7 @@ impl Store {
 
     /// Зафиксировать текущее состояние папки детали как новую версию.
     pub fn commit(&self, item: &Item, message: &str) -> Result<VersionInfo> {
+        self.project.writable()?;
         let message = message.trim();
         if message.is_empty() {
             return Err(StoreError::EmptyMessage);
@@ -111,6 +112,7 @@ impl Store {
 
     /// Зафиксировать файл проекта вне деталей: это не версия детали.
     pub fn commit_project_file(&self, file: &str, message: &str) -> Result<()> {
+        self.project.writable()?;
         let path = literal(file);
         self.git.run(&["add", "--", &path])?;
         let author = self.ai.as_ref().map(AiActor::git_author);
@@ -131,6 +133,7 @@ impl Store {
         version: VersionNumber,
         note: Option<&str>,
     ) -> Result<VersionInfo> {
+        self.project.writable()?;
         if !self.changes(item)?.is_empty() {
             return Err(StoreError::Dirty(item.name.clone()));
         }

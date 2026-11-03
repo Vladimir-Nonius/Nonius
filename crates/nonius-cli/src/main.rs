@@ -24,8 +24,8 @@ use nonius_app::{AiActor, App, GitOptions};
 use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
-use args::{Cli, Command, FileCommand, PartCommand};
-use commands::{compare, describe, files, history, import, json, mcp, passport, project};
+use args::{Cli, Command, FileCommand, FolderCommand, PartCommand};
+use commands::{compare, describe, files, history, import, json, layout, mcp, passport, project};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
@@ -97,9 +97,17 @@ fn run(cli: Cli) -> Result<()> {
         Command::Init { path, name } => {
             project::init(path.as_ref().or(cli.project.as_ref()), name.as_deref())?
         }
-        Command::Part(PartCommand::New { name, assembly }) => {
-            project::part_new(&app()?, name, *assembly)?
+        Command::Part(PartCommand::Move { name, folder }) => {
+            layout::part_move(&app()?, name, folder)?
         }
+        Command::Folder(FolderCommand::New { path }) => layout::folder_new(&app()?, path)?,
+        Command::Map => layout::map(&app()?)?,
+        Command::Upgrade => layout::upgrade(&app()?)?,
+        Command::Part(PartCommand::New {
+            name,
+            assembly,
+            folder,
+        }) => project::part_new(&app()?, name, *assembly, folder.as_deref())?,
         Command::Part(PartCommand::Rename { name, new }) => {
             project::part_rename(&app()?, name, new)?
         }

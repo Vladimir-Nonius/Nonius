@@ -219,7 +219,7 @@ impl Desk {
 
 /// Папка детали в проекте.
 fn part_dir(project: &Path, name: &str) -> PathBuf {
-    project.join("parts").join(name)
+    project.join(name)
 }
 
 /// Версии в файлах: что на самом деле лежит в git.

@@ -61,6 +61,17 @@ pub enum Error {
     #[error("{0}: уже существует")]
     AlreadyExists(PathBuf),
 
+    /// Проект старого устройства (`parts/`, `assemblies/`): до обновления
+    /// его можно только смотреть.
+    #[error(
+        "{0}: проект старого формата, его можно только смотреть. Обновите его: nonius upgrade"
+    )]
+    OldLayout(PathBuf),
+
+    /// Папку или деталь нельзя положить внутрь другой детали.
+    #[error("{0}: это папка детали, внутрь неё класть нельзя")]
+    InsideItem(PathBuf),
+
     /// Модуль нарушил правила подключения или вернул ошибку.
     #[error("модуль {module}: {message}")]
     Module {
@@ -81,6 +92,8 @@ impl Error {
             Self::InvalidName { .. } => "invalid_name",
             Self::NotAProject(_) => "not_a_project",
             Self::AlreadyExists(_) => "already_exists",
+            Self::OldLayout(_) => "old_layout",
+            Self::InsideItem(_) => "inside_item",
             Self::Module { .. } => "module",
         }
     }
