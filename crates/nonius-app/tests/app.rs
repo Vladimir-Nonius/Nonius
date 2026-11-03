@@ -527,3 +527,20 @@ fn own_files_are_added_and_removed() {
     f.app.remove_file("пластина", &path).unwrap();
     assert!(!item.dir.join("docs").exists(), "пустая docs/ убрана");
 }
+
+#[test]
+fn old_version_leaves_the_map() {
+    let f = fixture(false);
+    import(&f, 1000.0);
+    f.app.save_version("пластина", "Первая").unwrap();
+    import(&f, 2000.0);
+    f.app.save_version("пластина", "Вторая").unwrap();
+
+    let e = f.app.set_hidden("пластина", v(2), true).unwrap_err();
+    assert_eq!(e.code(), "latest_version", "{e}");
+    assert!(f.app.set_hidden("пластина", v(1), true).unwrap().hidden);
+    let list = f.app.versions("пластина").unwrap();
+    assert_eq!(list.len(), 2);
+    assert!(list[1].hidden);
+    assert!(!f.app.set_hidden("пластина", v(1), false).unwrap().hidden);
+}

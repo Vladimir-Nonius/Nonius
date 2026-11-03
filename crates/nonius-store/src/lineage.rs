@@ -2,11 +2,13 @@
 //! деталь могли с тех пор переименовать, удалить или создать заново под тем же
 //! именем. История идёт от новых записей к старым, поэтому имя можно
 //! проследить назад: на отметке «переименована» оно меняется на прежнее, на
-//! отметке «удалена» история нынешней детали заканчивается.
+//! отметке «удалена» история нынешней детали заканчивается. Отметка «убрана с
+//! карты» относится к детали под тем же прослеженным именем.
 
 use std::collections::{HashMap, HashSet};
 
 use nonius_core::project::Item;
+use nonius_core::VersionNumber;
 
 use crate::git::git_path;
 use crate::message::{parse_event, Event, LOG_EVENTS, LOG_FORMAT};
@@ -34,6 +36,8 @@ impl Store {
             .collect();
         // Вернули удалённую: всё до отметки удаления — уже не про неё.
         let mut recovered = HashMap::new();
+        // Убрана ли версия с карты: решает самая новая отметка.
+        let mut marks: HashMap<(usize, VersionNumber), bool> = HashMap::new();
         for event in self.events()? {
             match event {
                 Event::Version(mut v) => {
@@ -66,6 +70,20 @@ impl Store {
                         recovered.insert(name.to_string(), i);
                     }
                 }
+                Event::Hidden {
+                    item,
+                    version,
+                    hidden,
+                } => {
+                    if let Some(&i) = owner.get(item.as_str()) {
+                        marks.entry((i, version)).or_insert(hidden);
+                    }
+                }
+            }
+        }
+        for (i, versions) in list.iter_mut().enumerate() {
+            for v in versions {
+                v.hidden = marks.get(&(i, v.version)).copied().unwrap_or(false);
             }
         }
         Ok(list)

@@ -39,6 +39,7 @@ pub fn version(v: &VersionInfo) -> Value {
         "date": v.date,
         "summary": v.summary(),
         "message": v.message,
+        "hidden": v.hidden,
     })
 }
 

@@ -66,6 +66,10 @@ pub enum Error {
         similar: String,
     },
 
+    /// Последнюю версию нельзя убрать с карты.
+    #[error("{0} — последняя версия, её убрать с карты нельзя: она и есть деталь сейчас")]
+    LatestVersion(nonius_core::VersionNumber),
+
     /// В этой версии детали нет такого файла.
     #[error("в «{item}» нет файла {path}")]
     UnknownFile {
@@ -161,6 +165,7 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
         "материала нет в справочнике, нужна плотность",
     ),
     ("unknown_file", "в версии нет такого файла"),
+    ("latest_version", "последнюю версию не убрать с карты"),
     ("open_failed", "система не смогла открыть файл"),
     ("cancelled", "расчёт отменён"),
     ("inside_project", "папка уже внутри другого проекта"),
@@ -190,6 +195,7 @@ impl Error {
             Self::BadDensity(_) => "bad_density",
             Self::UnknownMaterial { .. } => "unknown_material",
             Self::UnknownFile { .. } => "unknown_file",
+            Self::LatestVersion(_) => "latest_version",
             Self::FileExists { .. } => "already_exists",
             Self::ProtectedFile { .. } => "protected_file",
             Self::NotText(_) => "not_text",

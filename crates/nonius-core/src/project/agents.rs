@@ -39,7 +39,8 @@ fn block() -> String {
 - `nonius material <деталь> [материал]` — паспорт и масса.\n\
 - `nonius compare <деталь> --file <файл.step>` или `--with <деталь>` — сравнить, ничего не сохраняя.\n\
 - `nonius commit <деталь> -m \"что и почему\"` — новая версия.\n\
-- `nonius part rename`, `part delete`, `part deleted`, `part recover` — переименовать, удалить, вернуть. Удалённое остаётся в истории.\n\n\
+- `nonius part rename`, `part delete`, `part deleted`, `part recover` — переименовать, удалить, вернуть. Удалённое остаётся в истории.\n\
+- `nonius hide <деталь> <версия>`, `unhide` — убрать старую версию с карты окна и вернуть. В истории она остаётся.\n\n\
 ## Правила для ИИ\n\
 - Не читай файлы моделей: `model.*`, `*.step`, `*.sldprt`, `*.sldasm`. Они огромные и бесполезны как текст. Числа есть в `meta.yaml` и `nonius diff`.\n\
 - Подписывай свои действия: `--ai <имя> --ai-model <модель>` или переменные `NONIUS_AI` и `NONIUS_AI_MODEL`.\n\

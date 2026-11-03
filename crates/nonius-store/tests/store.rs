@@ -547,3 +547,36 @@ fn part_held_by_another_program_stays() {
     assert!(store.changes(&item).unwrap().is_empty());
     store.delete(&item).unwrap();
 }
+
+#[test]
+fn version_is_hidden_from_the_map_and_comes_back() {
+    let (_tmp, store, item) = two_versions("крюк");
+    // Чужое в индексе в отметку не попадает.
+    fs::write(item.dir.join("docs").join("черновик.md"), "x").unwrap();
+    store.set_hidden(&item, v(1), true).unwrap();
+    let list = store.versions(&item).unwrap();
+    assert_eq!(list.len(), 2, "версия осталась в истории");
+    assert!(list[1].hidden && !list[0].hidden, "{list:?}");
+    assert!(store
+        .changes(&item)
+        .unwrap()
+        .iter()
+        .any(|c| c.path.ends_with("черновик.md")));
+    // Второй раз — ничего нового.
+    store.set_hidden(&item, v(1), true).unwrap();
+
+    // Отметка идёт за деталью через переименование.
+    fs::remove_file(item.dir.join("docs").join("черновик.md")).unwrap();
+    let new = store.rename(&item, &name("крюк М38")).unwrap();
+    let list = store.versions(&new).unwrap();
+    assert!(list[1].hidden, "{list:?}");
+    assert_eq!(
+        store.histories(std::slice::from_ref(&new)).unwrap()[0].versions,
+        list
+    );
+
+    store.set_hidden(&new, v(1), false).unwrap();
+    assert!(store.versions(&new).unwrap().iter().all(|v| !v.hidden));
+    let e = store.set_hidden(&new, v(9), true).unwrap_err();
+    assert!(matches!(e, StoreError::UnknownVersion { .. }), "{e}");
+}

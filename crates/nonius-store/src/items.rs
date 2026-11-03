@@ -1,4 +1,5 @@
-//! Удалить, вернуть и переименовать деталь. Это не версии, а отметки в истории
+//! Удалить, вернуть и переименовать деталь, убрать версию с карты. Это не
+//! версии, а отметки в истории
 //! ([`crate::message`]): старое остаётся в git. Папка сдвигается одним шагом до
 //! записи в git: если файл держит другая программа, ничего не меняется.
 
@@ -6,10 +7,10 @@ use std::fs;
 use std::path::Path;
 
 use nonius_core::project::{Item, DOCS_DIR};
-use nonius_core::{Error as CoreError, PartName};
+use nonius_core::{Error as CoreError, PartName, VersionNumber};
 
 use crate::git::{git_path, literal};
-use crate::message::{deleted_message, recovered_message, renamed_message};
+use crate::message::{deleted_message, hidden_message, recovered_message, renamed_message};
 use crate::{workdir, AiActor, DeletedItem, Result, Store, StoreError};
 
 /// Описание версии, в которой сохраняется несохранённое перед удалением.
@@ -29,6 +30,24 @@ impl Store {
         }
         args.push("--");
         args.extend(paths.iter().map(String::as_str));
+        self.git.run_with_input(&args, Some(message.as_bytes()))?;
+        Ok(())
+    }
+
+    /// Убрать версию с карты (`hidden`) или вернуть на неё. Файлы и версия
+    /// остаются в истории; отметка — пустой коммит, чужое в индексе не
+    /// попадает.
+    pub fn set_hidden(&self, item: &Item, version: VersionNumber, hidden: bool) -> Result<()> {
+        let v = self.version(item, version)?;
+        if v.hidden == hidden {
+            return Ok(());
+        }
+        let message = hidden_message(&item.name, version, hidden, self.ai.as_ref());
+        let author = self.ai.as_ref().map(AiActor::git_author);
+        let mut args = vec!["commit", "-q", "--allow-empty", "--only", "-F", "-"];
+        if let Some(author) = &author {
+            args.extend(["--author", author]);
+        }
         self.git.run_with_input(&args, Some(message.as_bytes()))?;
         Ok(())
     }

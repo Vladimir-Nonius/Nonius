@@ -57,6 +57,17 @@ impl App {
         self.dialog = Some(Dialog::RemoveFile(confirm(part), path));
     }
 
+    /// Убрать версию с карты или вернуть на неё.
+    pub(super) fn set_hidden(&mut self, ctx: &egui::Context, part: String, n: u32, hidden: bool) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        self.jobs.spawn(ctx, move |_| {
+            let done = project.set_hidden(&part, n, hidden);
+            Done::HiddenSet(part, n, hidden, done)
+        });
+    }
+
     /// Показать удалённые детали.
     pub(super) fn show_deleted(&mut self, ctx: &egui::Context) {
         let Some(project) = self.project.clone() else {

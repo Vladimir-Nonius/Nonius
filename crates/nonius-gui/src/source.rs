@@ -38,6 +38,8 @@ pub struct VersionEntry {
     pub author: String,
     /// Первая строка описания.
     pub summary: String,
+    /// Убрана с карты: видна только в списке «Убрано с карты».
+    pub hidden: bool,
 }
 
 /// Какую версию показать.
@@ -317,6 +319,8 @@ pub trait ProjectSource: Send + Sync {
     fn add_file(&self, part: &str, file: &Path) -> anyhow::Result<String>;
     /// Убрать файл из папки детали: в сохранённых версиях он остаётся.
     fn remove_file(&self, part: &str, path: &str) -> anyhow::Result<()>;
+    /// Убрать версию с карты (`hidden`) или вернуть на неё.
+    fn set_hidden(&self, part: &str, version: u32, hidden: bool) -> anyhow::Result<()>;
     /// Выгрузить файлы версии в папку. Возвращает, сколько файлов записано.
     fn export_version(&self, part: &str, version: u32, dest: &Path) -> anyhow::Result<usize>;
     /// Сравнить деталь с файлом или другой деталью, ничего не сохраняя.
@@ -366,6 +370,7 @@ mod tests {
             date: String::new(),
             author: String::new(),
             summary: String::new(),
+            hidden: false,
         }
     }
 

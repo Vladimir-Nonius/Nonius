@@ -657,6 +657,8 @@ fn mcp_without_write_changes_nothing() {
         "init",
         "file_add",
         "file_remove",
+        "hide",
+        "unhide",
     ];
     let mut messages = vec![
         HELLO(),
@@ -856,4 +858,28 @@ fn ai_creates_project_and_own_files_through_mcp() {
         answers[8]
     );
     assert!(d.join("parts/крюк/meta.yaml").is_file());
+}
+
+#[test]
+fn old_version_leaves_the_map() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    assert!(nonius(d, &["init"]).0);
+    assert!(nonius(d, &["part", "new", "вал"]).0);
+    let note = d.join("parts/вал/docs/заметка.md");
+    std::fs::write(&note, "1").unwrap();
+    assert!(nonius(d, &["commit", "вал", "-m", "первая"]).0);
+    std::fs::write(&note, "2").unwrap();
+    assert!(nonius(d, &["commit", "вал", "-m", "вторая"]).0);
+
+    let out = json(d, &["hide", "вал", "v2", "--json"]);
+    assert_eq!(out["error"]["code"], "latest_version", "{out}");
+    let out = json(d, &["hide", "вал", "v1", "--json"]);
+    assert_eq!(out["data"]["hidden"], true, "{out}");
+    let (ok, out) = nonius(d, &["log", "вал"]);
+    assert!(ok && out.contains("(убрана с карты)"), "{out}");
+    let (ok, out) = nonius(d, &["unhide", "вал", "1"]);
+    assert!(ok && out.contains("снова на карте"), "{out}");
+    let log = json(d, &["log", "вал", "--json"]);
+    assert_eq!(log["data"]["versions"][1]["hidden"], false, "{log}");
 }

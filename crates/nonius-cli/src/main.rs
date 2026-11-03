@@ -129,6 +129,8 @@ fn run(cli: Cli) -> Result<()> {
             let other = compare::other(file.as_deref(), with.as_deref())?;
             compare::compare(&app()?, part, version.as_deref(), other)?
         }
+        Command::Hide { part, version } => history::hide(&app()?, part, version, true)?,
+        Command::Unhide { part, version } => history::hide(&app()?, part, version, false)?,
         Command::Render {
             part,
             from,

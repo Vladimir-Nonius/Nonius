@@ -240,6 +240,7 @@ impl ProjectSource for AppSource {
                 date: short_date(&v.date),
                 author: v.signature(),
                 summary: v.summary().to_string(),
+                hidden: v.hidden,
             })
             .collect();
         list.sort_by_key(|v| std::cmp::Reverse(v.number));
@@ -516,6 +517,15 @@ impl ProjectSource for AppSource {
     fn remove_file(&self, part: &str, path: &str) -> Result<()> {
         let _files = self.writing();
         Ok(self.app.remove_file(part, path)?)
+    }
+
+    fn set_hidden(&self, part: &str, version: u32, hidden: bool) -> Result<()> {
+        let number = VersionNumber::new(version)?;
+        let _files = self.writing();
+        self.app
+            .set_hidden(part, number, hidden)
+            .map_err(in_words)?;
+        Ok(())
     }
 
     fn export_version(&self, part: &str, version: u32, dest: &Path) -> Result<usize> {

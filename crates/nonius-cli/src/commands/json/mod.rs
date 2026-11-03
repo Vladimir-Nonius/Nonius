@@ -38,6 +38,8 @@ pub const COMMANDS: &[&str] = &[
     "diff",
     "compare",
     "restore",
+    "hide",
+    "unhide",
     "export",
     "files",
     "show",
@@ -218,6 +220,12 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
             version: number,
             message,
         } => version(&app()?.restore(part, parse_version(number)?, message.as_deref())?),
+        Command::Hide { part, version: n } => {
+            version(&app()?.set_hidden(part, parse_version(n)?, true)?)
+        }
+        Command::Unhide { part, version: n } => {
+            version(&app()?.set_hidden(part, parse_version(n)?, false)?)
+        }
         Command::Export {
             part,
             version: number,

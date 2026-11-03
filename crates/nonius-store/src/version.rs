@@ -72,6 +72,8 @@ pub struct VersionInfo {
     pub date: String,
     /// Описание версии (без служебных строк).
     pub message: String,
+    /// Убрана с карты: в истории есть, на карте не видна.
+    pub hidden: bool,
 }
 
 impl VersionInfo {

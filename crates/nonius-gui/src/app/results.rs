@@ -198,6 +198,22 @@ impl App {
                     }
                     Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
                 },
+                Done::HiddenSet(name, n, hidden, result) => match result {
+                    Ok(()) => {
+                        let word = if hidden {
+                            t.version_hidden
+                        } else {
+                            t.version_unhidden
+                        };
+                        self.notice = Some(format!("v{n} «{name}» {word}"));
+                        if current(&name) {
+                            self.refresh(ctx);
+                        } else {
+                            self.list_versions(ctx, &name);
+                        }
+                    }
+                    Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
+                },
                 Done::FileRemoved(name, path, Ok(())) => {
                     self.dialog = None;
                     let text = format!("{path} {} «{name}». {}", t.file_removed, t.save_to_keep);

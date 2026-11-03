@@ -1,5 +1,6 @@
 //! Карта версий снизу: кружки на линии слева направо, старые первыми, справа
-//! «Сейчас». Щелчок и правая кнопка — как в истории.
+//! «Сейчас». Убранных с карты версий здесь нет. Щелчок и правая кнопка — как
+//! в истории.
 
 use eframe::egui::{self, Align2, Color32, FontId, Sense, Stroke};
 
@@ -21,7 +22,7 @@ const PLAIN: Color32 = Color32::from_rgb(150, 155, 165);
 /// Нарисовать карту выбранной детали.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     // Карта нужна, когда выбирать есть из чего.
-    let count = app.versions.len() + usize::from(app.part_dirty());
+    let count = history::on_map(&app.versions).len() + usize::from(app.part_dirty());
     if app.part.is_none() || count < 2 {
         return;
     }
@@ -45,7 +46,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
     let t = texts();
     let dirty = app.part_dirty();
-    let count = app.versions.len() + usize::from(dirty);
+    let versions = history::on_map(&app.versions);
+    let count = versions.len() + usize::from(dirty);
     let latest = app.versions.first().map(|v| v.number);
     let size = egui::vec2(count as f32 * STEP, HEIGHT);
     let (area, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -56,15 +58,15 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
 
     let picks = app.picks;
     let part = app.part.as_deref().unwrap_or_default();
-    for (k, i) in (0..app.versions.len()).rev().enumerate() {
-        let v = &app.versions[i];
+    for (k, i) in (0..versions.len()).rev().enumerate() {
+        let v = &versions[i];
         let me = Pick::Version(v.number);
         let r = node(ui, center(k), me, picks, &version_text(v), date(&v.date));
         let r = r.on_hover_text(version_hint(v));
         if r.clicked() {
-            *act = Some(Act::Show(history::version_pair(&app.versions, i)));
+            *act = Some(Act::Show(history::version_pair(&versions, i)));
         }
-        history::version_menu(&r, part, me, Some(picks), latest, act);
+        history::version_menu(&r, part, me, Some(picks), latest, false, act);
     }
     if dirty {
         let at = center(count - 1);

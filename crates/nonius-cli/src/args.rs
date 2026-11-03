@@ -122,6 +122,20 @@ pub enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
+    /// Убрать старую версию с карты: в истории она остаётся, вернёт `unhide`.
+    Hide {
+        /// Деталь.
+        part: String,
+        /// Версия: v3 или 3.
+        version: String,
+    },
+    /// Вернуть версию на карту.
+    Unhide {
+        /// Деталь.
+        part: String,
+        /// Версия: v3 или 3.
+        version: String,
+    },
     /// Нарисовать изменения цветом: зелёное — добавлено, красное — убрано.
     Render {
         /// Деталь.

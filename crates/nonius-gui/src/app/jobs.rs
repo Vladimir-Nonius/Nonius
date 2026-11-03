@@ -71,6 +71,8 @@ pub enum Done {
     FilesAdded(String, anyhow::Result<Vec<String>>),
     /// Файл убран из папки детали.
     FileRemoved(String, String, anyhow::Result<()>),
+    /// Версия убрана с карты (`true`) или возвращена: деталь, версия.
+    HiddenSet(String, u32, bool, anyhow::Result<()>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }
