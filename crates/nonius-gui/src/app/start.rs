@@ -16,7 +16,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.add_space(ui.available_height() * 0.3);
             ui.heading(RichText::new(t.no_project).size(24.0));
             ui.add_space(16.0);
-            if app.jobs.busy() {
+            if app.tab.jobs.busy() {
                 ui.spinner();
                 return;
             }
@@ -51,7 +51,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     }
                 });
             }
-            if let Some(m) = &app.message {
+            if let Some(m) = &app.tab.message {
                 ui.add_space(12.0);
                 ui.label(RichText::new(m).color(ui.visuals().warn_fg_color));
             }

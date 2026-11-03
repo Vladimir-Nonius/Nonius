@@ -1,0 +1,74 @@
+//! Вкладка проекта: всё, что окно знает об одном открытом проекте. Окно
+//! держит несколько вкладок, рисуется одна — открытая, остальные ждут.
+//! У каждой своя очередь фоновых работ: результат не попадёт в чужую.
+
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use super::jobs::Jobs;
+use super::{add_model, bottom, material, new_part, open_menu, part_dialogs, save};
+use crate::source::{
+    Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
+    VersionEntry,
+};
+
+/// Один проект в окне.
+#[derive(Default)]
+pub(super) struct ProjectTab {
+    /// Открытый проект; `None` — начальный экран.
+    pub project: Option<Arc<dyn ProjectSource>>,
+    pub parts: Vec<PartEntry>,
+    pub programs: open_menu::Programs,
+    pub part: Option<String>,
+    pub versions: Vec<VersionEntry>,
+    pub picks: (Pick, Pick),
+    pub want: Option<(String, Option<(Pick, Pick)>)>,
+    pub comparison: Option<Comparison>,
+    pub shown: Option<(String, (Pick, Pick))>,
+    /// Деталь, под которую настроена камера: её вид не сбрасывается.
+    pub framed: Option<String>,
+    pub selected: Option<usize>,
+    pub jobs: Jobs,
+    /// Ошибка — показывается в строке состояния, пока не выбрали другое.
+    pub message: Option<String>,
+    /// Что получилось: «Сохранена версия …», «Сравнение отменено».
+    pub notice: Option<String>,
+    /// Что сказать, когда деталь будет показана.
+    pub sticky: Option<String>,
+    /// Строка поиска в дереве.
+    pub search: String,
+    /// Раскрытые в дереве детали.
+    pub expanded: BTreeSet<String>,
+    /// Версии раскрытых деталей, кроме выбранной.
+    pub listed: HashMap<String, Vec<VersionEntry>>,
+    /// С чем сравнивается деталь вне истории: имя файла или детали.
+    pub outside: Option<String>,
+    /// Открытое окошко действия над деталью.
+    pub dialog: Option<part_dialogs::Dialog>,
+    pub materials: Vec<MaterialEntry>,
+    /// Материал и масса для пары версий: «Было», «Стало», сейчас.
+    pub masses: Option<((Pick, Pick), [MassEntry; 3])>,
+    /// Открытое окошко «Сохранить версию».
+    pub save: Option<save::SaveDialog>,
+    /// Открытое окошко «Новая деталь».
+    pub new_part: Option<new_part::NewPart>,
+    /// Открытое окошко «Добавить модель».
+    pub add: Option<add_model::AddModel>,
+    /// Что добавить, когда откроется новый проект.
+    pub after_open: Vec<PathBuf>,
+    /// Вернулись в окно: перечитать детали, как только оно освободится.
+    pub reread_wanted: bool,
+    /// Ввод своего материала.
+    pub custom: material::Custom,
+    /// Материал записывается — список выбора ждёт.
+    pub material_busy: bool,
+    /// Открытая вкладка под 3D; `None` — панель свёрнута.
+    pub panel: Option<bottom::Tab>,
+    /// Файлы для пары версий.
+    pub files: Option<((Pick, Pick), Vec<FileEntry>)>,
+    /// Выбранный файл на вкладке «Файлы».
+    pub file: Option<String>,
+    /// Строки выбранного текстового файла.
+    pub file_text: Option<Vec<DiffEntry>>,
+}

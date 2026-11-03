@@ -152,20 +152,21 @@ fn choose_program(ui: &mut egui::Ui, programs: &Programs, target: &Target, ask: 
 impl App {
     /// Выполнить то, что попросили в меню.
     pub(super) fn answer_menu(&mut self, ctx: &egui::Context, ask: Option<Ask>) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
         match ask {
             Some(Ask::Open(target, way)) => {
-                self.jobs.spawn(ctx, move |_| {
+                self.tab.jobs.spawn(ctx, move |_| {
                     let folder = way == OpenWay::Folder;
                     let opened = project.open_file(&target.part, target.pick, &target.path, &way);
                     Done::FileOpened(target.pick, folder, opened)
                 });
             }
             Some(Ask::Programs(kind, path)) => {
-                self.programs.insert(kind.clone(), None);
-                self.jobs
+                self.tab.programs.insert(kind.clone(), None);
+                self.tab
+                    .jobs
                     .spawn(ctx, move |_| Done::Programs(kind, project.programs(&path)));
             }
             Some(Ask::ReplaceModel(part)) => {

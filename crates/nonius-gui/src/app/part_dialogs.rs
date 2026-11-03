@@ -119,12 +119,12 @@ fn question(
 /// Нарисовать открытое окошко.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
-    let dirty = |part: &str| app.parts.iter().any(|p| p.name == part && p.dirty);
+    let dirty = |part: &str| app.tab.parts.iter().any(|p| p.name == part && p.dirty);
     let saved = |part: &str| {
-        let entry = app.parts.iter().find(|p| p.name == part);
+        let entry = app.tab.parts.iter().find(|p| p.name == part);
         entry.is_some_and(|p| p.latest.is_some())
     };
-    let pressed = match app.dialog.as_mut() {
+    let pressed = match app.tab.dialog.as_mut() {
         None => return,
         Some(Dialog::Delete(base)) => {
             let title = format!("{} «{}»?", t.delete_title, base.part);
@@ -207,7 +207,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
     };
     match pressed {
-        Some(Pressed::No) => app.dialog = None,
+        Some(Pressed::No) => app.tab.dialog = None,
         Some(Pressed::Yes) => app.confirmed(ctx),
         None => {}
     }

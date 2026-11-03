@@ -22,8 +22,8 @@ const PLAIN: Color32 = Color32::from_rgb(150, 155, 165);
 /// Нарисовать карту выбранной детали.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     // Карта нужна, когда выбирать есть из чего.
-    let count = history::on_map(&app.versions).len() + usize::from(app.part_dirty());
-    if app.part.is_none() || count < 2 {
+    let count = history::on_map(&app.tab.versions).len() + usize::from(app.part_dirty());
+    if app.tab.part.is_none() || count < 2 {
         return;
     }
     let mut act = None;
@@ -46,9 +46,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
     let t = texts();
     let dirty = app.part_dirty();
-    let versions = history::on_map(&app.versions);
+    let versions = history::on_map(&app.tab.versions);
     let count = versions.len() + usize::from(dirty);
-    let latest = app.versions.first().map(|v| v.number);
+    let latest = app.tab.versions.first().map(|v| v.number);
     let size = egui::vec2(count as f32 * STEP, HEIGHT);
     let (area, _) = ui.allocate_exact_size(size, Sense::hover());
     let center = |k: usize| area.left_top() + egui::vec2((k as f32 + 0.5) * STEP, RADIUS + 3.0);
@@ -56,8 +56,8 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
     ui.painter()
         .line_segment([center(0), center(count - 1)], line);
 
-    let picks = app.picks;
-    let part = app.part.as_deref().unwrap_or_default();
+    let picks = app.tab.picks;
+    let part = app.tab.part.as_deref().unwrap_or_default();
     for (k, i) in (0..versions.len()).rev().enumerate() {
         let v = &versions[i];
         let me = Pick::Version(v.number);
@@ -72,10 +72,10 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
         let at = center(count - 1);
         let r = node(ui, at, Pick::Current, picks, t.now, "");
         let r = r.on_hover_text(t.not_saved);
-        if let (true, Some(p)) = (r.clicked(), history::now_pair(&app.versions)) {
+        if let (true, Some(p)) = (r.clicked(), history::now_pair(&app.tab.versions)) {
             *act = Some(Act::Show(p));
         }
-        if !app.versions.is_empty() {
+        if !app.tab.versions.is_empty() {
             history::now_menu(&r, picks, act);
         }
     }

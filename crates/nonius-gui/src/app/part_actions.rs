@@ -13,7 +13,7 @@ use crate::texts::texts;
 impl App {
     /// Спросить новое имя детали.
     pub(super) fn ask_rename(&mut self, part: &str) {
-        self.dialog = Some(Dialog::Rename(Rename {
+        self.tab.dialog = Some(Dialog::Rename(Rename {
             name: part.to_string(),
             base: confirm(part),
             ..Rename::default()
@@ -22,31 +22,31 @@ impl App {
 
     /// Спросить, удалить ли деталь.
     pub(super) fn ask_delete(&mut self, part: &str) {
-        self.dialog = Some(Dialog::Delete(confirm(part)));
+        self.tab.dialog = Some(Dialog::Delete(confirm(part)));
     }
 
     /// Спросить, вернуть ли выбранную деталь к версии.
     pub(super) fn ask_restore(&mut self, version: Option<u32>) {
-        if let (Some(part), Some(n)) = (self.part.clone(), version) {
+        if let (Some(part), Some(n)) = (self.tab.part.clone(), version) {
             self.ask_restore_of(&part, n);
         }
     }
 
     /// Спросить, вернуть ли деталь `part` к версии: она не обязательно выбрана.
     pub(super) fn ask_restore_of(&mut self, part: &str, version: u32) {
-        self.dialog = Some(Dialog::Restore(confirm(part), version));
+        self.tab.dialog = Some(Dialog::Restore(confirm(part), version));
     }
 
     /// Выбрать свои файлы и положить их в `docs/` детали.
     pub(super) fn add_files(&mut self, ctx: &egui::Context, part: String) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
         let files = self.chooser.files();
         if files.is_empty() {
             return;
         }
-        self.jobs.spawn(ctx, move |_| {
+        self.tab.jobs.spawn(ctx, move |_| {
             let added = files.iter().map(|f| project.add_file(&part, f)).collect();
             Done::FilesAdded(part, added)
         });
@@ -54,15 +54,15 @@ impl App {
 
     /// Спросить, убрать ли файл из папки детали.
     pub(super) fn ask_remove_file(&mut self, part: &str, path: String) {
-        self.dialog = Some(Dialog::RemoveFile(confirm(part), path));
+        self.tab.dialog = Some(Dialog::RemoveFile(confirm(part), path));
     }
 
     /// Убрать версию с карты или вернуть на неё.
     pub(super) fn set_hidden(&mut self, ctx: &egui::Context, part: String, n: u32, hidden: bool) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
-        self.jobs.spawn(ctx, move |_| {
+        self.tab.jobs.spawn(ctx, move |_| {
             let done = project.set_hidden(&part, n, hidden);
             Done::HiddenSet(part, n, hidden, done)
         });
@@ -70,44 +70,45 @@ impl App {
 
     /// Показать удалённые детали.
     pub(super) fn show_deleted(&mut self, ctx: &egui::Context) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
-        self.dialog = Some(Dialog::Deleted(None, Confirm::default()));
-        self.jobs
+        self.tab.dialog = Some(Dialog::Deleted(None, Confirm::default()));
+        self.tab
+            .jobs
             .spawn(ctx, move |_| Done::DeletedList(project.deleted_parts()));
     }
 
     /// Человек подтвердил вопрос в окошке.
     pub(super) fn confirmed(&mut self, ctx: &egui::Context) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
-        let Some(dialog) = self.dialog.as_mut() else {
+        let Some(dialog) = self.tab.dialog.as_mut() else {
             return;
         };
         dialog.base().busy = true;
         dialog.base().error = None;
         // Папка детали сейчас изменится: идущее сравнение не нужно.
-        self.jobs.cancel();
-        match self.dialog.as_ref() {
+        self.tab.jobs.cancel();
+        match self.tab.dialog.as_ref() {
             Some(Dialog::Rename(d)) => {
                 let (old, new) = (d.base.part.clone(), d.name.trim().to_string());
-                self.jobs.spawn(ctx, move |_| {
+                self.tab.jobs.spawn(ctx, move |_| {
                     let done = project.rename_part(&old, &new);
                     Done::PartRenamed(old, new, done)
                 });
             }
             Some(Dialog::Delete(c)) => {
                 let part = c.part.clone();
-                self.jobs.spawn(ctx, move |_| {
+                self.tab.jobs.spawn(ctx, move |_| {
                     let done = project.delete_part(&part);
                     Done::PartDeleted(part, done)
                 });
             }
             Some(Dialog::RemoveFile(c, path)) => {
                 let (part, path) = (c.part.clone(), path.clone());
-                self.jobs.spawn(ctx, move |_| {
+                self.tab.jobs.spawn(ctx, move |_| {
                     // Убрали ещё не сохранённый файл — сохранять, может, и нечего.
                     let done = project
                         .remove_file(&part, &path)
@@ -117,7 +118,7 @@ impl App {
             }
             Some(Dialog::Restore(c, version)) => {
                 let (part, version) = (c.part.clone(), *version);
-                self.jobs.spawn(ctx, move |_| {
+                self.tab.jobs.spawn(ctx, move |_| {
                     let done = project.restore_version(&part, version);
                     Done::Restored(part, version, done)
                 });
@@ -128,14 +129,14 @@ impl App {
 
     /// Вернуть удалённую деталь из списка.
     pub(super) fn recover(&mut self, ctx: &egui::Context, part: String) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
-        if let Some(dialog) = self.dialog.as_mut() {
+        if let Some(dialog) = self.tab.dialog.as_mut() {
             dialog.base().busy = true;
             dialog.base().error = None;
         }
-        self.jobs.spawn(ctx, move |_| {
+        self.tab.jobs.spawn(ctx, move |_| {
             let done = project.recover_part(&part);
             Done::PartRecovered(part, done)
         });
@@ -143,20 +144,20 @@ impl App {
 
     /// Выбрать папку и выгрузить в неё файлы версии.
     pub(super) fn export_version(&mut self, ctx: &egui::Context, version: Option<u32>) {
-        if let (Some(part), Some(n)) = (self.part.clone(), version) {
+        if let (Some(part), Some(n)) = (self.tab.part.clone(), version) {
             self.export_of(ctx, part, n);
         }
     }
 
     /// Выгрузить версию детали `part`: она не обязательно выбрана.
     pub(super) fn export_of(&mut self, ctx: &egui::Context, part: String, n: u32) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
         let Some(dest) = self.chooser.folder(&self.path_input) else {
             return;
         };
-        self.jobs.spawn(ctx, move |_| {
+        self.tab.jobs.spawn(ctx, move |_| {
             let done = project.export_version(&part, n, &dest);
             Done::Exported(part, n, dest, done)
         });
@@ -165,10 +166,10 @@ impl App {
     /// Сравнить показанную версию с файлом или другой деталью. В историю
     /// ничего не попадает.
     pub(super) fn compare_with(&mut self, ctx: &egui::Context, other: Other) {
-        let (Some(project), Some(part)) = (self.project.clone(), self.part.clone()) else {
+        let (Some(project), Some(part)) = (self.tab.project.clone(), self.tab.part.clone()) else {
             return;
         };
-        let pick = self.picks.1;
+        let pick = self.tab.picks.1;
         let label = match &other {
             Other::File(path) => path.file_name().map_or_else(
                 || path.display().to_string(),
@@ -176,13 +177,13 @@ impl App {
             ),
             Other::Part(name) => name.clone(),
         };
-        self.outside = Some(label.clone());
-        self.notice = None;
-        self.comparison = None;
-        self.selected = None;
+        self.tab.outside = Some(label.clone());
+        self.tab.notice = None;
+        self.tab.comparison = None;
+        self.tab.selected = None;
         self.viewport.set_model(None, false);
-        self.shown = None;
-        self.jobs.spawn_cancellable(ctx, move |progress| {
+        self.tab.shown = None;
+        self.tab.jobs.spawn_cancellable(ctx, move |progress| {
             let done = project.compare_outside(&part, pick, &other, progress);
             Done::ComparedOutside(part, label, done)
         });
@@ -190,26 +191,26 @@ impl App {
 
     /// Подпись сравнения вне истории: «v2 → файл.step».
     pub(super) fn outside_title(&self) -> Option<String> {
-        let other = self.outside.as_ref()?;
-        Some(format!("{} → {other}", pick_label(self.picks.1)))
+        let other = self.tab.outside.as_ref()?;
+        Some(format!("{} → {other}", pick_label(self.tab.picks.1)))
     }
 
     /// Закрыть сравнение с файлом: вернуться к версиям детали.
     pub(super) fn close_outside(&mut self, ctx: &egui::Context) {
-        self.outside = None;
+        self.tab.outside = None;
         self.compare(ctx);
     }
 
     /// Деталь больше не называется `old`: всё, что помнит окно, — про `new`.
     pub(super) fn renamed(&mut self, ctx: &egui::Context, old: &str, new: String) {
         let t = texts();
-        self.dialog = None;
-        if self.expanded.remove(old) {
-            self.expanded.insert(new.clone());
+        self.tab.dialog = None;
+        if self.tab.expanded.remove(old) {
+            self.tab.expanded.insert(new.clone());
         }
-        self.listed.remove(old);
-        if self.framed.as_deref() == Some(old) {
-            self.framed = Some(new.clone());
+        self.tab.listed.remove(old);
+        if self.tab.framed.as_deref() == Some(old) {
+            self.tab.framed = Some(new.clone());
         }
         let text = format!("«{old}» {} «{new}»", t.renamed_to);
         self.reload_on(ctx, new, text);
@@ -218,15 +219,15 @@ impl App {
     /// Деталь удалена: её больше нет на экране.
     pub(super) fn part_gone(&mut self, ctx: &egui::Context, name: &str) {
         let t = texts();
-        self.dialog = None;
-        self.expanded.remove(name);
-        self.listed.remove(name);
-        if self.part.as_deref() == Some(name) {
+        self.tab.dialog = None;
+        self.tab.expanded.remove(name);
+        self.tab.listed.remove(name);
+        if self.tab.part.as_deref() == Some(name) {
             self.clear_part();
         }
         let text = format!("«{name}» {}", t.part_deleted);
-        self.notice = Some(text.clone());
-        self.sticky = Some(text);
+        self.tab.notice = Some(text.clone());
+        self.tab.sticky = Some(text);
         self.reload(ctx);
     }
 }

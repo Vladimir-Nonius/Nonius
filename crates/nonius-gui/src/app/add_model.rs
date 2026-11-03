@@ -116,8 +116,8 @@ impl AddModel {
 /// Нарисовать окошко, если оно открыто.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
-    let parts = app.parts.clone();
-    let Some(d) = app.add.as_mut() else {
+    let parts = app.tab.parts.clone();
+    let Some(d) = app.tab.add.as_mut() else {
         return;
     };
     let Some(file) = d.file().cloned() else {
@@ -224,7 +224,7 @@ impl App {
         if files.is_empty() {
             return;
         }
-        if let Some(d) = self.add.as_mut() {
+        if let Some(d) = self.tab.add.as_mut() {
             d.total += files.len();
             d.queue.extend(files);
             return;
@@ -236,16 +236,16 @@ impl App {
             target: part,
             ..AddModel::default()
         };
-        dialog.prepare(&self.parts);
-        self.add = Some(dialog);
+        dialog.prepare(&self.tab.parts);
+        self.tab.add = Some(dialog);
     }
 
     /// Добавить файл на экране и сохранить версию.
     fn add_current(&mut self, ctx: &egui::Context) {
-        let (Some(project), Some(d)) = (self.project.clone(), self.add.as_mut()) else {
+        let (Some(project), Some(d)) = (self.tab.project.clone(), self.tab.add.as_mut()) else {
             return;
         };
-        let (Some(file), part) = (d.file().cloned(), d.place(&self.parts)) else {
+        let (Some(file), part) = (d.file().cloned(), d.place(&self.tab.parts)) else {
             return;
         };
         let (Place::Existing(part) | Place::New(part)) = part else {
@@ -255,8 +255,8 @@ impl App {
         d.busy = true;
         d.error = None;
         let message = d.message.trim().to_string();
-        self.jobs.cancel();
-        self.jobs.spawn(ctx, move |progress| {
+        self.tab.jobs.cancel();
+        self.tab.jobs.spawn(ctx, move |progress| {
             progress.step(texts().importing);
             Done::Added(project.add_model(&file, &part, &message))
         });
@@ -266,9 +266,9 @@ impl App {
     pub(super) fn added(&mut self, ctx: &egui::Context, added: AddedModel) {
         // Деталь уже есть для следующего файла, хотя список ещё не перечитан.
         let version = added.version.map(|v| format!("v{v}"));
-        match self.parts.iter_mut().find(|p| p.name == added.part) {
+        match self.tab.parts.iter_mut().find(|p| p.name == added.part) {
             Some(p) => p.latest = version.or(p.latest.take()),
-            None => self.parts.push(PartEntry {
+            None => self.tab.parts.push(PartEntry {
                 name: added.part.clone(),
                 assembly: false,
                 latest: version,
@@ -277,8 +277,8 @@ impl App {
                 stamp: String::new(),
             }),
         }
-        let parts = self.parts.clone();
-        let Some(d) = self.add.as_mut() else {
+        let parts = self.tab.parts.clone();
+        let Some(d) = self.tab.add.as_mut() else {
             return;
         };
         if !d.advance(added, &parts) {
@@ -290,7 +290,7 @@ impl App {
 
     /// Закрыть окошко и показать, что получилось.
     fn finish_adding(&mut self, ctx: &egui::Context) {
-        let outcome = self.add.take().and_then(|d| d.outcome());
+        let outcome = self.tab.add.take().and_then(|d| d.outcome());
         if let Some((part, text)) = outcome {
             self.reload_on(ctx, part, text);
         }

@@ -142,11 +142,11 @@ impl App {
     /// Выполнить то, что попросили в истории или на карте.
     pub(super) fn apply(&mut self, ctx: &egui::Context, act: Option<Act>) {
         match act {
-            Some(Act::Show(p)) if p != self.picks || self.outside.is_some() => {
+            Some(Act::Show(p)) if p != self.tab.picks || self.tab.outside.is_some() => {
                 self.show_picks(ctx, p)
             }
             Some(Act::Open(part, picks)) => {
-                self.want = Some((part.clone(), Some(picks)));
+                self.tab.want = Some((part.clone(), Some(picks)));
                 self.select_part(ctx, &part);
             }
             Some(Act::Save) => self.start_save(ctx),
@@ -159,23 +159,24 @@ impl App {
 
     /// Есть несохранённое у выбранной детали.
     pub(super) fn part_dirty(&self) -> bool {
-        self.parts
+        self.tab
+            .parts
             .iter()
-            .any(|p| Some(&p.name) == self.part.as_ref() && p.dirty)
+            .any(|p| Some(&p.name) == self.tab.part.as_ref() && p.dirty)
     }
 }
 
 /// Нарисовать историю детали `part`.
 pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
     let t = texts();
-    let chosen = app.part.as_ref() == Some(&part.name);
+    let chosen = app.tab.part.as_ref() == Some(&part.name);
     let empty = Vec::new();
     let versions = if chosen {
-        &app.versions
+        &app.tab.versions
     } else {
-        app.listed.get(&part.name).unwrap_or(&empty)
+        app.tab.listed.get(&part.name).unwrap_or(&empty)
     };
-    let picks = chosen.then_some(app.picks);
+    let picks = chosen.then_some(app.tab.picks);
     let latest = versions.first().map(|v| v.number);
     let go = |pair: (Pick, Pick)| {
         if chosen {
@@ -199,7 +200,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
                 Some(n) => format!("{} v{}…", t.save_version, n + 1),
                 None => format!("{}…", t.save_first),
             };
-            let busy = app.save.is_some();
+            let busy = app.tab.save.is_some();
             if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
                 act = Some(Act::Save);
             }

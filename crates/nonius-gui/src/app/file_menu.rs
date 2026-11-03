@@ -36,7 +36,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
                 if ui.button(t.new_part).clicked() {
                     ui.close();
-                    app.new_part = Some(NewPart::default());
+                    app.tab.new_part = Some(NewPart::default());
                 }
                 if ui.button(t.deleted_parts).clicked() {
                     ui.close();
@@ -56,7 +56,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     }
                 }
             });
-            ui.add_enabled_ui(app.part.is_some(), |ui| part_menu(app, ui));
+            ui.add_enabled_ui(app.tab.part.is_some(), |ui| part_menu(app, ui));
             view_menu(app, ui);
         });
     });
@@ -66,20 +66,21 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 fn part_menu(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
     let ctx = ui.ctx().clone();
-    let version = match app.picks.1 {
+    let version = match app.tab.picks.1 {
         Pick::Version(n) => Some(n),
         Pick::Current => None,
     };
-    let latest = app.versions.first().map(|v| v.number);
+    let latest = app.tab.versions.first().map(|v| v.number);
     let others: Vec<String> = app
+        .tab
         .parts
         .iter()
         .map(|p| p.name.clone())
-        .filter(|n| Some(n) != app.part.as_ref())
+        .filter(|n| Some(n) != app.tab.part.as_ref())
         .collect();
     ui.menu_button(t.menu_part, |ui| {
         ui.set_min_width(240.0);
-        let Some(part) = app.part.clone() else {
+        let Some(part) = app.tab.part.clone() else {
             return;
         };
         if ui
@@ -89,7 +90,7 @@ fn part_menu(app: &mut App, ui: &mut egui::Ui) {
             ui.close();
             app.start_save(&ctx);
         }
-        let model = app.parts.iter().find(|p| p.name == part);
+        let model = app.tab.parts.iter().find(|p| p.name == part);
         let replace = model.is_some_and(|p| p.model.is_some());
         let label = if replace { t.add_version } else { t.add_model };
         if ui.button(label).clicked() {

@@ -28,7 +28,7 @@ impl NewPart {
 /// Нарисовать окошко, если оно открыто.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
-    let Some(dialog) = app.new_part.as_mut() else {
+    let Some(dialog) = app.tab.new_part.as_mut() else {
         return;
     };
     let mut create = false;
@@ -58,7 +58,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         });
     });
     if close || (modal.should_close() && !dialog.busy) {
-        app.new_part = None;
+        app.tab.new_part = None;
     } else if create {
         dialog.busy = true;
         dialog.error = None;

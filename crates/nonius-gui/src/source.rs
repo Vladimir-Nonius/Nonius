@@ -43,11 +43,12 @@ pub struct VersionEntry {
 }
 
 /// Какую версию показать.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Pick {
     /// Сохранённая версия.
     Version(u32),
     /// То, что сейчас лежит в папке детали.
+    #[default]
     Current,
 }
 

@@ -60,11 +60,11 @@ impl MenuPlace<'_> {
 impl App {
     /// Прочитать файлы выбранной пары версий.
     pub(super) fn load_files(&mut self, ctx: &egui::Context) {
-        let (Some(project), Some(part)) = (self.project.clone(), self.part.clone()) else {
+        let (Some(project), Some(part)) = (self.tab.project.clone(), self.tab.part.clone()) else {
             return;
         };
-        let picks = self.picks;
-        self.jobs.spawn(ctx, move |_| {
+        let picks = self.tab.picks;
+        self.tab.jobs.spawn(ctx, move |_| {
             let files = project.files(&part, picks.0, picks.1);
             Done::VersionFiles(part, picks, files)
         });
@@ -74,41 +74,43 @@ impl App {
     pub(super) fn got_files(&mut self, ctx: &egui::Context, mut files: Vec<FileEntry>) {
         files.sort_by_key(|f| f.state == FileState::Same);
         let keep = self
+            .tab
             .file
             .take()
             .filter(|p| files.iter().any(|f| f.path == *p));
-        self.files = Some((self.picks, files));
-        self.file_text = None;
+        self.tab.files = Some((self.tab.picks, files));
+        self.tab.file_text = None;
         if let Some(path) = keep {
             self.select_file(ctx, path);
         }
     }
 
     fn select_file(&mut self, ctx: &egui::Context, path: String) {
-        self.file_text = None;
+        self.tab.file_text = None;
         let text = self.listed_file(&path).is_some_and(|f| f.text);
-        self.file = Some(path.clone());
-        let (Some(project), Some(part), true) = (self.project.clone(), self.part.clone(), text)
+        self.tab.file = Some(path.clone());
+        let (Some(project), Some(part), true) =
+            (self.tab.project.clone(), self.tab.part.clone(), text)
         else {
             return;
         };
-        let picks = self.picks;
-        self.jobs.spawn(ctx, move |_| {
+        let picks = self.tab.picks;
+        self.tab.jobs.spawn(ctx, move |_| {
             let lines = project.file_diff(&part, picks.0, picks.1, &path);
             Done::FileDiff(part, picks, path, lines)
         });
     }
 
     fn listed_file(&self, path: &str) -> Option<&FileEntry> {
-        let (_, files) = self.files.as_ref()?;
+        let (_, files) = self.tab.files.as_ref()?;
         files.iter().find(|f| f.path == path)
     }
 
     /// Перечитать папку детали: файлы могли появиться, пока окно открыто.
     fn reread(&mut self, ctx: &egui::Context) {
-        self.programs.clear();
-        if let Some(part) = self.part.clone() {
-            self.want = Some((part, Some(self.picks)));
+        self.tab.programs.clear();
+        if let Some(part) = self.tab.part.clone() {
+            self.tab.want = Some((part, Some(self.tab.picks)));
             self.refresh(ctx);
         }
     }
@@ -117,20 +119,20 @@ impl App {
 /// Нарисовать вкладку.
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
-    let picks = app.picks;
-    let Some((_, files)) = app.files.as_ref().filter(|f| f.0 == picks) else {
+    let picks = app.tab.picks;
+    let Some((_, files)) = app.tab.files.as_ref().filter(|f| f.0 == picks) else {
         ui.spinner();
         return;
     };
-    let Some(part) = app.part.as_deref() else {
+    let Some(part) = app.tab.part.as_deref() else {
         return;
     };
-    let entry = app.parts.iter().find(|p| p.name == part);
-    let latest = app.versions.first().map(|v| Pick::Version(v.number));
+    let entry = app.tab.parts.iter().find(|p| p.name == part);
+    let latest = app.tab.versions.first().map(|v| Pick::Version(v.number));
     let now =
         picks.1 == Pick::Current || (Some(picks.1) == latest && !entry.is_some_and(|p| p.dirty));
     let place = MenuPlace {
-        programs: &app.programs,
+        programs: &app.tab.programs,
         part,
         picks,
         now,
@@ -141,12 +143,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         list(
             &mut columns[0],
             files,
-            app.file.as_deref(),
+            app.tab.file.as_deref(),
             &mut ask,
             &place,
             &mut asked,
         );
         let selected = app
+            .tab
             .file
             .as_deref()
             .and_then(|p| files.iter().find(|f| f.path == p));
@@ -154,7 +157,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             Some(f) => detail(
                 &mut columns[1],
                 f,
-                app.file_text.as_deref(),
+                app.tab.file_text.as_deref(),
                 &place,
                 &mut asked,
             ),
@@ -166,7 +169,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     // Delete по выбранному файлу — как «Убрать файл…» в меню.
     let ctx = ui.ctx().clone();
     let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !ctx.wants_keyboard_input();
-    if let (true, None, None, Some(path)) = (delete, &asked, &app.dialog, app.file.clone()) {
+    if let (true, None, None, Some(path)) = (delete, &asked, &app.tab.dialog, app.tab.file.clone())
+    {
         let exists = files.iter().any(|f| f.path == path && f.after.is_some());
         if exists && place.target(picks.1, &path).removable {
             asked = Some(open_menu::Ask::RemoveFile(part.to_string(), path));
