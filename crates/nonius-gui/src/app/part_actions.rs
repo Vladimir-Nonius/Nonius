@@ -28,8 +28,13 @@ impl App {
     /// Спросить, вернуть ли выбранную деталь к версии.
     pub(super) fn ask_restore(&mut self, version: Option<u32>) {
         if let (Some(part), Some(n)) = (self.part.clone(), version) {
-            self.dialog = Some(Dialog::Restore(confirm(&part), n));
+            self.ask_restore_of(&part, n);
         }
+    }
+
+    /// Спросить, вернуть ли деталь `part` к версии: она не обязательно выбрана.
+    pub(super) fn ask_restore_of(&mut self, part: &str, version: u32) {
+        self.dialog = Some(Dialog::Restore(confirm(part), version));
     }
 
     /// Показать удалённые детали.
@@ -97,9 +102,14 @@ impl App {
 
     /// Выбрать папку и выгрузить в неё файлы версии.
     pub(super) fn export_version(&mut self, ctx: &egui::Context, version: Option<u32>) {
-        let (Some(project), Some(part), Some(n)) =
-            (self.project.clone(), self.part.clone(), version)
-        else {
+        if let (Some(part), Some(n)) = (self.part.clone(), version) {
+            self.export_of(ctx, part, n);
+        }
+    }
+
+    /// Выгрузить версию детали `part`: она не обязательно выбрана.
+    pub(super) fn export_of(&mut self, ctx: &egui::Context, part: String, n: u32) {
+        let Some(project) = self.project.clone() else {
             return;
         };
         let Some(dest) = self.chooser.folder(&self.path_input) else {

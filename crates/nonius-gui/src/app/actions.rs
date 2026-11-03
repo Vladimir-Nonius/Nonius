@@ -91,8 +91,12 @@ impl App {
 
     fn select(&mut self, part: Option<String>) {
         self.jobs.cancel();
-        self.part = part;
-        self.versions.clear();
+        // Прежняя деталь может остаться раскрытой: её версии не пропадают.
+        let old = std::mem::replace(&mut self.part, part);
+        let versions = std::mem::take(&mut self.versions);
+        if let Some(old) = old.filter(|_| !versions.is_empty()) {
+            self.listed.insert(old, versions);
+        }
         self.comparison = None;
         self.masses = None;
         self.selected = None;

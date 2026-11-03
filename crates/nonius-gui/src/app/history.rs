@@ -15,8 +15,10 @@ pub enum Act {
     /// Выбрать другую деталь и показать у неё эту пару.
     Open(String, (Pick, Pick)),
     Save,
-    Restore(u32),
-    Export(u32),
+    /// Вернуть деталь к версии.
+    Restore(String, u32),
+    /// Выгрузить файлы версии детали.
+    Export(String, u32),
 }
 
 /// Метка версии в выбранной паре.
@@ -66,35 +68,39 @@ pub fn now_pair(versions: &[VersionEntry]) -> Option<(Pick, Pick)> {
     Some((Pick::Version(latest.number), Pick::Current))
 }
 
-/// Правая кнопка по версии выбранной детали. `latest` вернуть незачем.
+/// Правая кнопка по версии детали `part`. «Было» и «Стало» — только у
+/// выбранной (`picks` есть), остальное — у любой. `latest` вернуть незачем.
 pub fn version_menu(
     r: &egui::Response,
+    part: &str,
     me: Pick,
-    picks: (Pick, Pick),
+    picks: Option<(Pick, Pick)>,
     latest: Option<u32>,
     act: &mut Option<Act>,
 ) {
     let t = texts();
     r.context_menu(|ui| {
-        if ui.button(t.make_before).clicked() {
-            *act = Some(Act::Show((me, picks.1)));
-            ui.close();
+        if let Some(picks) = picks {
+            if ui.button(t.make_before).clicked() {
+                *act = Some(Act::Show((me, picks.1)));
+                ui.close();
+            }
+            if ui.button(t.make_after).clicked() {
+                *act = Some(Act::Show((picks.0, me)));
+                ui.close();
+            }
+            ui.separator();
         }
-        if ui.button(t.make_after).clicked() {
-            *act = Some(Act::Show((picks.0, me)));
-            ui.close();
-        }
-        ui.separator();
         let old = old_version(me, latest);
         if ui
             .add_enabled(old.is_some(), egui::Button::new(t.restore_version))
             .clicked()
         {
-            *act = old.map(Act::Restore);
+            *act = old.map(|n| Act::Restore(part.to_string(), n));
             ui.close();
         }
         if let (Pick::Version(n), true) = (me, ui.button(t.export_version).clicked()) {
-            *act = Some(Act::Export(n));
+            *act = Some(Act::Export(part.to_string(), n));
             ui.close();
         }
     });
@@ -123,8 +129,8 @@ impl App {
                 self.select_part(ctx, &part);
             }
             Some(Act::Save) => self.start_save(ctx),
-            Some(Act::Restore(n)) => self.ask_restore(Some(n)),
-            Some(Act::Export(n)) => self.export_version(ctx, Some(n)),
+            Some(Act::Restore(part, n)) => self.ask_restore_of(&part, n),
+            Some(Act::Export(part, n)) => self.export_of(ctx, part, n),
             _ => {}
         }
     }
@@ -186,9 +192,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
         if r.clicked() {
             act = Some(go(version_pair(versions, i)));
         }
-        if let Some(picks) = picks {
-            version_menu(&r, me, picks, latest, &mut act);
-        }
+        version_menu(&r, &part.name, me, picks, latest, &mut act);
     }
     let ctx = ui.ctx().clone();
     app.apply(&ctx, act);

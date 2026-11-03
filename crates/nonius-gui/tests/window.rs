@@ -972,3 +972,31 @@ fn map_shows_versions() {
     wait_for(&mut h, "Сделать «Было»");
     assert!(h.query_by_label("Сделать «Стало»").is_some());
 }
+
+#[test]
+fn right_click_acts_on_its_own_row() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(dir.path(), Arc::default());
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+
+    // Выбран кронштейн, а щёлкнули по корпусу: удалять и называть — корпус.
+    h.get_by_label_contains("корпус").click_secondary();
+    wait_for(&mut h, "Удалить…");
+    h.get_by_label("Удалить…").click();
+    wait_for(&mut h, "«корпус»?");
+    assert!(h.query_by_label_contains("«кронштейн»?").is_none());
+    h.get_by_label("Отмена").click();
+    for _ in 0..4 {
+        h.step();
+    }
+
+    // Кронштейн больше не выбран, но раскрыт: у его версии своё меню.
+    h.get_by_label("v1").click_secondary();
+    wait_for(&mut h, "Вернуть эту версию");
+    assert!(h.query_by_label_contains("Сделать «Было»").is_none());
+    h.get_by_label_contains("Вернуть эту версию").click();
+    wait_for(&mut h, "«кронштейн» к v1?");
+}

@@ -55,6 +55,7 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
         .line_segment([center(0), center(count - 1)], line);
 
     let picks = app.picks;
+    let part = app.part.as_deref().unwrap_or_default();
     for (k, i) in (0..app.versions.len()).rev().enumerate() {
         let v = &app.versions[i];
         let me = Pick::Version(v.number);
@@ -63,7 +64,7 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
         if r.clicked() {
             *act = Some(Act::Show(history::version_pair(&app.versions, i)));
         }
-        history::version_menu(&r, me, picks, latest, act);
+        history::version_menu(&r, part, me, Some(picks), latest, act);
     }
     if dirty {
         let at = center(count - 1);
