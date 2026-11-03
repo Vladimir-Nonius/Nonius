@@ -645,7 +645,7 @@ fn project_buttons_are_always_there() {
     h.run();
     for label in [
         "Открыть проект…",
-        "Создать проект…",
+        "Новый проект",
         "Новая деталь…",
         "Добавить модели…",
         "Добавить папку с моделями…",
@@ -672,7 +672,7 @@ fn start_screen_opens_and_creates() {
     });
     h.run();
     assert!(h.query_by_label("Открыть проект…").is_some());
-    assert!(h.query_by_label("Создать проект…").is_some());
+    assert!(h.query_by_label("Новый проект").is_some());
 
     // Модели в пустое окно: проект создаётся рядом с ними и сразу принимает их.
     let models = dir.path().join("модели");

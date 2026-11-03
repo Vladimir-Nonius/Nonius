@@ -157,7 +157,7 @@ impl eframe::App for App {
         self.watch_window_close(ctx);
         if self.draft_wanted && self.first_run.is_none() && !self.tab.jobs.busy() {
             self.draft_wanted = false;
-            self.new_draft(ctx);
+            self.new_project(ctx);
         }
         // Меню выше вкладок: оно у окна одно на все проекты.
         if self.tab.project.is_some() {

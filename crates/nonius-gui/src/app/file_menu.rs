@@ -43,16 +43,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     app.show_deleted(ctx);
                 }
                 ui.separator();
+                if ui.button(t.new_project).clicked() {
+                    ui.close();
+                    app.new_project(ctx);
+                }
                 if ui.button(t.open_project).clicked() {
                     ui.close();
                     if let Some(dir) = app.chooser.folder(&app.path_input) {
                         app.open(ctx, dir);
-                    }
-                }
-                if ui.button(t.create_project).clicked() {
-                    ui.close();
-                    if let Some(dir) = app.chooser.folder(&app.path_input) {
-                        app.create(ctx, dir, Vec::new());
                     }
                 }
             });

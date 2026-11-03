@@ -36,9 +36,13 @@ impl App {
         self.is_draft(tab) && !tab.parts.is_empty()
     }
 
-    /// Новый черновик в новой вкладке (или в пустой).
-    pub(super) fn new_draft(&mut self, ctx: &egui::Context) {
+    /// «Новый проект»: черновик в новой вкладке (или в пустой), папку
+    /// выбирают потом. Без папки черновиков — сразу спросить папку.
+    pub(super) fn new_project(&mut self, ctx: &egui::Context) {
         let Some(drafts) = self.drafts.clone() else {
+            if let Some(dir) = self.chooser.folder(&self.path_input) {
+                self.create(ctx, dir, Vec::new());
+            }
             return;
         };
         let stamp = SystemTime::now()

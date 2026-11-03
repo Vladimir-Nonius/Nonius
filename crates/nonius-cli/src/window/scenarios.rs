@@ -187,7 +187,7 @@ impl Desk {
         let path = self.dir.join(name);
         std::fs::create_dir(&path).unwrap();
         self.answers.folders.lock().unwrap().push_back(path.clone());
-        self.press("Создать проект…");
+        self.press("Новый проект");
         self.wait("пока нет деталей");
         path
     }
@@ -342,7 +342,7 @@ fn whole_way_of_a_part() {
     let other = d.dir.join("Другой");
     std::fs::create_dir(&other).unwrap();
     d.answers.folders.lock().unwrap().push_back(other);
-    d.menu("Файл", "Создать проект…");
+    d.menu("Файл", "Новый проект");
     d.wait_gone("плита основания");
     d.wait("пока нет деталей");
 }

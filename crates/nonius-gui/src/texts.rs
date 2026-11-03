@@ -9,7 +9,6 @@ pub struct Texts {
     // Начальный экран
     pub no_project: &'static str,
     pub open_project: &'static str,
-    pub create_project: &'static str,
     pub new_tab: &'static str,
     pub close_tab: &'static str,
     pub new_project: &'static str,
@@ -246,7 +245,6 @@ pub const RU: Texts = Texts {
     app_title: "Nonius",
     no_project: "Проект не открыт",
     open_project: "Открыть проект…",
-    create_project: "Создать проект…",
     new_tab: "Новая вкладка",
     close_tab: "Закрыть вкладку",
     new_project: "Новый проект",

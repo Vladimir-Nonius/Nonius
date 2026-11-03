@@ -27,11 +27,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
             }
             ui.add_space(6.0);
-            let create = egui::Button::new(RichText::new(t.create_project).size(16.0));
+            let create = egui::Button::new(RichText::new(t.new_project).size(16.0));
             if ui.add(create).clicked() {
-                if let Some(dir) = app.chooser.folder(&app.path_input) {
-                    app.create(ctx, dir, Vec::new());
-                }
+                app.new_project(ctx);
             }
             ui.add_space(6.0);
             ui.label(RichText::new(t.drop_folder_hint).weak());
