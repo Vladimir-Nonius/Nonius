@@ -66,6 +66,28 @@ pub enum Error {
         path: String,
     },
 
+    /// В детали уже есть файл с таким именем.
+    #[error("в «{item}» уже есть {path}: переименуйте свой файл или уберите старый")]
+    FileExists {
+        /// Деталь.
+        item: String,
+        /// Путь внутри папки детали.
+        path: String,
+    },
+
+    /// Файл модели или служебный файл нельзя убрать руками.
+    #[error("{path} в «{item}» ведёт Nonius: модель меняется новой версией, служебные файлы не убираются")]
+    ProtectedFile {
+        /// Деталь.
+        item: String,
+        /// Путь внутри папки детали.
+        path: String,
+    },
+
+    /// Файл не текстовый: его смотрят программой.
+    #[error("{0} не текстовый файл: откройте его программой (nonius open)")]
+    NotText(String),
+
     /// Система не смогла открыть файл.
     #[error("не удалось открыть {path}: {why}")]
     OpenFailed {
@@ -132,6 +154,11 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("in_use", "файлы детали открыты в другой программе"),
     ("not_deleted", "среди удалённых нет такой детали"),
     ("not_step", "сравнить можно только с файлом STEP"),
+    ("not_text", "файл не текстовый"),
+    (
+        "protected_file",
+        "файл модели или служебный файл не убирается",
+    ),
 ];
 
 impl Error {
@@ -149,6 +176,9 @@ impl Error {
             Self::NoRenderer => "no_renderer",
             Self::BadDensity(_) => "bad_density",
             Self::UnknownFile { .. } => "unknown_file",
+            Self::FileExists { .. } => "already_exists",
+            Self::ProtectedFile { .. } => "protected_file",
+            Self::NotText(_) => "not_text",
             Self::OpenFailed { .. } => "open_failed",
             Self::Cancelled => "cancelled",
             Self::InsideProject { .. } => "inside_project",

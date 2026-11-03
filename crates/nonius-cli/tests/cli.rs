@@ -646,6 +646,9 @@ fn mcp_without_write_changes_nothing() {
         "restore",
         "export",
         "agents",
+        "init",
+        "file_add",
+        "file_remove",
     ];
     let mut messages = vec![
         HELLO(),
@@ -662,6 +665,7 @@ fn mcp_without_write_changes_nothing() {
     }
     assert!(tools.contains("part_deleted"), "чтение есть: {tools}");
     assert!(tools.contains("\"compare\""), "чтение есть: {tools}");
+    assert!(tools.contains("\"show\""), "чтение есть: {tools}");
     for (reply, name) in out[2..].iter().zip(names) {
         let answer = tool_answer(reply);
         assert_eq!(answer["error"]["code"], "unknown_tool", "{name}: {answer}");
@@ -769,4 +773,79 @@ fn versions_are_saved_while_project_is_read() {
     });
     let log = json(d, &["--json", "log", "вал"]);
     assert_eq!(log["data"]["versions"].as_array().unwrap().len(), 6);
+}
+
+/// ИИ сам создаёт проект, кладёт к детали свой файл, читает и убирает его.
+#[test]
+fn ai_creates_project_and_own_files_through_mcp() {
+    use serde_json::json;
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path().join("мастерская");
+    std::fs::create_dir(&d).unwrap();
+    let tech = tmp.path().join("технология.md");
+    std::fs::write(
+        &tech,
+        "# Крюк
+резать лазером
+",
+    )
+    .unwrap();
+    let doc = "docs/технология.md";
+    let root = d.display().to_string();
+    let out = mcp(
+        tmp.path(),
+        &["--write", "-C", &root],
+        &[
+            HELLO(),
+            call(2, "init", json!({ "name": "Мастерская" })),
+            call(3, "part_new", json!({ "name": "крюк" })),
+            call(4, "file_add", json!({ "part": "крюк", "file": tech })),
+            call(5, "show", json!({ "part": "крюк", "file": doc })),
+            call(
+                6,
+                "commit",
+                json!({ "part": "крюк", "message": "технология" }),
+            ),
+            call(7, "file_remove", json!({ "part": "крюк", "file": doc })),
+            call(
+                8,
+                "show",
+                json!({ "part": "крюк", "file": doc, "version": "v1" }),
+            ),
+            call(9, "show", json!({ "part": "крюк", "file": doc })),
+            call(
+                10,
+                "file_remove",
+                json!({ "part": "крюк", "file": "meta.yaml" }),
+            ),
+        ],
+    );
+    assert_eq!(out.len(), 10, "{out:?}");
+    let answers: Vec<_> = out[1..].iter().map(tool_answer).collect();
+    for a in &answers[..7] {
+        assert_eq!(a["ok"], true, "{a}");
+    }
+    assert_eq!(answers[0]["data"]["name"], "Мастерская");
+    assert_eq!(answers[2]["data"]["added"], doc);
+    assert_eq!(
+        answers[3]["data"]["text"],
+        "# Крюк
+резать лазером"
+    );
+    assert_eq!(
+        answers[6]["data"]["text"],
+        "# Крюк
+резать лазером"
+    );
+    assert_eq!(
+        answers[7]["error"]["code"], "unknown_file",
+        "{}",
+        answers[7]
+    );
+    assert_eq!(
+        answers[8]["error"]["code"], "protected_file",
+        "{}",
+        answers[8]
+    );
+    assert!(d.join("parts/крюк/meta.yaml").is_file());
 }

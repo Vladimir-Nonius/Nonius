@@ -24,7 +24,7 @@ use nonius_app::{AiActor, App, GitOptions};
 use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
-use args::{Cli, Command, PartCommand};
+use args::{Cli, Command, FileCommand, PartCommand};
 use commands::{compare, describe, files, history, import, json, mcp, passport, project};
 
 fn main() -> ExitCode {
@@ -163,6 +163,13 @@ fn run(cli: Cli) -> Result<()> {
             to.as_deref(),
             text.as_deref(),
         )?,
+        Command::Show {
+            part,
+            file,
+            version,
+        } => files::show(&app()?, part, file, version.as_deref())?,
+        Command::File(FileCommand::Add { part, file }) => files::add(&app()?, part, file)?,
+        Command::File(FileCommand::Remove { part, file }) => files::remove(&app()?, part, file)?,
         Command::Open {
             part,
             file,

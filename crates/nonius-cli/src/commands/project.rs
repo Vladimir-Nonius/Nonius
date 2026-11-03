@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use nonius_app::{create_project, App, History, ItemState, ItemStatus};
+use nonius_app::{create_project, App, Created, History, ItemState, ItemStatus};
 use nonius_core::extension::Registry;
 use nonius_core::meta::ItemKind;
 
@@ -12,25 +12,42 @@ use crate::format::{kind_word, short_date};
 
 /// `nonius init`: папка — `path`, иначе `-C`, иначе текущая.
 pub fn init(path: Option<&PathBuf>, name: Option<&str>) -> Result<()> {
-    let root = match path {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()?,
-    };
-    let created = create_project(&root, name)?;
+    let created = create(path, name)?;
     println!(
         "Создан проект «{}» в {}",
         created.name,
         created.root.display()
     );
-    match created.history {
-        History::Lfs => println!("История версий включена (git + LFS)."),
-        History::NoLfs => println!(
-            "предупреждение: Git LFS не найден — модели будут храниться прямо в git. \
-             Установите Git LFS (https://git-lfs.com)."
-        ),
-        History::Off(e) => println!("предупреждение: история версий не включена: {e}"),
+    match history_words(&created.history) {
+        (_, Some(warning)) => println!("предупреждение: {warning}"),
+        (_, None) => println!("История версий включена (git + LFS)."),
     }
     Ok(())
+}
+
+/// Создать проект в папке `path`, по умолчанию — в текущей.
+pub fn create(path: Option<&PathBuf>, name: Option<&str>) -> Result<Created> {
+    let root = match path {
+        Some(p) => p.clone(),
+        None => std::env::current_dir()?,
+    };
+    Ok(create_project(&root, name)?)
+}
+
+/// Как ведётся история: слово для программ и предупреждение для человека.
+pub fn history_words(history: &History) -> (&'static str, Option<String>) {
+    match history {
+        History::Lfs => ("lfs", None),
+        History::NoLfs => (
+            "git",
+            Some(
+                "Git LFS не найден — модели будут храниться прямо в git. \
+                 Установите Git LFS (https://git-lfs.com)."
+                    .into(),
+            ),
+        ),
+        History::Off(e) => ("off", Some(format!("история версий не включена: {e}"))),
+    }
 }
 
 /// Сборка или деталь по ключу `--assembly`.
