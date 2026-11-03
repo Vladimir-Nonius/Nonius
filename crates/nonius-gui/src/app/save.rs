@@ -50,7 +50,7 @@ impl SaveDialog {
 /// Нарисовать окошко, если оно открыто.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
-    let Some(dialog) = app.save.as_ref() else {
+    let Some(dialog) = app.tab.save.as_ref() else {
         return;
     };
     let (next, part) = (dialog.next, dialog.part.clone());
@@ -58,7 +58,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let mut save = false;
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::new("save-version")).show(ctx, |ui| {
-        let Some(d) = app.save.as_mut() else {
+        let Some(d) = app.tab.save.as_mut() else {
             return;
         };
         ui.set_width(520.0);
@@ -129,9 +129,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         });
     });
     // Esc или щелчок мимо — закрыть, пока версия не сохраняется.
-    let saving = app.save.as_ref().is_some_and(|d| d.saving);
+    let saving = app.tab.save.as_ref().is_some_and(|d| d.saving);
     if (close || modal.should_close()) && !saving {
-        app.save = None;
+        app.tab.save = None;
     } else if save {
         app.save_version(ctx);
     }
@@ -155,9 +155,9 @@ fn own_files(files: &[String]) -> Vec<&str> {
 /// Что изменилось с последней версией — если на экране как раз это сравнение.
 fn summary(app: &App, part: &str) -> Option<Vec<(String, Option<Color32>)>> {
     let t = texts();
-    let latest = app.versions.first()?.number;
+    let latest = app.tab.versions.first()?.number;
     let picks = (Pick::Version(latest), Pick::Current);
-    if app.shown.as_ref() != Some(&(part.to_string(), picks)) {
+    if app.tab.shown.as_ref() != Some(&(part.to_string(), picks)) {
         return None;
     }
     let mut lines = vec![(format!("{} v{latest}:", t.compared_with), None)];
@@ -179,7 +179,7 @@ fn summary(app: &App, part: &str) -> Option<Vec<(String, Option<Color32>)>> {
             }
         }
     }
-    if let Some((p, [before, after, _])) = &app.masses {
+    if let Some((p, [before, after, _])) = &app.tab.masses {
         if *p == picks {
             if let (Some(a), Some(b)) = (before.mass_kg, after.mass_kg) {
                 lines.push((

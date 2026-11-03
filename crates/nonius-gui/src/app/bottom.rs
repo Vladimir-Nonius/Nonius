@@ -32,11 +32,11 @@ struct Row {
 
 /// Нарисовать панель вкладок.
 pub fn show(app: &mut App, ctx: &egui::Context) {
-    if app.part.is_none() {
+    if app.tab.part.is_none() {
         return;
     }
     let t = texts();
-    let open = app.tab.is_some();
+    let open = app.tab.panel.is_some();
     // Свёрнутая панель — другая: иначе она вспомнит высоту развёрнутой.
     let id = if open { "tabs" } else { "tabs-closed" };
     egui::TopBottomPanel::bottom(id)
@@ -51,12 +51,15 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 for (tab, label) in [(Tab::Files, t.tab_files), (Tab::Numbers, t.tab_numbers)] {
-                    if ui.selectable_label(app.tab == Some(tab), label).clicked() {
-                        app.tab = (app.tab != Some(tab)).then_some(tab);
+                    if ui
+                        .selectable_label(app.tab.panel == Some(tab), label)
+                        .clicked()
+                    {
+                        app.tab.panel = (app.tab.panel != Some(tab)).then_some(tab);
                     }
                 }
             });
-            match app.tab {
+            match app.tab.panel {
                 Some(Tab::Files) => {
                     ui.separator();
                     super::files::show(app, ui);
@@ -78,10 +81,10 @@ fn numbers(app: &App, ui: &mut egui::Ui) {
         return;
     }
     // Одна версия: столбцов «Было» и «Стало» нет, сравнивать не с чем.
-    let single = app.picks.0 == app.picks.1 && app.outside.is_none();
-    let (before, after) = match &app.outside {
-        Some(other) => (pick_label(app.picks.1), other.clone()),
-        None => (pick_label(app.picks.0), pick_label(app.picks.1)),
+    let single = app.tab.picks.0 == app.tab.picks.1 && app.tab.outside.is_none();
+    let (before, after) = match &app.tab.outside {
+        Some(other) => (pick_label(app.tab.picks.1), other.clone()),
+        None => (pick_label(app.tab.picks.0), pick_label(app.tab.picks.1)),
     };
     egui::ScrollArea::vertical()
         .id_salt("numbers-tab")
@@ -121,8 +124,8 @@ fn numbers(app: &App, ui: &mut egui::Ui) {
 fn rows(app: &App) -> Vec<Row> {
     let t = texts();
     let mut rows = Vec::new();
-    let masses = app.masses.as_ref().filter(|m| m.0 == app.picks);
-    if let Some((_, [before, after, _])) = masses.filter(|_| app.outside.is_none()) {
+    let masses = app.tab.masses.as_ref().filter(|m| m.0 == app.tab.picks);
+    if let Some((_, [before, after, _])) = masses.filter(|_| app.tab.outside.is_none()) {
         let material = |m: &MassEntry| m.material.clone().unwrap_or_else(|| "—".to_string());
         rows.push(Row {
             name: t.material.to_string(),
@@ -148,7 +151,7 @@ fn rows(app: &App) -> Vec<Row> {
             delta,
         });
     }
-    if let Some(c) = &app.comparison {
+    if let Some(c) = &app.tab.comparison {
         rows.extend(c.reports.iter().flat_map(|r| &r.changes).map(change_row));
     }
     rows

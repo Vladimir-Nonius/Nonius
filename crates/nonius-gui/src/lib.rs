@@ -9,7 +9,7 @@ pub mod source;
 pub mod texts;
 pub mod view;
 
-pub use app::{App, Options, Settings, SystemChooser};
+pub use app::{drafts_dir, App, Options, Settings, SystemChooser};
 
 use eframe::egui;
 

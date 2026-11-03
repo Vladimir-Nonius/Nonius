@@ -43,11 +43,12 @@ pub struct VersionEntry {
 }
 
 /// Какую версию показать.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Pick {
     /// Сохранённая версия.
     Version(u32),
     /// То, что сейчас лежит в папке детали.
+    #[default]
     Current,
 }
 
@@ -336,6 +337,13 @@ pub trait ProjectSource: Send + Sync {
 /// Открывает или создаёт проект по папке: «Открыть проект…», «Создать
 /// проект…», перетаскивание.
 pub type Opener = Arc<dyn Fn(&Path) -> anyhow::Result<Box<dyn ProjectSource>> + Send + Sync>;
+
+/// Переносит закрытый проект из первой папки во вторую: «Сохранить проект как…».
+pub type Mover = Arc<dyn Fn(&Path, &Path) -> anyhow::Result<()> + Send + Sync>;
+
+/// Убирает папку несохранённого черновика с деталями: в программе — в
+/// Корзину, откуда её можно вернуть.
+pub type Discard = Arc<dyn Fn(&Path) -> anyhow::Result<()> + Send + Sync>;
 
 /// Что сравнить по умолчанию: изменённое — с последней версией; иначе —
 /// последнюю с предпоследней; одна версия — её саму. Версий нет — сравнивать

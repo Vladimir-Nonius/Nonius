@@ -119,7 +119,9 @@ jobs:
             "oleaut32.dll", "userenv.dll", "secur32.dll", "crypt32.dll", "shlwapi.dll", "comdlg32.dll",
             # окно: ввод текста, оформление, специальные возможности, видеокарта (DirectX 12 / OpenGL)
             "imm32.dll", "dwmapi.dll", "uxtheme.dll", "uiautomationcore.dll", "comctl32.dll",
-            "opengl32.dll", "d3d12.dll", "dxgi.dll", "d3dcompiler_47.dll"
+            "opengl32.dll", "d3d12.dll", "dxgi.dll", "d3dcompiler_47.dll",
+            # Корзина: «Не сохранять» у черновика (COM, часть Windows)
+            "combase.dll"
           $foreign = $dlls | Where-Object { $_ -notin $system -and $_ -notlike "api-ms-win-core-*" }
           if (-not $dlls) { Write-Error "не удалось прочитать список DLL"; exit 1 }
           if ($foreign) { Write-Error "nonius.exe требует сторонние DLL: $($foreign -join ', ')"; exit 1 }

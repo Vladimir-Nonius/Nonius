@@ -20,25 +20,26 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     egui::SidePanel::left("parts")
         .default_width(250.0)
         .show(ctx, |ui| {
-            if let Some(p) = &app.project {
+            if let Some(p) = &app.tab.project {
                 ui.add_space(6.0);
                 ui.heading(p.title());
             }
-            let search = egui::TextEdit::singleline(&mut app.search)
+            let search = egui::TextEdit::singleline(&mut app.tab.search)
                 .hint_text(t.search_parts)
                 .desired_width(f32::INFINITY);
             ui.add(search);
             ui.separator();
-            if app.parts.is_empty() && !app.jobs.busy() {
+            if app.tab.parts.is_empty() && !app.tab.jobs.busy() {
                 ui.label(RichText::new(t.no_parts).weak());
             }
             let found: Vec<PartEntry> = app
+                .tab
                 .parts
                 .iter()
-                .filter(|p| matches(&p.name, &app.search))
+                .filter(|p| matches(&p.name, &app.tab.search))
                 .cloned()
                 .collect();
-            if found.is_empty() && !app.parts.is_empty() {
+            if found.is_empty() && !app.tab.parts.is_empty() {
                 ui.label(RichText::new(t.nothing_found).weak());
             }
             egui::ScrollArea::vertical()
@@ -46,26 +47,26 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     for p in &found {
-                        let selected = app.part.as_ref() == Some(&p.name);
-                        let open = app.expanded.contains(&p.name);
+                        let selected = app.tab.part.as_ref() == Some(&p.name);
+                        let open = app.tab.expanded.contains(&p.name);
                         ui.horizontal(|ui| {
                             let arrow = if open { "▾" } else { "▸" };
                             let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
                             let r = part_row(ui, p, selected);
                             if toggle && open {
-                                app.expanded.remove(&p.name);
+                                app.tab.expanded.remove(&p.name);
                             } else if toggle {
-                                app.expanded.insert(p.name.clone());
+                                app.tab.expanded.insert(p.name.clone());
                                 if !selected {
                                     unfolded = Some(p.name.clone());
                                 }
                             } else if r.clicked() && selected {
-                                app.expanded.insert(p.name.clone());
+                                app.tab.expanded.insert(p.name.clone());
                             } else if r.clicked() || (r.secondary_clicked() && !selected) {
                                 // Правый щелчок тоже выделяет: видно, к чему меню.
                                 clicked = Some(p.name.clone());
                             }
-                            open_menu::attach(&r, &app.programs, || target(p), &mut asked);
+                            open_menu::attach(&r, &app.tab.programs, || target(p), &mut asked);
                         });
                         if open {
                             ui.indent(&p.name, |ui| super::history::show(app, ui, p));
@@ -85,11 +86,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 impl App {
     /// Раскрыть деталь в дереве, не выбирая её.
     pub(super) fn list_versions(&mut self, ctx: &egui::Context, name: &str) {
-        let Some(project) = self.project.clone() else {
+        let Some(project) = self.tab.project.clone() else {
             return;
         };
         let name = name.to_string();
-        self.jobs.spawn(ctx, move |_| {
+        self.tab.jobs.spawn(ctx, move |_| {
             let v = project.versions(&name);
             Done::Listed(name, v)
         });
@@ -97,18 +98,19 @@ impl App {
 
     /// Новый список деталей: раскрытые, что изменились, перечитать.
     pub(super) fn set_parts(&mut self, ctx: &egui::Context, parts: Vec<PartEntry>) {
-        let old = std::mem::replace(&mut self.parts, parts);
-        let names = self.parts.iter().map(|p| p.name.clone());
+        let old = std::mem::replace(&mut self.tab.parts, parts);
+        let names = self.tab.parts.iter().map(|p| p.name.clone());
         let names: std::collections::BTreeSet<String> = names.collect();
-        self.expanded.retain(|n| names.contains(n));
-        self.listed.retain(|n, _| names.contains(n));
+        self.tab.expanded.retain(|n| names.contains(n));
+        self.tab.listed.retain(|n, _| names.contains(n));
         let stale: Vec<String> = self
+            .tab
             .expanded
             .iter()
-            .filter(|n| Some(*n) != self.part.as_ref())
+            .filter(|n| Some(*n) != self.tab.part.as_ref())
             .filter(|n| {
                 let entry = |list: &[PartEntry]| list.iter().find(|p| p.name == **n).cloned();
-                entry(&old) != entry(&self.parts)
+                entry(&old) != entry(&self.tab.parts)
             })
             .cloned()
             .collect();

@@ -6,7 +6,9 @@
 
 mod actions;
 mod add_model;
+mod bottom;
 mod choose;
+mod draft;
 mod dropped;
 mod file_menu;
 mod files;
@@ -23,29 +25,26 @@ mod open_menu;
 mod panels;
 mod part_actions;
 mod part_dialogs;
+mod project_tab;
 mod results;
 mod save;
 mod settings;
 mod start;
-mod tabs;
+mod strip;
 mod toolbar;
 mod tree;
 
-use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui;
 
-use crate::source::{
-    Chooser, Comparison, DiffEntry, FileEntry, Machine, MassEntry, MaterialEntry, Opener,
-    PartEntry, Pick, ProjectSource, VersionEntry,
-};
+use crate::source::{Chooser, Discard, Machine, Mover, Opener, Pick, ProjectSource};
 use crate::texts::texts;
 use crate::view::{Look, Mode, Viewport, ViewportEvent};
 pub use choose::SystemChooser;
-use jobs::Jobs;
-pub use settings::Settings;
+use project_tab::ProjectTab;
+pub use settings::{drafts_dir, Settings};
 
 /// С чем открыть окно.
 pub struct Options {
@@ -63,6 +62,12 @@ pub struct Options {
     pub part: Option<String>,
     /// И сразу сравнить эти версии.
     pub picks: Option<(Pick, Pick)>,
+    /// Папка черновиков; `None` — без черновиков, начальный экран.
+    pub drafts: Option<PathBuf>,
+    /// Как перенести черновик в настоящую папку.
+    pub mover: Mover,
+    /// Как убрать черновик, который решили не сохранять.
+    pub discard: Discard,
 }
 
 /// Состояние окна.
@@ -70,73 +75,34 @@ pub struct App {
     opener: Opener,
     creator: Opener,
     chooser: Arc<dyn Chooser>,
-    project: Option<Arc<dyn ProjectSource>>,
-    parts: Vec<PartEntry>,
-    programs: open_menu::Programs,
-    part: Option<String>,
-    versions: Vec<VersionEntry>,
-    picks: (Pick, Pick),
-    want: Option<(String, Option<(Pick, Pick)>)>,
-    comparison: Option<Comparison>,
-    shown: Option<(String, (Pick, Pick))>,
-    /// Деталь, под которую настроена камера: её вид не сбрасывается.
-    framed: Option<String>,
+    /// Открытая вкладка проекта.
+    tab: ProjectTab,
+    /// Все вкладки по порядку; на месте открытой (`at`) — пустышка.
+    tabs: Vec<ProjectTab>,
+    at: usize,
     viewport: Viewport,
     mode: Mode,
     look: Look,
     settings: Settings,
-    selected: Option<usize>,
-    jobs: Jobs,
-    /// Ошибка — показывается в строке состояния, пока не выбрали другое.
-    message: Option<String>,
-    /// Что получилось: «Сохранена версия …», «Сравнение отменено».
-    notice: Option<String>,
-    /// Что сказать, когда деталь будет показана.
-    sticky: Option<String>,
     path_input: String,
-    /// Строка поиска в дереве.
-    search: String,
-    /// Раскрытые в дереве детали.
-    expanded: BTreeSet<String>,
-    /// Версии раскрытых деталей, кроме выбранной.
-    listed: HashMap<String, Vec<VersionEntry>>,
-    /// С чем сравнивается деталь вне истории: имя файла или детали.
-    outside: Option<String>,
-    /// Открытое окошко действия над деталью.
-    dialog: Option<part_dialogs::Dialog>,
-    materials: Vec<MaterialEntry>,
-    /// Материал и масса для пары версий: «Было», «Стало», сейчас.
-    masses: Option<((Pick, Pick), [MassEntry; 3])>,
-    /// Открытое окошко «Сохранить версию».
-    save: Option<save::SaveDialog>,
-    /// Открытое окошко «Новая деталь».
-    new_part: Option<new_part::NewPart>,
-    /// Открытое окошко «Добавить модель».
-    add: Option<add_model::AddModel>,
     /// Модели бросили в пустое окно: создать проект в этой папке?
     new_here: Option<(PathBuf, Vec<PathBuf>)>,
-    /// Что добавить, когда откроется новый проект.
-    after_open: Vec<PathBuf>,
     /// Окошко первого запуска.
     first_run: Option<first_run::FirstRun>,
     /// Git есть, а Git LFS нет.
     no_lfs: bool,
     /// Окно было в фокусе в прошлом кадре.
     was_focused: bool,
-    /// Вернулись в окно: перечитать детали, как только оно освободится.
-    reread_wanted: bool,
-    /// Ввод своего материала.
-    custom: material::Custom,
-    /// Материал записывается — список выбора ждёт.
-    material_busy: bool,
-    /// Открытая вкладка под 3D; `None` — панель свёрнута.
-    tab: Option<tabs::Tab>,
-    /// Файлы для пары версий.
-    files: Option<((Pick, Pick), Vec<FileEntry>)>,
-    /// Выбранный файл на вкладке «Файлы».
-    file: Option<String>,
-    /// Строки выбранного текстового файла.
-    file_text: Option<Vec<DiffEntry>>,
+    /// Папка черновиков.
+    drafts: Option<PathBuf>,
+    mover: Mover,
+    discard: Discard,
+    /// Создать черновик, как только окно будет готово.
+    draft_wanted: bool,
+    /// Окошко «Проект не сохранён».
+    closing: Option<draft::Closing>,
+    /// Пользователь согласился потерять черновики: окно закрывается.
+    may_close: bool,
 }
 
 impl App {
@@ -157,58 +123,31 @@ impl App {
             opener: options.opener,
             creator: options.creator,
             chooser: options.chooser,
-            project: None,
-            parts: Vec::new(),
-            programs: Default::default(),
-            part: None,
-            versions: Vec::new(),
-            picks: (Pick::Current, Pick::Current),
-            want: None,
-            comparison: None,
-            shown: None,
-            framed: None,
+            tab: ProjectTab::default(),
+            tabs: vec![ProjectTab::default()],
+            at: 0,
             viewport: Viewport::new(render),
             mode: Mode::Changes,
             look,
-            selected: None,
-            jobs: Jobs::default(),
-            message: None,
-            notice: None,
-            sticky: None,
             path_input: String::new(),
-            search: String::new(),
-            expanded: BTreeSet::new(),
-            listed: HashMap::new(),
-            outside: None,
-            dialog: None,
-            materials: Vec::new(),
-            masses: None,
-            save: None,
-            new_part: None,
-            add: None,
             new_here: None,
-            after_open: Vec::new(),
             first_run: first_run::FirstRun::check(options.machine, ready),
             no_lfs: ready.git && !ready.lfs,
             was_focused: true,
-            reread_wanted: false,
-            custom: material::Custom::default(),
-            material_busy: false,
-            tab: None,
-            files: None,
-            file: None,
-            file_text: None,
+            drafts: options.drafts,
+            mover: options.mover,
+            discard: options.discard,
+            draft_wanted: false,
+            closing: None,
+            may_close: false,
             settings,
         };
-        match options.project {
-            Some(p) => app.set_project(ctx, p),
-            None => {
-                if let Some(last) = app.settings.last_project.clone().filter(|p| p.is_dir()) {
-                    app.open(ctx, last);
-                }
-            }
+        app.restore_tabs(ctx);
+        if let Some(p) = options.project {
+            app.got_project(ctx, p);
         }
-        app.want = options.part.map(|p| (p, options.picks));
+        app.draft_wanted = app.drafts.is_some() && app.tab.project.is_none();
+        app.tab.want = options.part.map(|p| (p, options.picks));
         app
     }
 }
@@ -219,18 +158,30 @@ impl eframe::App for App {
         self.take_dropped(ctx);
         self.notice_focus(ctx);
         first_run::show(self, ctx);
+        self.watch_window_close(ctx);
+        if self.draft_wanted && self.first_run.is_none() && !self.tab.jobs.busy() {
+            self.draft_wanted = false;
+            self.new_project(ctx);
+        }
+        // Меню выше вкладок: оно у окна одно на все проекты.
+        if self.tab.project.is_some() {
+            file_menu::show(self, ctx);
+        }
+        self.move_when_free(ctx);
+        strip::show(self, ctx);
+        draft::bar(self, ctx);
+        draft::ask(self, ctx);
 
-        if self.project.is_none() {
+        if self.tab.project.is_none() {
             start::show(self, ctx);
             return;
         }
-        file_menu::show(self, ctx);
         panels::error_bar(self, ctx);
         panels::status_bar(self, ctx);
         map::show(self, ctx);
         tree::show(self, ctx);
         panels::changes(self, ctx);
-        tabs::show(self, ctx);
+        bottom::show(self, ctx);
         save::show(self, ctx);
         new_part::show(self, ctx);
         add_model::show(self, ctx);
@@ -245,11 +196,11 @@ impl eframe::App for App {
                     ui,
                     self.mode,
                     &self.look,
-                    self.selected,
+                    self.tab.selected,
                     self.settings.wheel_reverse,
                 );
                 if let Some(ViewportEvent::Picked(place)) = event {
-                    self.selected = place;
+                    self.tab.selected = place;
                 }
                 panels::overlay(self, ui);
             });

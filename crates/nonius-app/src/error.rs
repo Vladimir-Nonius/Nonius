@@ -79,6 +79,10 @@ pub enum Error {
         path: String,
     },
 
+    /// Проект переносится в папку, где уже что-то лежит.
+    #[error("папка {} не пуста: выберите пустую или создайте новую", .0.display())]
+    FolderNotEmpty(std::path::PathBuf),
+
     /// В детали уже есть файл с таким именем.
     #[error("в «{item}» уже есть {path}: переименуйте свой файл или уберите старый")]
     FileExists {
@@ -144,7 +148,10 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ),
     ("invalid_name", "недопустимое имя детали или версии"),
     ("not_a_project", "здесь нет проекта Nonius"),
-    ("already_exists", "такая деталь или файл уже есть"),
+    (
+        "already_exists",
+        "такая деталь, файл или непустая папка уже есть",
+    ),
     ("module", "ошибка модуля"),
     ("git_missing", "не установлен git"),
     ("git_identity", "git не знает имя автора"),
@@ -196,7 +203,7 @@ impl Error {
             Self::UnknownMaterial { .. } => "unknown_material",
             Self::UnknownFile { .. } => "unknown_file",
             Self::LatestVersion(_) => "latest_version",
-            Self::FileExists { .. } => "already_exists",
+            Self::FileExists { .. } | Self::FolderNotEmpty(_) => "already_exists",
             Self::ProtectedFile { .. } => "protected_file",
             Self::NotText(_) => "not_text",
             Self::OpenFailed { .. } => "open_failed",

@@ -76,6 +76,12 @@ pub fn open(
         chooser: Arc::new(nonius_gui::SystemChooser),
         part: part.map(str::to_string),
         picks,
+        drafts: nonius_gui::drafts_dir(),
+        mover: Arc::new(|from: &Path, to: &Path| {
+            nonius_app::move_project(from, to).map_err(|e| plainly(e.into()))
+        }),
+        // Не сохранённый черновик — в Корзину: правило «ничего не удаляется».
+        discard: Arc::new(|dir: &Path| Ok(trash::delete(dir)?)),
     })
 }
 

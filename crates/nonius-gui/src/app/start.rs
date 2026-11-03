@@ -16,7 +16,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.add_space(ui.available_height() * 0.3);
             ui.heading(RichText::new(t.no_project).size(24.0));
             ui.add_space(16.0);
-            if app.jobs.busy() {
+            if app.tab.jobs.busy() {
                 ui.spinner();
                 return;
             }
@@ -27,11 +27,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
             }
             ui.add_space(6.0);
-            let create = egui::Button::new(RichText::new(t.create_project).size(16.0));
+            let create = egui::Button::new(RichText::new(t.new_project).size(16.0));
             if ui.add(create).clicked() {
-                if let Some(dir) = app.chooser.folder(&app.path_input) {
-                    app.create(ctx, dir, Vec::new());
-                }
+                app.new_project(ctx);
             }
             ui.add_space(6.0);
             ui.label(RichText::new(t.drop_folder_hint).weak());
@@ -51,7 +49,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     }
                 });
             }
-            if let Some(m) = &app.message {
+            if let Some(m) = &app.tab.message {
                 ui.add_space(12.0);
                 ui.label(RichText::new(m).color(ui.visuals().warn_fg_color));
             }

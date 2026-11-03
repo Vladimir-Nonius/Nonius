@@ -28,20 +28,21 @@ enum Choice {
 /// Нарисовать блок.
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
-    if app.part.is_none() || app.versions.is_empty() && !app.part_dirty() {
+    if app.tab.part.is_none() || app.tab.versions.is_empty() && !app.part_dirty() {
         return;
     }
     ui.add_space(8.0);
     ui.label(RichText::new(t.material_mass).strong())
         .on_hover_text(t.material_hint);
-    let Some((picks, [before, after, now])) = app.masses.clone().filter(|m| m.0 == app.picks)
+    let Some((picks, [before, after, now])) =
+        app.tab.masses.clone().filter(|m| m.0 == app.tab.picks)
     else {
         ui.spinner();
         return;
     };
-    let catalog = catalog_entry(&app.materials, &now);
+    let catalog = catalog_entry(&app.tab.materials, &now);
     let mut choice = None;
-    let busy = app.material_busy;
+    let busy = app.tab.material_busy;
     egui::Grid::new("material").num_columns(2).show(ui, |ui| {
         ui.label(RichText::new(t.material).weak());
         let shown = now
@@ -60,7 +61,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     {
                         choice = Some(Choice::Clear);
                     }
-                    for m in &app.materials {
+                    for m in &app.tab.materials {
                         let text = format!("{}   {}", m.name, density_text(m.density_kg_m3));
                         let on = catalog.is_some_and(|c| c.name == m.name);
                         if ui.selectable_label(on, text).clicked() {
@@ -92,15 +93,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     match choice {
         Some(Choice::Catalog(name)) => {
-            app.custom.open = false;
+            app.tab.custom.open = false;
             app.set_material(&ctx, Some((name, None)));
         }
         Some(Choice::Clear) => {
-            app.custom.open = false;
+            app.tab.custom.open = false;
             app.set_material(&ctx, None);
         }
         Some(Choice::Custom) => {
-            let c = &mut app.custom;
+            let c = &mut app.tab.custom;
             c.open = true;
             c.error = None;
             c.name = now.material.clone().unwrap_or_default();
@@ -111,7 +112,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         }
         None => {}
     }
-    if app.custom.open {
+    if app.tab.custom.open {
         custom(app, ui);
     }
 }
@@ -162,7 +163,7 @@ fn no_mass_text(after: Pick, why: String) -> String {
 fn custom(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
     let mut apply = false;
-    let c = &mut app.custom;
+    let c = &mut app.tab.custom;
     ui.horizontal(|ui| {
         ui.add(
             egui::TextEdit::singleline(&mut c.name)

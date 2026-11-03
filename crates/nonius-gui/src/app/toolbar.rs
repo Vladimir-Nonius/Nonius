@@ -17,7 +17,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 let ctx = ui.ctx().clone();
-                if app.part.is_some() {
+                if app.tab.part.is_some() {
                     match app.outside_title() {
                         Some(title) => {
                             ui.label(RichText::new(title).strong());
@@ -69,13 +69,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 /// Выбор «Было» и «Стало».
 fn versions(app: &mut App, ui: &mut egui::Ui) {
     let t = texts();
-    if app.versions.is_empty() {
+    if app.tab.versions.is_empty() {
         ui.label(RichText::new(t.no_versions).weak());
         return;
     }
     let dirty = app.part_dirty();
     // Одна версия: выбирать не из чего.
-    if let ([v], false) = (app.versions.as_slice(), dirty) {
+    if let ([v], false) = (app.tab.versions.as_slice(), dirty) {
         ui.label(format!("v{} · {} · {}", v.number, v.date, v.author));
         return;
     }
@@ -83,17 +83,17 @@ fn versions(app: &mut App, ui: &mut egui::Ui) {
     if dirty {
         choices.push((Pick::Current, t.current.to_string()));
     }
-    for v in &app.versions {
+    for v in &app.tab.versions {
         let mut text = format!("v{} · {} · {}", v.number, v.date, v.author);
         if !v.summary.is_empty() {
             text = format!("{text} — {}", v.summary);
         }
         choices.push((Pick::Version(v.number), text));
     }
-    let old = app.picks;
+    let old = app.tab.picks;
     for (label, pick, id) in [
-        (t.before, &mut app.picks.0, "before"),
-        (t.after, &mut app.picks.1, "after"),
+        (t.before, &mut app.tab.picks.0, "before"),
+        (t.after, &mut app.tab.picks.1, "after"),
     ] {
         ui.label(label);
         egui::ComboBox::from_id_salt(id)
@@ -108,7 +108,7 @@ fn versions(app: &mut App, ui: &mut egui::Ui) {
                 }
             });
     }
-    if app.picks != old {
+    if app.tab.picks != old {
         let ctx = ui.ctx().clone();
         app.compare(&ctx);
     }
@@ -117,10 +117,10 @@ fn versions(app: &mut App, ui: &mut egui::Ui) {
 /// Сохранить то, что сейчас видно в 3D, в PNG.
 pub fn save_picture(app: &mut App) {
     let t = texts();
-    let Some(part) = app.part.clone() else {
+    let Some(part) = app.tab.part.clone() else {
         return;
     };
-    let name = picture_name(&part, app.picks);
+    let name = picture_name(&part, app.tab.picks);
     let Some(path) = app.chooser.picture(&name) else {
         return;
     };
@@ -130,7 +130,7 @@ pub fn save_picture(app: &mut App) {
         .and_then(|img| img.ok_or_else(|| anyhow::anyhow!("{}", t.no_scene)))
         .and_then(|img| img.save_png(&path));
     match result {
-        Ok(()) => app.notice = Some(format!("{}: {}", t.picture_saved, path.display())),
-        Err(e) => app.message = Some(format!("{}: {e:#}", t.error)),
+        Ok(()) => app.tab.notice = Some(format!("{}: {}", t.picture_saved, path.display())),
+        Err(e) => app.tab.message = Some(format!("{}: {e:#}", t.error)),
     }
 }
