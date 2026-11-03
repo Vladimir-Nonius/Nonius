@@ -172,18 +172,7 @@ pub fn bar(app: &mut App, ctx: &egui::Context) {
         return;
     }
     let t = texts();
-    // Светло-жёлтая полоса, в тёмной теме — тёмно-жёлтая.
-    let (fill, text) = if ctx.style().visuals.dark_mode {
-        (
-            egui::Color32::from_rgb(74, 60, 20),
-            egui::Color32::from_rgb(250, 220, 140),
-        )
-    } else {
-        (
-            egui::Color32::from_rgb(255, 240, 190),
-            egui::Color32::from_rgb(110, 75, 0),
-        )
-    };
+    let (fill, text) = super::upgrade::bar_colors(ctx);
     egui::TopBottomPanel::top("draft-bar")
         .frame(egui::Frame::side_top_panel(&ctx.style()).fill(fill))
         .show(ctx, |ui| {

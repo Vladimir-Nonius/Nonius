@@ -323,6 +323,15 @@ impl ProjectSource for AppSource {
     ) -> Result<Comparison> {
         self.compare_with(part, pick, other, progress)
     }
+
+    fn old_layout(&self) -> bool {
+        self.app.is_old_layout()
+    }
+
+    fn upgrade(&self) -> Result<()> {
+        let _files = self.writing();
+        self.app.upgrade().map_err(in_words)
+    }
 }
 
 #[cfg(test)]

@@ -39,6 +39,7 @@ impl App {
     /// расширения; деталь создаётся, если её нет) и обновить паспорт.
     /// Материал и плотность сохраняются, масса пересчитывается по новому объёму.
     pub fn import(&self, file: &Path, part: Option<&str>) -> Result<Imported> {
+        self.project.writable()?;
         if !file.is_file() {
             return Err(Error::FileNotFound(file.to_path_buf()));
         }

@@ -45,11 +45,7 @@ pub fn from_str<T: Versioned>(text: &str, path: &Path) -> Result<T> {
     };
     let mut doc: Value = serde_yaml::from_str(text).map_err(yaml_err)?;
 
-    let found = doc
-        .get("schema")
-        .and_then(Value::as_u64)
-        .and_then(|v| u32::try_from(v).ok())
-        .unwrap_or(0);
+    let found = schema_of(&doc);
     if found == 0 || found > T::CURRENT {
         return Err(Error::UnsupportedSchema {
             path: path.to_path_buf(),
@@ -73,6 +69,19 @@ pub fn from_str<T: Versioned>(text: &str, path: &Path) -> Result<T> {
     }
 
     serde_yaml::from_value(doc).map_err(yaml_err)
+}
+
+/// Схема, записанная в тексте файла; 0 — не разобрать. Нужна тому, кто
+/// решает по старой схеме что-то сверх полей: [`load`] поднимает её молча.
+pub fn version_in(text: &str) -> u32 {
+    serde_yaml::from_str(text).map_or(0, |doc| schema_of(&doc))
+}
+
+fn schema_of(doc: &Value) -> u32 {
+    doc.get("schema")
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(0)
 }
 
 /// Записать файл данных. Порядок полей стабильный, чтобы diff был чистым.

@@ -73,4 +73,8 @@ pub(super) struct ProjectTab {
     pub file_text: Option<Vec<DiffEntry>>,
     /// Черновик сохраняется в эту папку, как только вкладка освободится.
     pub save_to: Option<PathBuf>,
+    /// Проект старого формата только что открыт: спросить, обновить ли.
+    pub ask_upgrade: bool,
+    /// Проект обновляется, как только вкладка освободится.
+    pub upgrading: bool,
 }

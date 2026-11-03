@@ -47,13 +47,13 @@ fn store_feeds_the_window() {
     let app = App::open(d, registry()).unwrap();
     app.import(&step, None).unwrap();
     app.save_version("кронштейн", "Первая").unwrap();
-    let meta = d.join("parts").join("кронштейн").join("meta.yaml");
+    let meta = d.join("кронштейн").join("meta.yaml");
     let text = std::fs::read_to_string(&meta).unwrap() + "material: Ст3\n";
     std::fs::write(&meta, text).unwrap();
     app.save_version("кронштейн", "Материал").unwrap();
 
     // Из подпапки проекта — тоже находится.
-    let src = AppSource::open(&d.join("parts")).unwrap();
+    let src = AppSource::open(&d.join("notes")).unwrap();
     assert_eq!(src.title(), "Станок");
     let parts = src.parts().unwrap();
     assert_eq!(parts.len(), 1);
@@ -210,7 +210,7 @@ fn model_first_then_colors() {
     assert!(two.reports.iter().any(|r| !r.changes.is_empty()));
 
     // Заметка не сбрасывает расчёт: результат тот же и из кэша.
-    let docs = d.join("parts").join("плита").join("docs");
+    let docs = d.join("плита").join("docs");
     std::fs::write(docs.join("заметка.md"), "сверлить").unwrap();
     let said = Said::default();
     let again = src
@@ -259,7 +259,7 @@ fn broken_model_changes_nothing() {
     let parts = src.parts().unwrap();
     assert_eq!(parts.len(), 1, "деталь-призрак: {parts:?}");
     assert!(!parts[0].dirty, "рабочая модель цела");
-    let model = d.join("parts").join("пластина").join("model.step");
+    let model = d.join("пластина").join("model.step");
     assert_eq!(std::fs::read_to_string(model).unwrap(), STEP);
 }
 
@@ -268,7 +268,7 @@ fn no_project_inside_a_project() {
     let tmp = tempfile::tempdir().unwrap();
     let d = tmp.path();
     nonius_app::create_project(d, Some("Станок")).unwrap();
-    let inner = d.join("parts");
+    let inner = d.join("notes");
     let e = nonius_app::create_project(&inner, None).unwrap_err();
     assert_eq!(e.code(), "inside_project");
     assert!(e.to_string().contains("Станок"), "{e}");

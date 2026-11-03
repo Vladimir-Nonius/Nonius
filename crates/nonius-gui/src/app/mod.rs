@@ -33,6 +33,7 @@ mod start;
 mod strip;
 mod toolbar;
 mod tree;
+mod upgrade;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -168,9 +169,12 @@ impl eframe::App for App {
             file_menu::show(self, ctx);
         }
         self.move_when_free(ctx);
+        self.upgrade_when_free(ctx);
         strip::show(self, ctx);
         draft::bar(self, ctx);
+        upgrade::bar(self, ctx);
         draft::ask(self, ctx);
+        upgrade::ask(self, ctx);
 
         if self.tab.project.is_none() {
             start::show(self, ctx);

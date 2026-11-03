@@ -5,14 +5,22 @@
 //! ├── project.yaml      # имя, участники, допуски сравнения
 //! ├── AGENTS.md         # описание проекта и правила для ИИ
 //! ├── .gitattributes    # бинарные файлы идут через Git LFS
-//! ├── parts/<имя>/      # meta.yaml, model.step, model.sldprt, tree.yaml, preview.png, docs/
-//! ├── assemblies/<имя>/ # то же для сборок
+//! ├── Стена/            # папка-группа: обычная папка, сколько угодно уровней
+//! │   └── PANEL-00/     # деталь или сборка: папка с meta.yaml, model.step, docs/ …
+//! ├── RAIL-01/          # деталь может лежать и прямо в корне
 //! └── notes/            # заметки Markdown
 //! ```
 //!
-//! Шаблоны `.gitattributes` и `AGENTS.md` нового проекта — в `templates.rs`.
+//! Дерево проекта и есть папки на диске: отдельного списка «что где лежит»
+//! нет. До схемы 2 детали лежали в `parts/<имя>/`, а сборки — в
+//! `assemblies/<имя>/`; такой проект открывается только для просмотра, пока
+//! его не обновят (`nonius-store`: перенос в корень одной записью истории).
+//!
+//! Обход папок — в `layout.rs`, шаблоны `.gitattributes` и `AGENTS.md`
+//! нового проекта — в `templates.rs`.
 
 mod agents;
+mod layout;
 mod templates;
 
 use std::fs;
@@ -27,6 +35,7 @@ use crate::names::PartName;
 use crate::schema::{self, Versioned};
 use agents::agents_md;
 pub use agents::AGENTS_FILE;
+pub use layout::{old_item_path, Layout};
 use templates::gitattributes;
 
 /// Имя файла настроек проекта.
@@ -35,10 +44,14 @@ pub const PROJECT_FILE: &str = "project.yaml";
 pub const META_FILE: &str = "meta.yaml";
 /// Имя слепка дерева построения в папке детали.
 pub const TREE_FILE: &str = "tree.yaml";
-/// Папка деталей.
+/// Папка деталей в проекте старого устройства (схема 1).
 pub const PARTS_DIR: &str = "parts";
-/// Папка сборок.
+/// Папка сборок в проекте старого устройства (схема 1).
 pub const ASSEMBLIES_DIR: &str = "assemblies";
+/// Пустой файл, который держит в git пустую папку-группу.
+pub const KEEP_FILE: &str = ".gitkeep";
+/// Схема `project.yaml`, с которой детали лежат в папках проекта.
+pub const TREE_SCHEMA: u32 = 2;
 /// Папка заметок.
 pub const NOTES_DIR: &str = "notes";
 /// Папка документов детали (чертежи, PDF, DXF).
@@ -112,7 +125,19 @@ pub struct ProjectConfig {
 
 impl Versioned for ProjectConfig {
     const KIND: &'static str = "project";
-    const CURRENT: u32 = 1;
+    const CURRENT: u32 = TREE_SCHEMA;
+
+    /// Поля схем 1 и 2 одинаковые: схема 2 говорит только, что детали лежат
+    /// в папках проекта. Переносит их `nonius-store` вместе с записью истории.
+    fn migrate(
+        doc: serde_yaml::Value,
+        from: u32,
+    ) -> std::result::Result<serde_yaml::Value, String> {
+        match from {
+            1 => Ok(doc),
+            _ => Err(format!("нет миграции со схемы {from}")),
+        }
+    }
 }
 
 /// Деталь или сборка в проекте.
@@ -131,6 +156,8 @@ pub struct Item {
 pub struct Project {
     root: PathBuf,
     config: ProjectConfig,
+    /// Детали в `parts/` и `assemblies/`: проект ещё не обновлён.
+    old_layout: bool,
 }
 
 impl Project {
@@ -141,10 +168,8 @@ impl Project {
         if config_path.exists() {
             return Err(Error::AlreadyExists(config_path));
         }
-        for dir in [PARTS_DIR, ASSEMBLIES_DIR, NOTES_DIR] {
-            let d = root.join(dir);
-            fs::create_dir_all(&d).map_err(|e| Error::io(&d, e))?;
-        }
+        let notes = root.join(NOTES_DIR);
+        fs::create_dir_all(&notes).map_err(|e| Error::io(&notes, e))?;
         let name = name.into();
         let config = ProjectConfig {
             schema: ProjectConfig::CURRENT,
@@ -155,7 +180,11 @@ impl Project {
         schema::save(&config, &config_path)?;
         write_if_missing(&root.join(".gitattributes"), &gitattributes())?;
         write_if_missing(&root.join(AGENTS_FILE), &agents_md(&name))?;
-        Ok(Self { root, config })
+        Ok(Self {
+            root,
+            config,
+            old_layout: false,
+        })
     }
 
     /// Открыть проект, корень которого — `root`.
@@ -165,8 +194,13 @@ impl Project {
         if !config_path.is_file() {
             return Err(Error::NotAProject(root));
         }
-        let config = schema::load(&config_path)?;
-        Ok(Self { root, config })
+        let text = fs::read_to_string(&config_path).map_err(|e| Error::io(&config_path, e))?;
+        let config = schema::from_str(&text, &config_path)?;
+        Ok(Self {
+            root,
+            config,
+            old_layout: schema::version_in(&text) < TREE_SCHEMA,
+        })
     }
 
     /// Найти проект, поднимаясь от `start` к корню диска.
@@ -194,6 +228,7 @@ impl Project {
 
     /// Изменить настройки и сохранить `project.yaml`.
     pub fn update_config(&mut self, f: impl FnOnce(&mut ProjectConfig)) -> Result<()> {
+        self.writable()?;
         let mut next = self.config.clone();
         f(&mut next);
         schema::save(&next, &self.root.join(PROJECT_FILE))?;
@@ -201,17 +236,22 @@ impl Project {
         Ok(())
     }
 
-    /// Папка детали или сборки (может ещё не существовать).
-    pub fn item_dir(&self, kind: ItemKind, name: &PartName) -> PathBuf {
-        self.root.join(kind_dir(kind)).join(name.as_str())
+    /// Создать деталь или сборку в корне проекта.
+    pub fn create_item(&self, kind: ItemKind, name: &PartName) -> Result<Item> {
+        self.create_item_in(kind, name, Path::new(""))
     }
 
-    /// Создать деталь или сборку: папку, `docs/` и пустой `meta.yaml`.
-    pub fn create_item(&self, kind: ItemKind, name: &PartName) -> Result<Item> {
+    /// Создать деталь или сборку в папке `folder` (путь от корня проекта,
+    /// пустой — корень): папку детали, `docs/` и пустой `meta.yaml`.
+    pub fn create_item_in(&self, kind: ItemKind, name: &PartName, folder: &Path) -> Result<Item> {
+        self.writable()?;
         if let Some(existing) = self.find_item(name)? {
             return Err(Error::AlreadyExists(existing.dir));
         }
-        let dir = self.item_dir(kind, name);
+        let dir = self.folder_dir(folder)?.join(name.as_str());
+        if dir.exists() {
+            return Err(Error::AlreadyExists(dir));
+        }
         let docs = dir.join(DOCS_DIR);
         fs::create_dir_all(&docs).map_err(|e| Error::io(&docs, e))?;
         schema::save(&PartMeta::new(kind), &dir.join(META_FILE))?;
@@ -230,28 +270,7 @@ impl Project {
 
     /// Все детали и сборки, отсортированные по виду и имени.
     pub fn items(&self) -> Result<Vec<Item>> {
-        let mut out = Vec::new();
-        for kind in [ItemKind::Part, ItemKind::Assembly] {
-            let base = self.root.join(kind_dir(kind));
-            let entries = match fs::read_dir(&base) {
-                Ok(e) => e,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(Error::io(&base, e)),
-            };
-            for entry in entries {
-                let entry = entry.map_err(|e| Error::io(&base, e))?;
-                let dir = entry.path();
-                if !dir.join(META_FILE).is_file() {
-                    continue;
-                }
-                let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
-                    continue;
-                };
-                if let Ok(name) = PartName::new(name) {
-                    out.push(Item { name, kind, dir });
-                }
-            }
-        }
+        let mut out = self.scan()?.items;
         out.sort_by(|a, b| (a.kind as u8, &a.name).cmp(&(b.kind as u8, &b.name)));
         Ok(out)
     }
@@ -276,13 +295,6 @@ impl Project {
             meta: self.load_meta(item)?,
             tree,
         })
-    }
-}
-
-fn kind_dir(kind: ItemKind) -> &'static str {
-    match kind {
-        ItemKind::Part => PARTS_DIR,
-        ItemKind::Assembly => ASSEMBLIES_DIR,
     }
 }
 

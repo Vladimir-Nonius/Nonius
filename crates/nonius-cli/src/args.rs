@@ -41,6 +41,13 @@ pub enum Command {
     /// Детали и сборки.
     #[command(subcommand)]
     Part(PartCommand),
+    /// Папки-группы проекта.
+    #[command(subcommand)]
+    Folder(FolderCommand),
+    /// Карта проекта: папки и где лежит каждая деталь.
+    Map,
+    /// Перевести проект старого формата (parts/, assemblies/) на папки.
+    Upgrade,
     /// Список деталей и сборок.
     List,
     /// Сведения о проекте.
@@ -236,6 +243,16 @@ pub enum PartCommand {
         /// Это сборка.
         #[arg(long)]
         assembly: bool,
+        /// Папка, в которую положить (путь от корня проекта; по умолчанию корень).
+        #[arg(long = "in", value_name = "ПАПКА")]
+        folder: Option<PathBuf>,
+    },
+    /// Перенести деталь в другую папку: версии остаются при ней.
+    Move {
+        /// Деталь.
+        name: String,
+        /// Папка: путь от корня проекта, «.» — корень.
+        folder: PathBuf,
     },
     /// Переименовать деталь: версии остаются при ней.
     Rename {
@@ -255,6 +272,15 @@ pub enum PartCommand {
     Recover {
         /// Деталь.
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FolderCommand {
+    /// Создать папку-группу (можно сразу несколько уровней: Стена/Рейка).
+    New {
+        /// Путь от корня проекта.
+        path: PathBuf,
     },
 }
 

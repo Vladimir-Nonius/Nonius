@@ -6,6 +6,11 @@
 //! Переименование, удаление и возврат детали — не версии, а отметки в истории:
 //! `Nonius-Renamed`, `Nonius-Deleted`, `Nonius-Recovered`. Так же отмечается,
 //! что версию убрали с карты или вернули на неё: `Nonius-Hidden`, `Nonius-Shown`.
+//!
+//! Деталь перенесли в другую папку: `Nonius-Moved` с прежним путём. У
+//! удалённой детали `Nonius-Folder` — где она лежала, у возвращённой в другое
+//! место — `Nonius-Moved`. Проект перевели со старых `parts/` и `assemblies/`
+//! на папки: `Nonius-Layout: 2`; до этой записи каждая деталь лежала там.
 
 use nonius_core::meta::ItemKind;
 use nonius_core::{PartName, VersionNumber};
@@ -22,6 +27,9 @@ const RECOVERED_TRAILER: &str = "Nonius-Recovered: ";
 const KIND_TRAILER: &str = "Nonius-Kind: ";
 const HIDDEN_TRAILER: &str = "Nonius-Hidden: ";
 const SHOWN_TRAILER: &str = "Nonius-Shown: ";
+const MOVED_TRAILER: &str = "Nonius-Moved: ";
+const FOLDER_TRAILER: &str = "Nonius-Folder: ";
+const LAYOUT_TRAILER: &str = "Nonius-Layout: ";
 
 /// Значение `Nonius-Kind` у сборки; у детали строки нет.
 const ASSEMBLY: &str = "assembly";
@@ -30,13 +38,15 @@ const ASSEMBLY: &str = "assembly";
 pub(crate) const LOG_FORMAT: &str = "--format=%H%x1f%an%x1f%cn%x1f%aI%x1f%B";
 
 /// Отбор `git log`: только то, что меняет историю деталей.
-pub(crate) const LOG_EVENTS: [&str; 6] = [
+pub(crate) const LOG_EVENTS: [&str; 8] = [
     "--grep=^Nonius-Version: ",
     "--grep=^Nonius-Renamed: ",
     "--grep=^Nonius-Deleted: ",
     "--grep=^Nonius-Recovered: ",
     "--grep=^Nonius-Hidden: ",
     "--grep=^Nonius-Shown: ",
+    "--grep=^Nonius-Moved: ",
+    "--grep=^Nonius-Layout: ",
 ];
 
 /// Запись истории проекта.
@@ -52,8 +62,23 @@ pub(crate) enum Event {
     },
     /// Деталь удалена.
     Deleted(DeletedItem),
-    /// Удалённая деталь возвращена.
-    Recovered(PartName),
+    /// Удалённая деталь возвращена; `from` — где она лежала, если вернулась
+    /// в другое место.
+    Recovered {
+        /// Имя.
+        name: PartName,
+        /// Прежняя папка, путь от корня.
+        from: Option<String>,
+    },
+    /// Деталь перенесена в другую папку.
+    Moved {
+        /// Деталь.
+        item: PartName,
+        /// Прежняя папка, путь от корня.
+        from: String,
+    },
+    /// Проект переведён со старых `parts/` и `assemblies/` на папки.
+    Layout,
     /// Версию убрали с карты (`hidden`) или вернули на неё.
     Hidden {
         /// Деталь под именем на тот момент.
@@ -110,20 +135,52 @@ pub(crate) fn renamed_message(from: &PartName, to: &PartName, ai: Option<&AiActo
     signed(text, ai)
 }
 
-/// Сообщение отметки «деталь удалена».
-pub(crate) fn deleted_message(item: &PartName, kind: ItemKind, ai: Option<&AiActor>) -> String {
+/// Сообщение отметки «деталь удалена»; `folder` — где она лежала.
+pub(crate) fn deleted_message(
+    item: &PartName,
+    kind: ItemKind,
+    folder: &str,
+    ai: Option<&AiActor>,
+) -> String {
     let mut text = format!("{item}: деталь удалена\n\n{DELETED_TRAILER}{item}\n");
     if kind == ItemKind::Assembly {
         text.push_str(&format!("{KIND_TRAILER}{ASSEMBLY}\n"));
     }
+    text.push_str(&format!("{FOLDER_TRAILER}{folder}\n"));
     signed(text, ai)
 }
 
-/// Сообщение отметки «деталь возвращена».
-pub(crate) fn recovered_message(item: &PartName, ai: Option<&AiActor>) -> String {
-    signed(
-        format!("{item}: деталь возвращена\n\n{RECOVERED_TRAILER}{item}\n"),
-        ai,
+/// Сообщение отметки «деталь возвращена»; `from` — где она лежала, если
+/// вернулась в другое место.
+pub(crate) fn recovered_message(
+    item: &PartName,
+    from: Option<&str>,
+    ai: Option<&AiActor>,
+) -> String {
+    let mut text = format!("{item}: деталь возвращена\n\n{RECOVERED_TRAILER}{item}\n");
+    if let Some(from) = from {
+        text.push_str(&format!("{MOVED_TRAILER}{from}\n"));
+    }
+    signed(text, ai)
+}
+
+/// Сообщение отметки «деталь перенесена»: из папки `from` в `to`.
+pub(crate) fn moved_message(item: &PartName, from: &str, to: &str, ai: Option<&AiActor>) -> String {
+    let place = match to.rsplit_once('/') {
+        Some((parent, _)) => format!("«{parent}»"),
+        None => "корень проекта".into(),
+    };
+    let text =
+        format!("{item}: перенесена в {place}\n\n{MOVED_TRAILER}{from}\n{ITEM_TRAILER}{item}\n");
+    signed(text, ai)
+}
+
+/// Сообщение записи «проект переведён на папки».
+pub(crate) fn layout_message(count: usize) -> String {
+    format!(
+        "Проект переведён на папки: {count} деталей и сборок перенесены в корень\n\n\
+         Детали больше не делятся на parts/ и assemblies/: дерево проекта — это\n\
+         папки на диске.\n\n{LAYOUT_TRAILER}2\n"
     )
 }
 
@@ -177,12 +234,24 @@ pub(crate) fn parse_event(record: &str) -> Option<Event> {
             });
         }
     }
+    let path = |trailer: &str| {
+        let found = block.lines().find_map(|l| l.strip_prefix(trailer))?;
+        Some(found.trim().to_string()).filter(|p| !p.is_empty())
+    };
+    if block.lines().any(|l| l.starts_with(LAYOUT_TRAILER)) {
+        return Some(Event::Layout);
+    }
     if let Some(from) = value(RENAMED_TRAILER) {
         let to = value(ITEM_TRAILER)?;
         return Some(Event::Renamed { from, to });
     }
     if let Some(name) = value(RECOVERED_TRAILER) {
-        return Some(Event::Recovered(name));
+        let from = path(MOVED_TRAILER);
+        return Some(Event::Recovered { name, from });
+    }
+    if let Some(from) = path(MOVED_TRAILER) {
+        let item = value(ITEM_TRAILER)?;
+        return Some(Event::Moved { item, from });
     }
     let name = value(DELETED_TRAILER)?;
     let assembly = block
@@ -195,6 +264,7 @@ pub(crate) fn parse_event(record: &str) -> Option<Event> {
         } else {
             ItemKind::Part
         },
+        folder: path(FOLDER_TRAILER),
         commit,
         author,
         date,
@@ -286,16 +356,37 @@ mod tests {
         assert!(
             matches!(parse_event(&renamed), Some(Event::Renamed { from, to }) if from == a && to == b)
         );
-        let deleted = record("Я", &deleted_message(&a, ItemKind::Assembly, None));
+        let deleted = record(
+            "Я",
+            &deleted_message(&a, ItemKind::Assembly, "Стена/вал", None),
+        );
         match parse_event(&deleted) {
             Some(Event::Deleted(d)) => {
                 assert_eq!(d.name, a);
                 assert_eq!(d.kind, ItemKind::Assembly);
+                assert_eq!(d.folder.as_deref(), Some("Стена/вал"));
             }
             _ => panic!("не отметка удаления"),
         }
-        let back = record("Я", &recovered_message(&a, None));
-        assert!(matches!(parse_event(&back), Some(Event::Recovered(n)) if n == a));
+        let back = record("Я", &recovered_message(&a, None, None));
+        assert!(
+            matches!(parse_event(&back), Some(Event::Recovered { name, from: None }) if name == a)
+        );
+        let back = record("Я", &recovered_message(&a, Some("parts/вал"), None));
+        assert!(matches!(
+            parse_event(&back),
+            Some(Event::Recovered { from: Some(f), .. }) if f == "parts/вал"
+        ));
+        let moved = record("Я", &moved_message(&a, "вал", "Стена/вал", None));
+        assert!(moved.contains("перенесена в «Стена»"));
+        assert!(matches!(
+            parse_event(&moved),
+            Some(Event::Moved { item, from }) if item == a && from == "вал"
+        ));
+        assert!(matches!(
+            parse_event(&record("Я", &layout_message(3))),
+            Some(Event::Layout)
+        ));
         // Строка в описании версии отметкой не становится.
         let text = commit_message(&a, VersionNumber::FIRST, "x\n\nNonius-Deleted: вал", None);
         assert!(matches!(

@@ -135,6 +135,7 @@ impl App {
     /// Файл с таким именем не перезаписывается. Возвращает путь внутри детали;
     /// в историю файл попадёт со следующей версией.
     pub fn add_file(&self, name: &str, file: &Path) -> Result<String> {
+        self.project.writable()?;
         let item = self.item(name)?;
         let file_name = match file.file_name() {
             Some(n) if file.is_file() => n.to_string_lossy().into_owned(),
@@ -157,6 +158,7 @@ impl App {
     /// Убрать файл из папки детали. В сохранённых версиях он остаётся; файл
     /// модели и служебные файлы так не убираются.
     pub fn remove_file(&self, name: &str, path: &str) -> Result<()> {
+        self.project.writable()?;
         let item = self.item(name)?;
         let unknown = || Error::UnknownFile {
             item: name.to_string(),

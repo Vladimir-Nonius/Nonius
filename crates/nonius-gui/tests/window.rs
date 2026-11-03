@@ -42,6 +42,8 @@ struct Fake {
     removed: Arc<Mutex<Vec<(String, String)>>>,
     /// Название проекта.
     title: &'static str,
+    /// Проект старого формата; обновление его снимает.
+    old: Arc<Mutex<bool>>,
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -302,6 +304,15 @@ impl ProjectSource for Fake {
     fn export_version(&self, _part: &str, _version: u32, _dest: &Path) -> anyhow::Result<usize> {
         Ok(2)
     }
+    fn old_layout(&self) -> bool {
+        *self.old.lock().unwrap()
+    }
+
+    fn upgrade(&self) -> anyhow::Result<()> {
+        *self.old.lock().unwrap() = false;
+        Ok(())
+    }
+
     fn compare_outside(
         &self,
         part: &str,
@@ -429,6 +440,7 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         removed: Arc::default(),
         hidden: Arc::default(),
         title,
+        old: Arc::default(),
     }
 }
 
@@ -1239,4 +1251,32 @@ fn draft_without_a_folder_is_saved_later() {
     assert!(h.query_by_label("Без имени ●").is_none());
     assert_eq!(std::fs::read_dir(&drafts).unwrap().count(), 0);
     assert_eq!(Settings::load().tabs, vec![target]);
+}
+
+#[test]
+fn old_project_is_upgraded_from_the_window() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let old = Arc::new(Mutex::new(true));
+    let mut h = window_on(
+        dir.path(),
+        Fake {
+            old: old.clone(),
+            ..fake(dir.path(), "Стенд")
+        },
+    );
+    wait_for(&mut h, "Проект старого формата");
+    h.get_by_label("Не сейчас").click();
+    h.run();
+    assert!(h.query_by_label("Не сейчас").is_none(), "спросили один раз");
+    assert!(
+        h.query_by_label_contains("только просмотр").is_some(),
+        "полоса остаётся"
+    );
+    assert!(*old.lock().unwrap(), "без согласия не обновляется");
+
+    h.get_by_label("Обновить").click();
+    wait_for(&mut h, "Второй");
+    assert!(!*old.lock().unwrap(), "обновлён");
+    assert!(h.query_by_label_contains("только просмотр").is_none());
 }

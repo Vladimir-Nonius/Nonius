@@ -40,7 +40,7 @@ fn init_add_and_list() {
     assert!(!ok);
     assert!(out.contains("запрещённый символ"), "{out}");
 
-    let (ok, out) = nonius(&d.join("parts"), &["info"]);
+    let (ok, out) = nonius(&d.join("notes"), &["info"]);
     assert!(ok, "{out}");
     assert!(out.contains("Деталей:   1"), "{out}");
 
@@ -122,7 +122,7 @@ fn diff_between_versions_lists_files() {
     assert!(nonius(d, &["init"]).0);
     assert!(nonius(d, &["part", "new", "вал"]).0);
     assert!(nonius(d, &["commit", "вал", "-m", "Первая"]).0);
-    let docs = d.join("parts").join("вал").join("docs");
+    let docs = d.join("вал").join("docs");
     std::fs::write(docs.join("чертёж.pdf"), "pdf").unwrap();
     assert!(nonius(d, &["commit", "вал", "-m", "Чертёж"]).0);
 
@@ -315,7 +315,7 @@ fn json_answers_and_stable_error_codes() {
     assert_eq!(top["data"]["saved"], 1, "{top}");
     assert_eq!(top["data"]["items"][0]["latest"]["version"], "v1", "{top}");
 
-    let docs = d.join("parts").join("вал").join("docs");
+    let docs = d.join("вал").join("docs");
     std::fs::write(docs.join("чертёж.txt"), "сталь").unwrap();
     let status = json(d, &["status", "--json"]);
     assert_eq!(status["data"]["items"][0]["state"], "changed", "{status}");
@@ -392,7 +392,7 @@ fn import_commit_log_diff_restore_export() {
     assert!(!ok && out.contains("нет изменений"), "{out}");
 
     // меняем материал вручную в meta.yaml и сравниваем с v1
-    let meta = d.join("parts").join("кронштейн").join("meta.yaml");
+    let meta = d.join("кронштейн").join("meta.yaml");
     let text = std::fs::read_to_string(&meta).unwrap() + "material: Ст3\n";
     std::fs::write(&meta, text).unwrap();
     let (ok, out) = nonius(d, &["diff", "кронштейн"]);
@@ -448,7 +448,7 @@ fn material_sets_mass_only_when_known() {
     let (ok, out) = nonius(d, &["material", "кронштейн", "09Г2С"]);
     assert!(ok, "{out}");
     assert!(out.contains("плотность 7850 кг/м³"), "{out}");
-    let meta = std::fs::read_to_string(d.join("parts/кронштейн/meta.yaml")).unwrap();
+    let meta = std::fs::read_to_string(d.join("кронштейн/meta.yaml")).unwrap();
     assert!(meta.contains("material: 09Г2С"), "{meta}");
 
     let (ok, out) = nonius(d, &["material", "кронштейн", "Сплав-Х"]);
@@ -488,7 +488,7 @@ fn files_between_versions() {
     let d = tmp.path();
     assert!(nonius(d, &["init", "--name", "Станок"]).0);
     assert!(nonius(d, &["part", "new", "кронштейн"]).0);
-    let docs = d.join("parts").join("кронштейн").join("docs");
+    let docs = d.join("кронштейн").join("docs");
     std::fs::create_dir_all(&docs).unwrap();
     std::fs::write(docs.join("заметка.md"), "сверлить Ø6\n").unwrap();
     assert!(nonius(d, &["commit", "кронштейн", "-m", "Первая"]).0);
@@ -681,7 +681,7 @@ fn mcp_without_write_changes_nothing() {
         assert_eq!(answer["error"]["code"], "unknown_tool", "{name}: {answer}");
         assert_eq!(reply["result"]["isError"], true);
     }
-    assert!(d.join("parts").join("вал").is_dir(), "деталь на месте");
+    assert!(d.join("вал").is_dir(), "деталь на месте");
 }
 
 #[test]
@@ -712,7 +712,7 @@ fn json_part_actions_have_stable_codes() {
     );
     assert_eq!(code(&["--json", "part", "recover", "нет"]), "not_deleted");
     assert_eq!(code(&["--json", "part", "delete", "нет"]), "unknown_item");
-    let note = d.join("parts").join("вал").join("docs").join("н.md");
+    let note = d.join("вал").join("docs").join("н.md");
     std::fs::write(&note, "текст").unwrap();
     assert_eq!(code(&["--json", "part", "rename", "вал", "ось2"]), "dirty");
     assert_eq!(code(&["--json", "restore", "вал", "v1"]), "dirty");
@@ -773,7 +773,7 @@ fn versions_are_saved_while_project_is_read() {
                 assert!(nonius(d, &["--json", "overview"]).0);
             }
         });
-        let note = d.join("parts").join("вал").join("docs").join("н.md");
+        let note = d.join("вал").join("docs").join("н.md");
         for i in 0..6 {
             std::fs::write(&note, format!("правка {i}")).unwrap();
             let (ok, out) = nonius(d, &["commit", "вал", "-m", "правка"]);
@@ -857,7 +857,7 @@ fn ai_creates_project_and_own_files_through_mcp() {
         "{}",
         answers[8]
     );
-    assert!(d.join("parts/крюк/meta.yaml").is_file());
+    assert!(d.join("крюк/meta.yaml").is_file());
 }
 
 #[test]
@@ -866,7 +866,7 @@ fn old_version_leaves_the_map() {
     let d = tmp.path();
     assert!(nonius(d, &["init"]).0);
     assert!(nonius(d, &["part", "new", "вал"]).0);
-    let note = d.join("parts/вал/docs/заметка.md");
+    let note = d.join("вал/docs/заметка.md");
     std::fs::write(&note, "1").unwrap();
     assert!(nonius(d, &["commit", "вал", "-m", "первая"]).0);
     std::fs::write(&note, "2").unwrap();

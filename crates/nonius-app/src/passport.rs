@@ -130,6 +130,7 @@ impl App {
     /// `meta.yaml` в папке детали; чтобы изменение попало в историю,
     /// сохраните версию.
     pub fn set_material(&self, name: &str, choice: Option<MaterialChoice>) -> Result<Passport> {
+        self.project.writable()?;
         let item = self.item(name)?;
         let mut meta = self.project.load_meta(&item)?;
         match choice.filter(|c| !c.name.trim().is_empty()) {

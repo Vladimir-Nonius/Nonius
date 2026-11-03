@@ -105,6 +105,9 @@ pub struct DeletedItem {
     pub name: PartName,
     /// Деталь или сборка.
     pub kind: ItemKind,
+    /// Где лежала, путь от корня. Нет — удалена до перехода на папки, лежала
+    /// в `parts/` или `assemblies/`.
+    pub folder: Option<String>,
     /// Коммит удаления.
     pub commit: String,
     /// Кто удалил.

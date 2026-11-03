@@ -4,10 +4,14 @@
 //! проследить назад: на отметке «переименована» оно меняется на прежнее, на
 //! отметке «удалена» история нынешней детали заканчивается. Отметка «убрана с
 //! карты» относится к детали под тем же прослеженным именем.
+//!
+//! Так же назад прослеживается папка: на отметке «перенесена» она меняется
+//! на прежнюю, на переименовании меняется её последнее звено, а до перехода
+//! проекта на папки деталь лежала в `parts/<имя>` или `assemblies/<имя>`.
 
 use std::collections::{HashMap, HashSet};
 
-use nonius_core::project::Item;
+use nonius_core::project::{old_item_path, Item};
 use nonius_core::VersionNumber;
 
 use crate::git::git_path;
@@ -38,18 +42,30 @@ impl Store {
         let mut recovered = HashMap::new();
         // Убрана ли версия с карты: решает самая новая отметка.
         let mut marks: HashMap<(usize, VersionNumber), bool> = HashMap::new();
+        // Папка детали на тот момент; `None` — до перехода на папки.
+        let mut path: Vec<Option<String>> = items
+            .iter()
+            .map(|item| Some(git_path(self.project.root(), &item.dir)))
+            .collect();
         for event in self.events()? {
             match event {
                 Event::Version(mut v) => {
                     if let Some(&i) = owner.get(v.item.as_str()) {
-                        let dir = self.project.item_dir(items[i].kind, &v.item);
-                        v.folder = git_path(self.project.root(), &dir);
+                        v.folder = path[i]
+                            .clone()
+                            .unwrap_or_else(|| old_item_path(items[i].kind, &v.item));
                         v.item = items[i].name.clone();
                         list[i].push(v);
                     }
                 }
                 Event::Renamed { from, to } => match owner.remove(to.as_str()) {
                     Some(i) => {
+                        if let Some(p) = &mut path[i] {
+                            *p = match p.rsplit_once('/') {
+                                Some((parent, _)) => format!("{parent}/{from}"),
+                                None => from.to_string(),
+                            };
+                        }
                         owner.insert(from.to_string(), i);
                     }
                     // Старые версии с этим именем — у той детали, что ушла.
@@ -65,11 +81,20 @@ impl Store {
                         owner.remove(d.name.as_str());
                     }
                 },
-                Event::Recovered(name) => {
+                Event::Recovered { name, from } => {
                     if let Some(i) = owner.remove(name.as_str()) {
+                        if from.is_some() {
+                            path[i] = from;
+                        }
                         recovered.insert(name.to_string(), i);
                     }
                 }
+                Event::Moved { item, from } => {
+                    if let Some(&i) = owner.get(item.as_str()) {
+                        path[i] = Some(from);
+                    }
+                }
+                Event::Layout => path.iter_mut().for_each(|p| *p = None),
                 Event::Hidden {
                     item,
                     version,
@@ -97,7 +122,7 @@ impl Store {
         let mut list = Vec::new();
         for event in self.events()? {
             match event {
-                Event::Recovered(name) => {
+                Event::Recovered { name, .. } => {
                     recovered.insert(name.to_string());
                 }
                 Event::Deleted(d)
