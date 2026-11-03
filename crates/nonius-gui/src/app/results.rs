@@ -214,9 +214,12 @@ impl App {
                     }
                     Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
                 },
-                Done::FileRemoved(name, path, Ok(())) => {
+                Done::FileRemoved(name, path, Ok(dirty)) => {
                     self.dialog = None;
-                    let text = format!("{path} {} «{name}». {}", t.file_removed, t.save_to_keep);
+                    let mut text = format!("{path} {} «{name}».", t.file_removed);
+                    if dirty {
+                        text = format!("{text} {}", t.save_to_keep);
+                    }
                     self.reload_on(ctx, name, text);
                 }
                 Done::PartRenamed(_, _, Err(e))

@@ -108,7 +108,10 @@ impl App {
             Some(Dialog::RemoveFile(c, path)) => {
                 let (part, path) = (c.part.clone(), path.clone());
                 self.jobs.spawn(ctx, move |_| {
-                    let done = project.remove_file(&part, &path);
+                    // Убрали ещё не сохранённый файл — сохранять, может, и нечего.
+                    let done = project
+                        .remove_file(&part, &path)
+                        .and_then(|()| Ok(!project.changed_files(&part)?.is_empty()));
                     Done::FileRemoved(part, path, done)
                 });
             }

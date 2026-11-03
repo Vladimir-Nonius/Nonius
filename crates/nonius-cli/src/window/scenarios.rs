@@ -525,6 +525,7 @@ fn own_file_of_a_part() {
     d.wait("Убрать файл docs/технология.txt?");
     d.press("Убрать");
     d.wait("убран из «плита»");
+    assert!(!d.sees("Сохраните версию"), "сохранять нечего");
     assert!(!file.exists());
     assert_eq!(
         saved_versions(&project, "плита"),
