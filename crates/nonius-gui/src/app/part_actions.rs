@@ -28,8 +28,44 @@ impl App {
     /// Спросить, вернуть ли выбранную деталь к версии.
     pub(super) fn ask_restore(&mut self, version: Option<u32>) {
         if let (Some(part), Some(n)) = (self.part.clone(), version) {
-            self.dialog = Some(Dialog::Restore(confirm(&part), n));
+            self.ask_restore_of(&part, n);
         }
+    }
+
+    /// Спросить, вернуть ли деталь `part` к версии: она не обязательно выбрана.
+    pub(super) fn ask_restore_of(&mut self, part: &str, version: u32) {
+        self.dialog = Some(Dialog::Restore(confirm(part), version));
+    }
+
+    /// Выбрать свои файлы и положить их в `docs/` детали.
+    pub(super) fn add_files(&mut self, ctx: &egui::Context, part: String) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let files = self.chooser.files();
+        if files.is_empty() {
+            return;
+        }
+        self.jobs.spawn(ctx, move |_| {
+            let added = files.iter().map(|f| project.add_file(&part, f)).collect();
+            Done::FilesAdded(part, added)
+        });
+    }
+
+    /// Спросить, убрать ли файл из папки детали.
+    pub(super) fn ask_remove_file(&mut self, part: &str, path: String) {
+        self.dialog = Some(Dialog::RemoveFile(confirm(part), path));
+    }
+
+    /// Убрать версию с карты или вернуть на неё.
+    pub(super) fn set_hidden(&mut self, ctx: &egui::Context, part: String, n: u32, hidden: bool) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        self.jobs.spawn(ctx, move |_| {
+            let done = project.set_hidden(&part, n, hidden);
+            Done::HiddenSet(part, n, hidden, done)
+        });
     }
 
     /// Показать удалённые детали.
@@ -69,6 +105,16 @@ impl App {
                     Done::PartDeleted(part, done)
                 });
             }
+            Some(Dialog::RemoveFile(c, path)) => {
+                let (part, path) = (c.part.clone(), path.clone());
+                self.jobs.spawn(ctx, move |_| {
+                    // Убрали ещё не сохранённый файл — сохранять, может, и нечего.
+                    let done = project
+                        .remove_file(&part, &path)
+                        .and_then(|()| Ok(!project.changed_files(&part)?.is_empty()));
+                    Done::FileRemoved(part, path, done)
+                });
+            }
             Some(Dialog::Restore(c, version)) => {
                 let (part, version) = (c.part.clone(), *version);
                 self.jobs.spawn(ctx, move |_| {
@@ -97,9 +143,14 @@ impl App {
 
     /// Выбрать папку и выгрузить в неё файлы версии.
     pub(super) fn export_version(&mut self, ctx: &egui::Context, version: Option<u32>) {
-        let (Some(project), Some(part), Some(n)) =
-            (self.project.clone(), self.part.clone(), version)
-        else {
+        if let (Some(part), Some(n)) = (self.part.clone(), version) {
+            self.export_of(ctx, part, n);
+        }
+    }
+
+    /// Выгрузить версию детали `part`: она не обязательно выбрана.
+    pub(super) fn export_of(&mut self, ctx: &egui::Context, part: String, n: u32) {
+        let Some(project) = self.project.clone() else {
             return;
         };
         let Some(dest) = self.chooser.folder(&self.path_input) else {

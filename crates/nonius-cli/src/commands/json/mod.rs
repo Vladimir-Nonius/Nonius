@@ -10,7 +10,7 @@ use nonius_app::{App, CompareOptions, ItemState, NoProgress, StoreError, MATERIA
 use nonius_core::meta::ItemKind;
 use serde_json::{json, Value};
 
-use crate::args::{Cli, Command, PartCommand};
+use crate::args::{Cli, Command, FileCommand, PartCommand};
 use crate::commands::{compare, describe, files, passport, project};
 use crate::format::parse_version;
 
@@ -20,6 +20,7 @@ use view::{change, item, kind, mass, version};
 
 /// Команды, которые отвечают в JSON. Остальные открывают окна или программы.
 pub const COMMANDS: &[&str] = &[
+    "init",
     "part new",
     "part rename",
     "part delete",
@@ -37,8 +38,13 @@ pub const COMMANDS: &[&str] = &[
     "diff",
     "compare",
     "restore",
+    "hide",
+    "unhide",
     "export",
     "files",
+    "show",
+    "file add",
+    "file remove",
     "material",
     "materials",
     "describe",
@@ -102,6 +108,17 @@ fn code(error: &anyhow::Error) -> &'static str {
 fn data(cli: &Cli) -> Result<Option<Value>> {
     let app = || crate::open_app(cli);
     Ok(Some(match &cli.command {
+        Command::Init { path, name } => {
+            let root = path.as_ref().or(cli.project.as_ref());
+            let created = project::create(root, name.as_deref())?;
+            let (history, warning) = project::history_words(&created.history);
+            json!({
+                "name": created.name,
+                "root": created.root,
+                "history": history,
+                "warning": warning,
+            })
+        }
         Command::Part(PartCommand::New { name, assembly }) => {
             let item = app()?.new_item(name, project::kind_of(*assembly))?;
             json!({ "name": item.name.as_str(), "kind": kind(item.kind) })
@@ -203,6 +220,12 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
             version: number,
             message,
         } => version(&app()?.restore(part, parse_version(number)?, message.as_deref())?),
+        Command::Hide { part, version: n } => {
+            version(&app()?.set_hidden(part, parse_version(n)?, true)?)
+        }
+        Command::Unhide { part, version: n } => {
+            version(&app()?.set_hidden(part, parse_version(n)?, false)?)
+        }
         Command::Export {
             part,
             version: number,
@@ -228,6 +251,28 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
                 None => file_list(&app, part, from, to, labels)?,
             }
         }
+        Command::Show {
+            part,
+            file,
+            version: at,
+        } => {
+            let at = at.as_deref().map(parse_version).transpose()?;
+            let text = app()?.file_text(part, at, file)?;
+            json!({
+                "item": part,
+                "path": file,
+                "version": at.map(|v| v.to_string()),
+                "text": text,
+            })
+        }
+        Command::File(FileCommand::Add { part, file }) => {
+            let path = app()?.add_file(part, file)?;
+            json!({ "item": part, "added": path })
+        }
+        Command::File(FileCommand::Remove { part, file }) => {
+            app()?.remove_file(part, file)?;
+            json!({ "item": part, "removed": file })
+        }
         Command::Material {
             part,
             material,
@@ -243,8 +288,7 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
         }
         Command::Materials => materials(),
         Command::Describe => describe::describe(),
-        Command::Init { .. }
-        | Command::Render { .. }
+        Command::Render { .. }
         | Command::View { .. }
         | Command::Open { .. }
         | Command::Mcp { .. } => return Ok(None),

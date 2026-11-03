@@ -31,6 +31,7 @@ struct Answers {
     folders: Mutex<VecDeque<PathBuf>>,
     models: Mutex<VecDeque<Vec<PathBuf>>>,
     steps: Mutex<VecDeque<PathBuf>>,
+    files: Mutex<VecDeque<Vec<PathBuf>>>,
 }
 
 impl Chooser for Answers {
@@ -42,6 +43,9 @@ impl Chooser for Answers {
     }
     fn step(&self) -> Option<PathBuf> {
         self.steps.lock().unwrap().pop_front()
+    }
+    fn files(&self) -> Vec<PathBuf> {
+        self.files.lock().unwrap().pop_front().unwrap_or_default()
     }
     fn picture(&self, _name: &str) -> Option<PathBuf> {
         None
@@ -379,7 +383,7 @@ fn mistakes_change_nothing() {
     d.menu("Деталь", "Переименовать…");
     d.wait("сначала сохраните версию");
     assert!(d.h.query_by_label("Переименовать").is_none());
-    d.press("Отмена");
+    d.press("Закрыть");
 
     // Удалить с несохранённым: предупреждает, а файл не пропадает.
     d.menu("Деталь", "Удалить…");
@@ -487,4 +491,45 @@ fn ai_works_while_the_window_is_open() {
     d.come_back();
     d.wait("пока нет деталей");
     d.wait_gone("Правка от ИИ");
+}
+
+/// Свой файл к детали: добавить из меню, убрать клавишей Delete.
+#[test]
+fn own_file_of_a_part() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let mut d = Desk::new();
+    let project = d.new_project("Мастерская");
+    let one = d.sample("plate-v1.step", "плита.step");
+    d.choose_models(&[&one]);
+    d.press("Добавить модели…");
+    d.wait("Будет новая деталь «плита»");
+    d.press("Добавить");
+    d.wait("плита   v1");
+    d.wait("Показана одна версия");
+
+    let tech = d.dir.join("технология.txt");
+    std::fs::write(&tech, "резать лазером").unwrap();
+    d.answers.files.lock().unwrap().push_back(vec![tech]);
+    d.menu("Деталь", "Добавить файл…");
+    d.wait("добавлено docs/технология.txt");
+    let file = part_dir(&project, "плита")
+        .join("docs")
+        .join("технология.txt");
+    assert!(file.is_file());
+
+    d.h.get_by_role_and_label(Role::Button, "Файлы").click();
+    d.wait("+ docs/технология.txt");
+    d.h.get_by_label_contains("+ docs/технология.txt").click();
+    d.settle();
+    d.h.key_press(egui::Key::Delete);
+    d.wait("Убрать файл docs/технология.txt?");
+    d.press("Убрать");
+    d.wait("убран из «плита»");
+    assert!(!d.sees("Сохраните версию"), "сохранять нечего");
+    assert!(!file.exists());
+    assert_eq!(
+        saved_versions(&project, "плита"),
+        ["v1"],
+        "истории не тронута"
+    );
 }

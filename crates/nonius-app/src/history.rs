@@ -1,4 +1,5 @@
-//! История: версии детали, сохранить, откатить, выгрузить; правила для ИИ.
+//! История: версии детали, сохранить, откатить, выгрузить, убрать с карты;
+//! правила для ИИ.
 
 use std::path::{Path, PathBuf};
 
@@ -7,7 +8,7 @@ use nonius_core::project::AGENTS_FILE;
 use nonius_core::VersionNumber;
 use nonius_store::VersionInfo;
 
-use crate::{App, Result};
+use crate::{App, Error, Result};
 
 impl App {
     /// Версии детали, новые первыми.
@@ -43,6 +44,24 @@ impl App {
         let v = self.store()?.restore(&item, version, note)?;
         self.notify(&v);
         Ok(v)
+    }
+
+    /// Убрать версию с карты (`hidden`) или вернуть на неё. В истории версия
+    /// остаётся. Последнюю убрать нельзя: она и есть деталь сейчас.
+    pub fn set_hidden(
+        &self,
+        name: &str,
+        version: VersionNumber,
+        hidden: bool,
+    ) -> Result<VersionInfo> {
+        let item = self.item(name)?;
+        let store = self.store()?;
+        let latest = store.latest(&item)?.map(|v| v.version);
+        if hidden && latest == Some(version) {
+            return Err(Error::LatestVersion(version));
+        }
+        store.set_hidden(&item, version, hidden)?;
+        Ok(store.version(&item, version)?)
     }
 
     /// Выгрузить все файлы версии в папку `dest`.

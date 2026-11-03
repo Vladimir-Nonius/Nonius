@@ -1,4 +1,5 @@
-//! Файлы детали: что в версии, что изменилось между версиями, открыть файл.
+//! Файлы детали: что в версии, что изменилось между версиями, открыть файл,
+//! положить свой файл в `docs/` и убрать файл из папки детали.
 //!
 //! Версия `None` — то, что сейчас лежит в папке детали. Файл сохранённой версии
 //! открывается копией во временной папке: служебный кэш версий трогать нельзя.
@@ -6,8 +7,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use nonius_core::project::{DOCS_DIR, META_FILE, TREE_FILE};
 use nonius_core::VersionNumber;
-use nonius_store::{DiffLine, VersionFile, VersionInfo};
+use nonius_store::{is_text_file, DiffLine, VersionFile, VersionInfo};
 
 use crate::system::{self, OpenWay};
 use crate::{App, Error, Result};
@@ -17,6 +19,9 @@ const COPIES_DIR: &str = "nonius-versions";
 
 /// Файл модели детали: сначала исходник CAD, потом STEP.
 const MODEL_FILES: [&str; 3] = ["model.sldasm", "model.sldprt", "model.step"];
+
+/// Файлы, которые ведёт сам Nonius: их не удаляют руками.
+const SERVICE_FILES: [&str; 3] = [META_FILE, TREE_FILE, "preview.png"];
 
 impl App {
     /// Файлы версии `to` и что изменилось после `from`. Без `from` — только
@@ -57,13 +62,7 @@ impl App {
         version: Option<VersionNumber>,
         path: &str,
     ) -> Result<PathBuf> {
-        let listed = self.version_files(name, None, version)?;
-        if !listed.iter().any(|f| f.path == path) {
-            return Err(Error::UnknownFile {
-                item: name.to_string(),
-                path: path.to_string(),
-            });
-        }
+        self.ensure_listed(name, version, path)?;
         let item = self.item(name)?;
         match self.pick(name, version)? {
             None => Ok(join(&item.dir, path)),
@@ -78,6 +77,34 @@ impl App {
                 Ok(dest)
             }
         }
+    }
+
+    /// Весь текстовый файл детали: как сейчас в папке или в версии.
+    pub fn file_text(
+        &self,
+        name: &str,
+        version: Option<VersionNumber>,
+        path: &str,
+    ) -> Result<String> {
+        if !is_text_file(path) {
+            return Err(Error::NotText(path.to_string()));
+        }
+        self.ensure_listed(name, version, path)?;
+        let lines = self.file_diff(name, None, version, path)?;
+        let lines: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        Ok(lines.join("\n"))
+    }
+
+    /// Такой файл есть в версии: путь не уводит из папки детали.
+    fn ensure_listed(&self, name: &str, version: Option<VersionNumber>, path: &str) -> Result<()> {
+        let listed = self.version_files(name, None, version)?;
+        if listed.iter().any(|f| f.path == path) {
+            return Ok(());
+        }
+        Err(Error::UnknownFile {
+            item: name.to_string(),
+            path: path.to_string(),
+        })
     }
 
     /// Файл модели детали сейчас: его открывает правый щелчок по детали.
@@ -102,6 +129,66 @@ impl App {
             why: e.to_string(),
         })?;
         Ok(file)
+    }
+
+    /// Положить копию своего файла (технология, чертёж, ТЗ) в `docs/` детали.
+    /// Файл с таким именем не перезаписывается. Возвращает путь внутри детали;
+    /// в историю файл попадёт со следующей версией.
+    pub fn add_file(&self, name: &str, file: &Path) -> Result<String> {
+        let item = self.item(name)?;
+        let file_name = match file.file_name() {
+            Some(n) if file.is_file() => n.to_string_lossy().into_owned(),
+            _ => return Err(Error::FileNotFound(file.to_path_buf())),
+        };
+        let path = format!("{DOCS_DIR}/{file_name}");
+        let dest = join(&item.dir, &path);
+        if dest.exists() {
+            return Err(Error::FileExists {
+                item: name.to_string(),
+                path,
+            });
+        }
+        let docs = item.dir.join(DOCS_DIR);
+        fs::create_dir_all(&docs).map_err(|e| Error::io(&docs, e))?;
+        fs::copy(file, &dest).map_err(|e| Error::io(&dest, e))?;
+        Ok(path)
+    }
+
+    /// Убрать файл из папки детали. В сохранённых версиях он остаётся; файл
+    /// модели и служебные файлы так не убираются.
+    pub fn remove_file(&self, name: &str, path: &str) -> Result<()> {
+        let item = self.item(name)?;
+        let unknown = || Error::UnknownFile {
+            item: name.to_string(),
+            path: path.to_string(),
+        };
+        let parts: Vec<&str> = path.split('/').collect();
+        if parts
+            .iter()
+            .any(|p| p.is_empty() || *p == "." || *p == "..")
+        {
+            return Err(unknown());
+        }
+        if MODEL_FILES.contains(&path) || SERVICE_FILES.contains(&path) {
+            return Err(Error::ProtectedFile {
+                item: name.to_string(),
+                path: path.to_string(),
+            });
+        }
+        let file = join(&item.dir, path);
+        if !file.is_file() {
+            return Err(unknown());
+        }
+        fs::remove_file(&file).map_err(|e| Error::io(&file, e))?;
+        // Пустые папки после файла не нужны: git их всё равно не хранит.
+        let mut dir = file.parent();
+        while let Some(d) = dir.filter(|d| *d != item.dir) {
+            if fs::remove_dir(d).is_err() {
+                break;
+            }
+            dir = d.parent();
+        }
+        Ok(())
     }
 
     fn pick(&self, name: &str, version: Option<VersionNumber>) -> Result<Option<VersionInfo>> {

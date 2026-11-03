@@ -1,6 +1,7 @@
 //! Меню правого щелчка по файлу или детали: «Открыть», «Открыть в…»,
-//! «Показать в папке», у детали ещё «Заменить модель…», «Переименовать…»,
-//! «Удалить…». Список программ читается в фоне при первом показе.
+//! «Показать в папке», у файла «Убрать файл…», у детали ещё «Добавить
+//! версию…», «Добавить файл…», «Переименовать…», «Удалить…». Список программ
+//! читается в фоне при первом показе.
 
 use std::collections::HashMap;
 
@@ -27,6 +28,8 @@ pub struct Target {
     pub openable: bool,
     /// Щёлкнули по детали: её модель можно заменить.
     pub model_slot: bool,
+    /// Файл лежит в папке детали сейчас и его можно убрать.
+    pub removable: bool,
 }
 
 /// Что попросили в этом кадре.
@@ -37,6 +40,10 @@ pub enum Ask {
     Programs(String, String),
     /// Выбрать файл и положить его в деталь.
     ReplaceModel(String),
+    /// Выбрать свои файлы и положить в деталь.
+    AddFiles(String),
+    /// Спросить, убрать ли файл: деталь и путь внутри неё.
+    RemoveFile(String, String),
     /// Спросить новое имя детали.
     Rename(String),
     /// Спросить, удалить ли деталь.
@@ -78,15 +85,26 @@ pub fn attach(
             *ask = Some(Ask::Open(target.clone(), OpenWay::Folder));
             ui.close();
         }
+        if target.removable {
+            ui.separator();
+            if ui.button(t.remove_file).clicked() {
+                *ask = Some(Ask::RemoveFile(target.part.clone(), target.path.clone()));
+                ui.close();
+            }
+        }
         if target.model_slot {
             ui.separator();
             let label = if target.openable {
-                t.replace_model
+                t.add_version
             } else {
                 t.add_model
             };
             if ui.button(label).clicked() {
                 *ask = Some(Ask::ReplaceModel(target.part.clone()));
+                ui.close();
+            }
+            if ui.button(t.add_file).clicked() {
+                *ask = Some(Ask::AddFiles(target.part.clone()));
                 ui.close();
             }
             ui.separator();
@@ -154,6 +172,8 @@ impl App {
                 let models = self.chooser.models();
                 self.start_adding(models, Some(part));
             }
+            Some(Ask::AddFiles(part)) => self.add_files(ctx, part),
+            Some(Ask::RemoveFile(part, path)) => self.ask_remove_file(&part, path),
             Some(Ask::Rename(part)) => self.ask_rename(&part),
             Some(Ask::Delete(part)) => self.ask_delete(&part),
             None => {}

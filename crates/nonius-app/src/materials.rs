@@ -64,6 +64,25 @@ pub fn find_material(name: &str) -> Option<&'static Material> {
         .find(|m| normalize(m.name) == key || m.aliases.iter().any(|a| normalize(a) == key))
 }
 
+/// Похожие материалы из справочника, когда названия там нет: «Сталь» →
+/// «Сталь 20», «Ст3»… Не больше пяти, в порядке справочника.
+pub fn similar_materials(name: &str) -> Vec<&'static str> {
+    let key = normalize(name);
+    if key.chars().count() < 2 {
+        return Vec::new();
+    }
+    let close = |n: &str| {
+        let n = normalize(n);
+        n.contains(&key) || key.contains(&n)
+    };
+    MATERIALS
+        .iter()
+        .filter(|m| close(m.name) || m.aliases.iter().any(|a| close(a)))
+        .map(|m| m.name)
+        .take(5)
+        .collect()
+}
+
 fn normalize(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_whitespace() && *c != '-')
@@ -84,6 +103,17 @@ mod tests {
         assert_eq!(find_material(" АМг 6 ").unwrap().density_kg_m3, 2640.0);
         assert!(find_material("унобтаниум").is_none());
         assert!(find_material("  ").is_none());
+    }
+
+    #[test]
+    fn similar_by_part_of_the_name() {
+        assert_eq!(
+            similar_materials("Сталь"),
+            ["Ст3", "Сталь 20", "Сталь 45", "09Г2С", "40Х"]
+        );
+        assert_eq!(similar_materials("Ст3 ГОСТ 380"), ["Ст3"]);
+        assert_eq!(similar_materials("алюминий"), Vec::<&str>::new());
+        assert_eq!(similar_materials("с"), Vec::<&str>::new());
     }
 
     #[test]

@@ -17,10 +17,11 @@
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
 | Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
-| Удалить, вернуть, переименовать деталь | `nonius-store/src/items.rs`, чьи версии — `lineage.rs`, отметки в истории — `message.rs` |
+| Удалить, вернуть, переименовать деталь, убрать версию с карты | `nonius-store/src/items.rs`, чьи версии — `lineage.rs`, отметки в истории — `message.rs` |
 | Сравнить с файлом или другой деталью | `nonius-app/src/outside.rs`; в окне — `compare_with` в `nonius-gui/src/app/part_actions.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
+| Свой файл детали: добавить, убрать, прочитать текст | `nonius-app/src/files.rs`; в окне — `add_files` в `nonius-gui/src/app/part_actions.rs`, вкладка `app/files.rs` |
 | Программы для файла, запуск, показ в папке | `nonius-app/src/system/` (`windows.rs`, запасной `other.rs`) |
 | Меню правого щелчка | `nonius-gui/src/app/open_menu.rs` |
 | Сервер MCP | `nonius-cli/src/commands/mcp.rs`; новый инструмент — команда в `commands/json/mod.rs` (`COMMANDS`) |
@@ -41,10 +42,10 @@
 | Окно: первый запуск, git и имя автора | `nonius-gui/src/app/first_run.rs`, `nonius-store/src/machine.rs` |
 | Один проект в одном окне | `nonius-cli/src/window_lock.rs` |
 | Окно: дерево деталей, карта версий | `nonius-gui/src/app/tree.rs`, `app/map.rs` |
-| Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source.rs` и `nonius-cli/src/window/source.rs` |
+| Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source.rs` и `nonius-cli/src/window/source/` |
 | Окно: вкладки под 3D | `nonius-gui/src/app/tabs.rs` (панель, «Числа»), `app/files.rs` (`«Файлы»`) |
 | 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
-| Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window/source.rs` (реализация на `nonius-app`) |
+| Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window/source/` (реализация на `nonius-app`) |
 | Сценарии человека на настоящем проекте | `nonius-cli/src/window/scenarios.rs` |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
 | Новая функция OpenCascade | `nonius-occt/cpp/nonius_occt.h` и `.cpp`, `src/ffi.rs`, `src/shape.rs` |
@@ -211,15 +212,17 @@
 | `main.rs` | запуск, выбор команды, набор модулей (`registry`) |
 | `args.rs` | команды и параметры, текст справки |
 | `window.rs` | окно: `nonius` без команды, `nonius view` |
-| `window/source.rs` | мост от `nonius-app` к окну (`AppSource`) |
+| `window/source/mod.rs` | мост от `nonius-app` к окну (`AppSource`), замки чтения и записи |
+| `window/source/compare.rs`, `files.rs` | сравнение для окна; файлы детали |
+| `window/source/machine.rs`, `words.rs` | git и имя автора; ошибки и масса словами |
 | `window/scenarios.rs` | сценарии человека: настоящее окно и настоящий проект на git |
 | `window_lock.rs` | один проект в одном окне |
 | `welcome.rs` | подсказка, если окно не открылось или отключено |
 | `format.rs` | значки изменений, номер версии, дата |
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `agents`, `modules` |
 | `commands/import.rs` | `import` |
-| `commands/history.rs` | `status`, `commit`, `log`, `restore`, `export` |
-| `commands/files.rs` | `files`, `open` |
+| `commands/history.rs` | `status`, `commit`, `log`, `restore`, `hide`, `unhide`, `export` |
+| `commands/files.rs` | `files`, `show`, `file add`, `file remove`, `open` |
 | `commands/compare.rs` | `diff`, `render` |
 | `commands/passport.rs` | `material`, `materials` |
 | `commands/json/mod.rs`, `view.rs` | ответ `--json`, код ошибки, выход; вид данных в JSON |

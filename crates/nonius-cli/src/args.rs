@@ -122,6 +122,20 @@ pub enum Command {
         #[arg(short, long)]
         message: Option<String>,
     },
+    /// Убрать старую версию с карты: в истории она остаётся, вернёт `unhide`.
+    Hide {
+        /// Деталь.
+        part: String,
+        /// Версия: v3 или 3.
+        version: String,
+    },
+    /// Вернуть версию на карту.
+    Unhide {
+        /// Деталь.
+        part: String,
+        /// Версия: v3 или 3.
+        version: String,
+    },
     /// Нарисовать изменения цветом: зелёное — добавлено, красное — убрано.
     Render {
         /// Деталь.
@@ -164,6 +178,19 @@ pub enum Command {
         #[arg(long)]
         text: Option<String>,
     },
+    /// Показать текстовый файл детали целиком: как сейчас или в версии.
+    Show {
+        /// Деталь.
+        part: String,
+        /// Файл внутри детали: docs/технология.md.
+        file: String,
+        /// Версия: v3 или 3 (по умолчанию — как сейчас в папке).
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Свои файлы детали: технология, чертёж, ТЗ.
+    #[command(subcommand)]
+    File(FileCommand),
     /// Открыть файл детали: в программе, назначенной в системе, в другой, или показать в папке.
     Open {
         /// Деталь.
@@ -228,5 +255,23 @@ pub enum PartCommand {
     Recover {
         /// Деталь.
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FileCommand {
+    /// Положить копию файла в docs/ детали; в историю он попадёт со следующей версией.
+    Add {
+        /// Деталь.
+        part: String,
+        /// Файл на диске.
+        file: PathBuf,
+    },
+    /// Убрать файл из папки детали: в сохранённых версиях он остаётся.
+    Remove {
+        /// Деталь.
+        part: String,
+        /// Файл внутри детали: docs/технология.md.
+        file: String,
     },
 }

@@ -1,4 +1,6 @@
-//! Файлы детали: `files`, `open`.
+//! Файлы детали: `files`, `show`, `file add`, `file remove`, `open`.
+
+use std::path::Path;
 
 use anyhow::{bail, Result};
 use nonius_app::{programs_for, App, DiffLineKind, FileChangeKind, OpenWay};
@@ -54,6 +56,27 @@ pub fn files(
         };
         println!("{word:<8} {}  ({size})", f.path);
     }
+    Ok(())
+}
+
+/// `nonius show`.
+pub fn show(app: &App, part: &str, file: &str, version: Option<&str>) -> Result<()> {
+    let version = version.map(parse_version).transpose()?;
+    println!("{}", app.file_text(part, version, file)?);
+    Ok(())
+}
+
+/// `nonius file add`.
+pub fn add(app: &App, part: &str, file: &Path) -> Result<()> {
+    let path = app.add_file(part, file)?;
+    println!("Добавлен {path} в «{part}». Сохраните версию, чтобы он попал в историю.");
+    Ok(())
+}
+
+/// `nonius file remove`.
+pub fn remove(app: &App, part: &str, file: &str) -> Result<()> {
+    app.remove_file(part, file)?;
+    println!("Убран {file} из «{part}». В сохранённых версиях он остаётся.");
     Ok(())
 }
 

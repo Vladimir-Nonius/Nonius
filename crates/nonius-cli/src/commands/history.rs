@@ -59,12 +59,31 @@ pub fn log(app: &App, part: &str) -> Result<()> {
     }
     for v in versions {
         let ver = v.version.to_string();
+        let hidden = if v.hidden {
+            "  (убрана с карты)"
+        } else {
+            ""
+        };
         println!(
-            "{ver:<5} {}  {}  {}",
+            "{ver:<5} {}  {}  {}{hidden}",
             short_date(&v.date),
             v.signature(),
             v.summary()
         );
+    }
+    Ok(())
+}
+
+/// `nonius hide` и `nonius unhide`.
+pub fn hide(app: &App, part: &str, version: &str, hidden: bool) -> Result<()> {
+    let v = app.set_hidden(part, parse_version(version)?, hidden)?;
+    if hidden {
+        println!(
+            "{} «{}» убрана с карты. В истории она есть: nonius unhide {} {}",
+            v.version, v.item, v.item, v.version
+        );
+    } else {
+        println!("{} «{}» снова на карте", v.version, v.item);
     }
     Ok(())
 }

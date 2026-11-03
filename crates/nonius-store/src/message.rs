@@ -4,7 +4,8 @@
 //! из описания версии не может выдать себя за подпись.
 //!
 //! Переименование, удаление и возврат детали — не версии, а отметки в истории:
-//! `Nonius-Renamed`, `Nonius-Deleted`, `Nonius-Recovered`.
+//! `Nonius-Renamed`, `Nonius-Deleted`, `Nonius-Recovered`. Так же отмечается,
+//! что версию убрали с карты или вернули на неё: `Nonius-Hidden`, `Nonius-Shown`.
 
 use nonius_core::meta::ItemKind;
 use nonius_core::{PartName, VersionNumber};
@@ -19,6 +20,8 @@ const RENAMED_TRAILER: &str = "Nonius-Renamed: ";
 const DELETED_TRAILER: &str = "Nonius-Deleted: ";
 const RECOVERED_TRAILER: &str = "Nonius-Recovered: ";
 const KIND_TRAILER: &str = "Nonius-Kind: ";
+const HIDDEN_TRAILER: &str = "Nonius-Hidden: ";
+const SHOWN_TRAILER: &str = "Nonius-Shown: ";
 
 /// Значение `Nonius-Kind` у сборки; у детали строки нет.
 const ASSEMBLY: &str = "assembly";
@@ -27,11 +30,13 @@ const ASSEMBLY: &str = "assembly";
 pub(crate) const LOG_FORMAT: &str = "--format=%H%x1f%an%x1f%cn%x1f%aI%x1f%B";
 
 /// Отбор `git log`: только то, что меняет историю деталей.
-pub(crate) const LOG_EVENTS: [&str; 4] = [
+pub(crate) const LOG_EVENTS: [&str; 6] = [
     "--grep=^Nonius-Version: ",
     "--grep=^Nonius-Renamed: ",
     "--grep=^Nonius-Deleted: ",
     "--grep=^Nonius-Recovered: ",
+    "--grep=^Nonius-Hidden: ",
+    "--grep=^Nonius-Shown: ",
 ];
 
 /// Запись истории проекта.
@@ -49,6 +54,15 @@ pub(crate) enum Event {
     Deleted(DeletedItem),
     /// Удалённая деталь возвращена.
     Recovered(PartName),
+    /// Версию убрали с карты (`hidden`) или вернули на неё.
+    Hidden {
+        /// Деталь под именем на тот момент.
+        item: PartName,
+        /// Версия.
+        version: VersionNumber,
+        /// Убрана.
+        hidden: bool,
+    },
 }
 
 pub(crate) fn commit_message(
@@ -113,6 +127,30 @@ pub(crate) fn recovered_message(item: &PartName, ai: Option<&AiActor>) -> String
     )
 }
 
+/// Сообщение отметки «версия убрана с карты» или «снова на карте».
+pub(crate) fn hidden_message(
+    item: &PartName,
+    version: VersionNumber,
+    hidden: bool,
+    ai: Option<&AiActor>,
+) -> String {
+    let (word, trailer) = if hidden {
+        ("убрана с карты", HIDDEN_TRAILER)
+    } else {
+        ("снова на карте", SHOWN_TRAILER)
+    };
+    signed(
+        format!("{item} {version}: {word}\n\n{trailer}{item}@{version}\n"),
+        ai,
+    )
+}
+
+/// `деталь@vN` из отметки карты.
+fn parse_mark(text: &str) -> Option<(PartName, VersionNumber)> {
+    let (item, version) = text.trim().rsplit_once('@')?;
+    Some((PartName::new(item).ok()?, version.parse().ok()?))
+}
+
 /// Запись `git log` → событие истории; `None` — обычный коммит.
 pub(crate) fn parse_event(record: &str) -> Option<Event> {
     if let Some(v) = parse_any_record(record) {
@@ -129,6 +167,16 @@ pub(crate) fn parse_event(record: &str) -> Option<Event> {
         let found = block.lines().find_map(|l| l.strip_prefix(trailer))?;
         PartName::new(found.trim()).ok()
     };
+    for (trailer, hidden) in [(HIDDEN_TRAILER, true), (SHOWN_TRAILER, false)] {
+        let mark = block.lines().find_map(|l| l.strip_prefix(trailer));
+        if let Some((item, version)) = mark.and_then(parse_mark) {
+            return Some(Event::Hidden {
+                item,
+                version,
+                hidden,
+            });
+        }
+    }
     if let Some(from) = value(RENAMED_TRAILER) {
         let to = value(ITEM_TRAILER)?;
         return Some(Event::Renamed { from, to });
@@ -202,6 +250,7 @@ pub(crate) fn parse_any_record(record: &str) -> Option<VersionInfo> {
         ai,
         date,
         message,
+        hidden: false,
     })
 }
 

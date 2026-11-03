@@ -61,7 +61,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                                 }
                             } else if r.clicked() && selected {
                                 app.expanded.insert(p.name.clone());
-                            } else if r.clicked() {
+                            } else if r.clicked() || (r.secondary_clicked() && !selected) {
+                                // Правый щелчок тоже выделяет: видно, к чему меню.
                                 clicked = Some(p.name.clone());
                             }
                             open_menu::attach(&r, &app.programs, || target(p), &mut asked);
@@ -152,6 +153,7 @@ fn target(p: &PartEntry) -> Target {
         path: p.model.clone().unwrap_or_else(|| META_FILE.to_string()),
         openable: p.model.is_some(),
         model_slot: true,
+        removable: false,
     }
 }
 

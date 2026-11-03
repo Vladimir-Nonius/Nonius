@@ -36,6 +36,10 @@ struct Fake {
     hold: Arc<Mutex<()>>,
     /// Какие детали созданы из окна.
     created: Arc<Mutex<Vec<(String, bool)>>>,
+    /// Какие версии кронштейна убраны с карты.
+    hidden: Arc<Mutex<Vec<u32>>>,
+    /// Какие файлы убрали из окна: деталь и путь.
+    removed: Arc<Mutex<Vec<(String, String)>>>,
     /// Название проекта.
     title: &'static str,
 }
@@ -104,6 +108,7 @@ impl ProjectSource for Fake {
             date: "2026-10-27 12:00".into(),
             author: "Владимир".into(),
             summary: format!("версия {number}"),
+            hidden: self.hidden.lock().unwrap().contains(&number),
         };
         Ok(if part == "кронштейн" {
             vec![v(2), v(1)]
@@ -276,6 +281,24 @@ impl ProjectSource for Fake {
     fn restore_version(&self, _part: &str, _version: u32) -> anyhow::Result<u32> {
         Ok(3)
     }
+    fn add_file(&self, _part: &str, file: &Path) -> anyhow::Result<String> {
+        Ok(format!("docs/{}", file.display()))
+    }
+    fn remove_file(&self, part: &str, path: &str) -> anyhow::Result<()> {
+        self.removed
+            .lock()
+            .unwrap()
+            .push((part.to_string(), path.to_string()));
+        Ok(())
+    }
+    fn set_hidden(&self, _part: &str, version: u32, hidden: bool) -> anyhow::Result<()> {
+        let mut list = self.hidden.lock().unwrap();
+        list.retain(|n| *n != version);
+        if hidden {
+            list.push(version);
+        }
+        Ok(())
+    }
     fn export_version(&self, _part: &str, _version: u32, _dest: &Path) -> anyhow::Result<usize> {
         Ok(2)
     }
@@ -299,6 +322,9 @@ impl Chooser for NoDialogs {
     }
     fn models(&self) -> Vec<PathBuf> {
         Vec::new()
+    }
+    fn files(&self) -> Vec<PathBuf> {
+        vec![PathBuf::from("технология.txt")]
     }
     fn step(&self) -> Option<PathBuf> {
         None
@@ -397,6 +423,8 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         stamp: Arc::default(),
         hold: Arc::default(),
         created: Arc::default(),
+        removed: Arc::default(),
+        hidden: Arc::default(),
         title,
     }
 }
@@ -971,4 +999,122 @@ fn map_shows_versions() {
     h.get_by_label("Карта v2").click_secondary();
     wait_for(&mut h, "Сделать «Было»");
     assert!(h.query_by_label("Сделать «Стало»").is_some());
+}
+
+#[test]
+fn right_click_acts_on_its_own_row() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(dir.path(), Arc::default());
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+
+    // Выбран кронштейн, а щёлкнули по корпусу: удалять и называть — корпус.
+    h.get_by_label_contains("корпус").click_secondary();
+    wait_for(&mut h, "Удалить…");
+    h.get_by_label("Удалить…").click();
+    wait_for(&mut h, "«корпус»?");
+    assert!(h.query_by_label_contains("«кронштейн»?").is_none());
+    h.get_by_label("Отмена").click();
+    for _ in 0..4 {
+        h.step();
+    }
+
+    // Кронштейн больше не выбран, но раскрыт: у его версии своё меню.
+    h.get_by_label("v1").click_secondary();
+    wait_for(&mut h, "Вернуть эту версию");
+    assert!(h.query_by_label_contains("Сделать «Было»").is_none());
+    h.get_by_label_contains("Вернуть эту версию").click();
+    wait_for(&mut h, "«кронштейн» к v1?");
+}
+
+#[test]
+fn own_files_from_the_files_tab() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let removed = project.removed.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Файлы")
+        .click();
+    wait_for(&mut h, "~ docs/заметка.md");
+    for _ in 0..4 {
+        h.step();
+    }
+
+    // Модель так не убирают: пункта нет.
+    h.get_by_label_contains("model.step").click_secondary();
+    wait_for(&mut h, "Показать в папке");
+    assert!(h.query_by_label("Убрать файл…").is_none());
+    h.get_by_label("Показать в папке").click();
+    h.run();
+
+    // Свой файл: меню, вопрос, убран.
+    h.get_by_label_contains("~ docs/заметка.md")
+        .click_secondary();
+    wait_for(&mut h, "Убрать файл…");
+    // Меню встаёт на место со второго кадра.
+    h.run();
+    h.get_by_label("Убрать файл…").click();
+    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    h.run();
+    h.get_by_label("Убрать").click();
+    wait_for(&mut h, "убран из «кронштейн»");
+    let gone = ("кронштейн".to_string(), "docs/заметка.md".to_string());
+    assert_eq!(*removed.lock().unwrap(), [gone]);
+
+    // Delete по выбранному файлу спрашивает так же. Сначала окно перечитает
+    // деталь после «убран».
+    for _ in 0..50 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait_for(&mut h, "~ docs/заметка.md");
+    h.get_by_label_contains("~ docs/заметка.md").click();
+    h.run();
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    h.run();
+    h.get_by_label("Отмена").click();
+    h.run();
+    assert_eq!(removed.lock().unwrap().len(), 1);
+
+    h.get_by_label("Добавить файл…").click();
+    wait_for(&mut h, "добавлено docs/технология.txt");
+}
+
+#[test]
+fn version_leaves_the_map_and_comes_back() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(dir.path(), Arc::default());
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Карта v1");
+
+    // Старая версия уходит с карты, но остаётся в истории.
+    h.get_by_label("Карта v1").click_secondary();
+    wait_for(&mut h, "Убрать с карты");
+    h.run();
+    h.get_by_label("Убрать с карты").click();
+    wait_for(&mut h, "v1 «кронштейн» убрана с карты");
+    for _ in 0..30 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Одна версия на карте — карта не нужна, а в истории строка «Убрано».
+    assert!(h.query_by_label("Карта v1").is_none());
+    assert!(h.query_by_label("Карта v2").is_none());
+    h.get_by_label_contains("Убрано с карты (1)").click();
+    wait_for(&mut h, "версия 1");
+    h.get_by_label("v1").click_secondary();
+    wait_for(&mut h, "Вернуть на карту");
+    h.run();
+    h.get_by_label("Вернуть на карту").click();
+    wait_for(&mut h, "v1 «кронштейн» снова на карте");
+    wait_for(&mut h, "Карта v1");
 }

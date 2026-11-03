@@ -1,6 +1,7 @@
 //! История детали внутри дерева: «Сейчас» (несохранённое), версии с метками
-//! «было» и «стало», кнопка «Сохранить версию». Щелчок по версии другой
-//! детали выбирает её. Что значит щелчок и правая кнопка — общее с картой снизу.
+//! «было» и «стало», кнопка «Сохранить версию», свёрнутые «Убрано с карты».
+//! Щелчок по версии другой детали выбирает её. Что значит щелчок и правая
+//! кнопка — общее с картой снизу.
 
 use eframe::egui::{self, Color32, RichText};
 
@@ -15,8 +16,12 @@ pub enum Act {
     /// Выбрать другую деталь и показать у неё эту пару.
     Open(String, (Pick, Pick)),
     Save,
-    Restore(u32),
-    Export(u32),
+    /// Вернуть деталь к версии.
+    Restore(String, u32),
+    /// Выгрузить файлы версии детали.
+    Export(String, u32),
+    /// Убрать версию с карты (`true`) или вернуть на неё.
+    Hide(String, u32, bool),
 }
 
 /// Метка версии в выбранной паре.
@@ -60,41 +65,63 @@ pub fn version_pair(versions: &[VersionEntry], i: usize) -> (Pick, Pick) {
     (before, me)
 }
 
+/// Версии на карте: без убранных.
+pub fn on_map(versions: &[VersionEntry]) -> Vec<VersionEntry> {
+    versions.iter().filter(|v| !v.hidden).cloned().collect()
+}
+
 /// Щелчок по «Сейчас»: сравнить с последней версией.
 pub fn now_pair(versions: &[VersionEntry]) -> Option<(Pick, Pick)> {
     let latest = versions.first()?;
     Some((Pick::Version(latest.number), Pick::Current))
 }
 
-/// Правая кнопка по версии выбранной детали. `latest` вернуть незачем.
+/// Правая кнопка по версии детали `part`. «Было» и «Стало» — только у
+/// выбранной (`picks` есть), остальное — у любой. `latest` вернуть и убрать с
+/// карты незачем; `hidden` — версия уже убрана.
 pub fn version_menu(
     r: &egui::Response,
+    part: &str,
     me: Pick,
-    picks: (Pick, Pick),
+    picks: Option<(Pick, Pick)>,
     latest: Option<u32>,
+    hidden: bool,
     act: &mut Option<Act>,
 ) {
     let t = texts();
     r.context_menu(|ui| {
-        if ui.button(t.make_before).clicked() {
-            *act = Some(Act::Show((me, picks.1)));
-            ui.close();
+        if let Some(picks) = picks {
+            if ui.button(t.make_before).clicked() {
+                *act = Some(Act::Show((me, picks.1)));
+                ui.close();
+            }
+            if ui.button(t.make_after).clicked() {
+                *act = Some(Act::Show((picks.0, me)));
+                ui.close();
+            }
+            ui.separator();
         }
-        if ui.button(t.make_after).clicked() {
-            *act = Some(Act::Show((picks.0, me)));
-            ui.close();
-        }
-        ui.separator();
         let old = old_version(me, latest);
         if ui
             .add_enabled(old.is_some(), egui::Button::new(t.restore_version))
             .clicked()
         {
-            *act = old.map(Act::Restore);
+            *act = old.map(|n| Act::Restore(part.to_string(), n));
             ui.close();
         }
         if let (Pick::Version(n), true) = (me, ui.button(t.export_version).clicked()) {
-            *act = Some(Act::Export(n));
+            *act = Some(Act::Export(part.to_string(), n));
+            ui.close();
+        }
+        ui.separator();
+        let label = if hidden {
+            t.unhide_version
+        } else {
+            t.hide_version
+        };
+        let button = egui::Button::new(label);
+        if ui.add_enabled(old.is_some(), button).clicked() {
+            *act = old.map(|n| Act::Hide(part.to_string(), n, !hidden));
             ui.close();
         }
     });
@@ -123,8 +150,9 @@ impl App {
                 self.select_part(ctx, &part);
             }
             Some(Act::Save) => self.start_save(ctx),
-            Some(Act::Restore(n)) => self.ask_restore(Some(n)),
-            Some(Act::Export(n)) => self.export_version(ctx, Some(n)),
+            Some(Act::Restore(part, n)) => self.ask_restore_of(&part, n),
+            Some(Act::Export(part, n)) => self.export_of(ctx, part, n),
+            Some(Act::Hide(part, n, hidden)) => self.set_hidden(ctx, part, n, hidden),
             _ => {}
         }
     }
@@ -178,17 +206,33 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
         }
         ui.add_space(4.0);
     }
-    for (i, v) in versions.iter().enumerate() {
+    let shown = on_map(versions);
+    for (i, v) in shown.iter().enumerate() {
         let me = Pick::Version(v.number);
         let title = format!("v{}", v.number);
         let sub = format!("{} · {}", v.date, v.author);
         let r = row(ui, me, picks, [&title, &sub, &v.summary]);
         if r.clicked() {
-            act = Some(go(version_pair(versions, i)));
+            act = Some(go(version_pair(&shown, i)));
         }
-        if let Some(picks) = picks {
-            version_menu(&r, me, picks, latest, &mut act);
-        }
+        version_menu(&r, &part.name, me, picks, latest, false, &mut act);
+    }
+    let hidden = versions.len() - shown.len();
+    if hidden > 0 {
+        egui::CollapsingHeader::new(format!("{} ({hidden})", t.hidden_versions))
+            .id_salt(("hidden-versions", &part.name))
+            .show(ui, |ui| {
+                for (i, v) in versions.iter().enumerate().filter(|(_, v)| v.hidden) {
+                    let me = Pick::Version(v.number);
+                    let title = format!("v{}", v.number);
+                    let sub = format!("{} · {}", v.date, v.author);
+                    let r = row(ui, me, picks, [&title, &sub, &v.summary]);
+                    if r.clicked() {
+                        act = Some(go(version_pair(versions, i)));
+                    }
+                    version_menu(&r, &part.name, me, picks, latest, true, &mut act);
+                }
+            });
     }
     let ctx = ui.ctx().clone();
     app.apply(&ctx, act);

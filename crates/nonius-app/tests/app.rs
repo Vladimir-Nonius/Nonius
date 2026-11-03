@@ -198,13 +198,16 @@ fn mass_only_with_material() {
     assert_eq!(p.meta.material.as_deref(), Some("Ст3"));
     assert!((p.mass.kg().unwrap() - 1.57).abs() < 1e-9, "{p:?}");
 
+    // Нет в справочнике и плотность не задана: отказ с похожими, паспорт прежний.
     let unknown = MaterialChoice {
-        name: "Унобтаниум".into(),
+        name: "Сталь".into(),
         density_kg_m3: None,
     };
-    let p = f.app.set_material("пластина", Some(unknown)).unwrap();
-    assert!(matches!(p.mass, Mass::NoDensity { .. }), "{p:?}");
-    assert_eq!(p.meta.geometry.mass_kg, None, "старая масса стёрта");
+    let e = f.app.set_material("пластина", Some(unknown)).unwrap_err();
+    assert_eq!(e.code(), "unknown_material");
+    assert!(e.to_string().contains("Ст3, Сталь 20"), "{e}");
+    let p = f.app.passport("пластина", None).unwrap();
+    assert_eq!(p.meta.material.as_deref(), Some("Ст3"));
 
     let own = MaterialChoice {
         name: "Унобтаниум".into(),
@@ -212,6 +215,7 @@ fn mass_only_with_material() {
     };
     let p = f.app.set_material("пластина", Some(own)).unwrap();
     assert!((p.mass.kg().unwrap() - 0.2).abs() < 1e-9, "{p:?}");
+    assert!(p.meta.geometry.mass_kg.is_some(), "масса нового материала");
 
     // Тот же материал без плотности — плотность остаётся прежней.
     let again = MaterialChoice {
@@ -475,4 +479,68 @@ fn file_of_a_version_opens_as_a_copy() {
         let e = f.app.file_path("пластина", None, bad).unwrap_err();
         assert!(matches!(e, Error::UnknownFile { .. }), "{e}");
     }
+}
+
+#[test]
+fn own_files_are_added_and_removed() {
+    let f = fixture(false);
+    import(&f, 1000.0);
+    f.app.save_version("пластина", "Первая").unwrap();
+    let outside = f.root.join("..").join("технология.txt");
+    std::fs::write(&outside, "резать лазером\nгнуть 90°\n").unwrap();
+
+    let path = f.app.add_file("пластина", &outside).unwrap();
+    assert_eq!(path, "docs/технология.txt");
+    let item = f.app.item("пластина").unwrap();
+    assert!(item.dir.join("docs/технология.txt").is_file());
+    // Свой файл не перезаписывается.
+    let e = f.app.add_file("пластина", &outside).unwrap_err();
+    assert_eq!(e.code(), "already_exists", "{e}");
+    let e = f
+        .app
+        .add_file("пластина", &f.root.join("нет.txt"))
+        .unwrap_err();
+    assert_eq!(e.code(), "file_not_found", "{e}");
+
+    // Новый файл читается целиком как добавленные строки.
+    let lines = f
+        .app
+        .file_diff("пластина", Some(v(1)), None, &path)
+        .unwrap();
+    let text: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(text, ["резать лазером", "гнуть 90°"]);
+    let whole = f.app.file_text("пластина", None, &path).unwrap();
+    assert_eq!(whole, "резать лазером\nгнуть 90°");
+    let e = f.app.file_text("пластина", None, "model.step").unwrap_err();
+    assert_eq!(e.code(), "not_text", "{e}");
+    let e = f.app.file_text("пластина", Some(v(1)), &path).unwrap_err();
+    assert_eq!(e.code(), "unknown_file", "в v1 его ещё нет: {e}");
+
+    for kept in ["model.step", "meta.yaml"] {
+        let e = f.app.remove_file("пластина", kept).unwrap_err();
+        assert_eq!(e.code(), "protected_file", "{e}");
+    }
+    for bad in ["../пластина/meta.yaml", "docs/нет.txt", ""] {
+        let e = f.app.remove_file("пластина", bad).unwrap_err();
+        assert_eq!(e.code(), "unknown_file", "{e}");
+    }
+    f.app.remove_file("пластина", &path).unwrap();
+    assert!(!item.dir.join("docs").exists(), "пустая docs/ убрана");
+}
+
+#[test]
+fn old_version_leaves_the_map() {
+    let f = fixture(false);
+    import(&f, 1000.0);
+    f.app.save_version("пластина", "Первая").unwrap();
+    import(&f, 2000.0);
+    f.app.save_version("пластина", "Вторая").unwrap();
+
+    let e = f.app.set_hidden("пластина", v(2), true).unwrap_err();
+    assert_eq!(e.code(), "latest_version", "{e}");
+    assert!(f.app.set_hidden("пластина", v(1), true).unwrap().hidden);
+    let list = f.app.versions("пластина").unwrap();
+    assert_eq!(list.len(), 2);
+    assert!(list[1].hidden);
+    assert!(!f.app.set_hidden("пластина", v(1), false).unwrap().hidden);
 }

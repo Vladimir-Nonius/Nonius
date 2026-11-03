@@ -57,6 +57,19 @@ pub enum Error {
     #[error("плотность {0} кг/м³ не подходит: нужно число больше нуля")]
     BadDensity(f64),
 
+    /// Материала нет в справочнике, плотность не задана.
+    #[error("«{name}» нет в справочнике: укажите плотность в кг/м³ или выберите материал из справочника{}", if similar.is_empty() { String::new() } else { format!(": {similar}") })]
+    UnknownMaterial {
+        /// Как назвали материал.
+        name: String,
+        /// Похожие из справочника через запятую.
+        similar: String,
+    },
+
+    /// Последнюю версию нельзя убрать с карты.
+    #[error("{0} — последняя версия, её убрать с карты нельзя: она и есть деталь сейчас")]
+    LatestVersion(nonius_core::VersionNumber),
+
     /// В этой версии детали нет такого файла.
     #[error("в «{item}» нет файла {path}")]
     UnknownFile {
@@ -65,6 +78,28 @@ pub enum Error {
         /// Путь внутри папки детали.
         path: String,
     },
+
+    /// В детали уже есть файл с таким именем.
+    #[error("в «{item}» уже есть {path}: переименуйте свой файл или уберите старый")]
+    FileExists {
+        /// Деталь.
+        item: String,
+        /// Путь внутри папки детали.
+        path: String,
+    },
+
+    /// Файл модели или служебный файл нельзя убрать руками.
+    #[error("{path} в «{item}» ведёт Nonius: модель меняется новой версией, служебные файлы не убираются")]
+    ProtectedFile {
+        /// Деталь.
+        item: String,
+        /// Путь внутри папки детали.
+        path: String,
+    },
+
+    /// Файл не текстовый: его смотрят программой.
+    #[error("{0} не текстовый файл: откройте его программой (nonius open)")]
+    NotText(String),
 
     /// Система не смогла открыть файл.
     #[error("не удалось открыть {path}: {why}")]
@@ -125,13 +160,23 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("no_versions", "у детали ещё нет версий"),
     ("no_renderer", "сборка без подсветки изменений"),
     ("bad_density", "неверная плотность"),
+    (
+        "unknown_material",
+        "материала нет в справочнике, нужна плотность",
+    ),
     ("unknown_file", "в версии нет такого файла"),
+    ("latest_version", "последнюю версию не убрать с карты"),
     ("open_failed", "система не смогла открыть файл"),
     ("cancelled", "расчёт отменён"),
     ("inside_project", "папка уже внутри другого проекта"),
     ("in_use", "файлы детали открыты в другой программе"),
     ("not_deleted", "среди удалённых нет такой детали"),
     ("not_step", "сравнить можно только с файлом STEP"),
+    ("not_text", "файл не текстовый"),
+    (
+        "protected_file",
+        "файл модели или служебный файл не убирается",
+    ),
 ];
 
 impl Error {
@@ -148,7 +193,12 @@ impl Error {
             Self::NoVersions(_) => "no_versions",
             Self::NoRenderer => "no_renderer",
             Self::BadDensity(_) => "bad_density",
+            Self::UnknownMaterial { .. } => "unknown_material",
             Self::UnknownFile { .. } => "unknown_file",
+            Self::LatestVersion(_) => "latest_version",
+            Self::FileExists { .. } => "already_exists",
+            Self::ProtectedFile { .. } => "protected_file",
+            Self::NotText(_) => "not_text",
             Self::OpenFailed { .. } => "open_failed",
             Self::Cancelled => "cancelled",
             Self::InsideProject { .. } => "inside_project",

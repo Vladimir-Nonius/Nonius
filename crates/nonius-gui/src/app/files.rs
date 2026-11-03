@@ -1,5 +1,6 @@
-//! Вкладка «Файлы»: что в версии, что изменилось, разница текста и «Открыть».
-//! Изменённые файлы идут первыми. Файл версии открывается копией.
+//! Вкладка «Файлы»: что в версии, что изменилось, разница текста и «Открыть»,
+//! свой файл добавить или убрать (меню и клавиша Delete). Изменённые файлы
+//! идут первыми. Файл версии открывается копией.
 
 use eframe::egui::{self, Color32, RichText};
 
@@ -21,6 +22,7 @@ const SERVICE_FILES: [&str; 3] = ["meta.yaml", "tree.yaml", "preview.png"];
 enum Ask {
     Select(String),
     Refresh,
+    Add,
 }
 
 /// Откуда строим меню правого щелчка.
@@ -28,6 +30,8 @@ struct MenuPlace<'a> {
     programs: &'a Programs,
     part: &'a str,
     picks: (Pick, Pick),
+    /// «Стало» — это то, что лежит в папке детали сейчас.
+    now: bool,
 }
 
 impl MenuPlace<'_> {
@@ -38,6 +42,7 @@ impl MenuPlace<'_> {
             path: path.to_string(),
             openable: true,
             model_slot: false,
+            removable: pick == self.picks.1 && self.now && !protected(path),
         }
     }
 
@@ -120,10 +125,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let Some(part) = app.part.as_deref() else {
         return;
     };
+    let entry = app.parts.iter().find(|p| p.name == part);
+    let latest = app.versions.first().map(|v| Pick::Version(v.number));
+    let now =
+        picks.1 == Pick::Current || (Some(picks.1) == latest && !entry.is_some_and(|p| p.dirty));
     let place = MenuPlace {
         programs: &app.programs,
         part,
         picks,
+        now,
     };
     let mut ask = None;
     let mut asked = None;
@@ -153,10 +163,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             }
         }
     });
+    // Delete по выбранному файлу — как «Убрать файл…» в меню.
     let ctx = ui.ctx().clone();
+    let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !ctx.wants_keyboard_input();
+    if let (true, None, None, Some(path)) = (delete, &asked, &app.dialog, app.file.clone()) {
+        let exists = files.iter().any(|f| f.path == path && f.after.is_some());
+        if exists && place.target(picks.1, &path).removable {
+            asked = Some(open_menu::Ask::RemoveFile(part.to_string(), path));
+        }
+    }
     match ask {
         Some(Ask::Select(path)) => app.select_file(&ctx, path),
         Some(Ask::Refresh) => app.reread(&ctx),
+        Some(Ask::Add) => app.add_files(&ctx, part.to_string()),
         None => {}
     }
     app.answer_menu(&ctx, asked);
@@ -174,6 +193,9 @@ fn list(
     ui.horizontal(|ui| {
         if ui.small_button(t.refresh).clicked() {
             *ask = Some(Ask::Refresh);
+        }
+        if ui.small_button(t.add_file).clicked() {
+            *ask = Some(Ask::Add);
         }
     });
     if files.is_empty() {
@@ -227,6 +249,11 @@ fn file_row(
         place.picks.0
     };
     place.attach(&row, pick, &f.path, asked);
+}
+
+/// Модель и служебные файлы убирать руками нельзя.
+fn protected(path: &str) -> bool {
+    SERVICE_FILES.contains(&path) || path.starts_with("model.")
 }
 
 fn detail(
