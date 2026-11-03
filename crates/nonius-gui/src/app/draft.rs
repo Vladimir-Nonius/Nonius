@@ -50,30 +50,50 @@ impl App {
     }
 
     /// «Сохранить проект как…»: перенести черновик в папку, которую выберут.
-    pub(super) fn save_draft(&mut self, ctx: &egui::Context) {
-        let t = texts();
-        let Some(from) = self.tab.project.as_ref().map(|p| p.root().to_path_buf()) else {
-            return;
-        };
-        if self.tab.jobs.busy() {
-            self.tab.message = Some(t.wait_for_work.to_string());
+    /// Перенос ждёт, пока фоновые работы вкладки закончатся.
+    pub(super) fn save_draft(&mut self, _ctx: &egui::Context) {
+        if self.tab.project.is_none() || self.tab.save_to.is_some() {
             return;
         }
-        let Some(to) = self.chooser.folder(&self.path_input) else {
+        if let Some(to) = self.chooser.folder(&self.path_input) {
+            self.tab.save_to = Some(to);
+        }
+    }
+
+    /// Перенести черновик, как только вкладка свободна.
+    pub(super) fn move_when_free(&mut self, ctx: &egui::Context) {
+        if self.tab.save_to.is_none() || self.tab.jobs.busy() {
+            return;
+        }
+        let (Some(to), Some(project)) = (self.tab.save_to.take(), self.tab.project.take()) else {
             return;
         };
+        let from = project.root().to_path_buf();
         // Проект закрывается: держать его открытым при переносе нельзя.
+        drop(project);
         self.tab = ProjectTab::default();
         let (mover, opener) = (self.mover.clone(), self.opener.clone());
         let drafts = self.drafts.clone();
-        self.tab.jobs.spawn(ctx, move |_| match mover(&from, &to) {
-            Ok(()) => {
-                if let Some(stamp) = from.parent().filter(|p| Some(*p) != drafts.as_deref()) {
-                    let _ = std::fs::remove_dir(stamp);
+        self.tab.jobs.spawn(ctx, move |_| {
+            // Поток прошлой работы мог ещё не отпустить файлы: ждём немного.
+            let mut moved = mover(&from, &to);
+            for _ in 0..20 {
+                let full = std::fs::read_dir(&to).is_ok_and(|mut d| d.next().is_some());
+                if moved.is_ok() || !from.exists() || full {
+                    break;
                 }
-                Done::Moved(opener(&to), None)
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                moved = mover(&from, &to);
             }
-            Err(e) => Done::Moved(opener(&from), Some(format!("{e:#}"))),
+            match moved {
+                Ok(()) => {
+                    if let Some(stamp) = from.parent().filter(|p| Some(*p) != drafts.as_deref()) {
+                        let _ = std::fs::remove_dir(stamp);
+                    }
+                    Done::Moved(opener(&to), None)
+                }
+                Err(e) => Done::Moved(opener(&from), Some(format!("{e:#}"))),
+            }
         });
     }
 
@@ -151,13 +171,27 @@ pub fn bar(app: &mut App, ctx: &egui::Context) {
         return;
     }
     let t = texts();
-    let fill = ctx.style().visuals.warn_fg_color.gamma_multiply(0.15);
+    // Светло-жёлтая полоса, в тёмной теме — тёмно-жёлтая.
+    let (fill, text) = if ctx.style().visuals.dark_mode {
+        (
+            egui::Color32::from_rgb(74, 60, 20),
+            egui::Color32::from_rgb(250, 220, 140),
+        )
+    } else {
+        (
+            egui::Color32::from_rgb(255, 240, 190),
+            egui::Color32::from_rgb(110, 75, 0),
+        )
+    };
     egui::TopBottomPanel::top("draft-bar")
         .frame(egui::Frame::side_top_panel(&ctx.style()).fill(fill))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(t.draft_bar).color(ui.visuals().warn_fg_color));
-                if ui.button(t.save_draft).clicked() {
+                ui.label(RichText::new(t.draft_bar).color(text));
+                if app.tab.save_to.is_some() {
+                    ui.spinner();
+                    ui.label(RichText::new(t.draft_saving).color(text));
+                } else if ui.button(t.save_draft).clicked() {
                     app.save_draft(ctx);
                 }
             });

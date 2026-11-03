@@ -71,4 +71,6 @@ pub(super) struct ProjectTab {
     pub file: Option<String>,
     /// Строки выбранного текстового файла.
     pub file_text: Option<Vec<DiffEntry>>,
+    /// Черновик сохраняется в эту папку, как только вкладка освободится.
+    pub save_to: Option<PathBuf>,
 }

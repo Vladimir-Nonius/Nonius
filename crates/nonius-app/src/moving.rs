@@ -26,7 +26,11 @@ pub fn move_project(from: &Path, to: &Path) -> Result<()> {
         fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
     }
     // На другой диск папку не переименовать: тогда копия и удаление.
-    if fs::rename(from, to).is_err() {
+    // Другие ошибки (файл занят) — без копии, чтобы не оставить две.
+    if let Err(e) = fs::rename(from, to) {
+        if !other_disk(&e) {
+            return Err(Error::io(from, e));
+        }
         copy_dir(from, to)?;
         fs::remove_dir_all(from).map_err(|e| Error::io(from, e))?;
     }
@@ -36,6 +40,13 @@ pub fn move_project(from: &Path, to: &Path) -> Result<()> {
         project.update_config(|c| c.name = name)?;
     }
     Ok(())
+}
+
+/// Переименовать не вышло, потому что папка на другом диске.
+fn other_disk(e: &std::io::Error) -> bool {
+    // Windows: ERROR_NOT_SAME_DEVICE; Linux и macOS: EXDEV.
+    matches!(e.raw_os_error(), Some(17) if cfg!(windows))
+        || matches!(e.raw_os_error(), Some(18) if !cfg!(windows))
 }
 
 /// Скопировать папку со всем содержимым.

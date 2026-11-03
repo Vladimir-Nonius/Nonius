@@ -35,7 +35,9 @@ impl App {
                 }
                 Done::Moved(Ok(p), error) => {
                     self.got_project(ctx, p);
-                    self.tab.message = error;
+                    // Выбор детали стирает сообщение: ошибка ждёт, пока деталь покажется.
+                    self.tab.message = error.clone();
+                    self.tab.sticky = error;
                     break;
                 }
                 Done::Moved(Err(e), _) | Done::Opened(Err(e)) => {

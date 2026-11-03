@@ -63,6 +63,11 @@ struct Desk {
 impl Desk {
     /// Окно без проекта на начальном экране.
     fn new() -> Self {
+        Self::with_drafts(false)
+    }
+
+    /// Окно; `drafts` — с черновиком при запуске, как у человека.
+    fn with_drafts(drafts: bool) -> Self {
         for (k, v) in [
             ("GIT_AUTHOR_NAME", "Тестировщик"),
             ("GIT_AUTHOR_EMAIL", "test@example.com"),
@@ -83,8 +88,10 @@ impl Desk {
             chooser: answers.clone(),
             part: None,
             picks: None,
-            drafts: None,
-            mover: Arc::new(|_, _| anyhow::bail!("не нужно")),
+            drafts: drafts.then(|| dir.join("черновики")),
+            mover: Arc::new(|from: &Path, to: &Path| {
+                nonius_app::move_project(from, to).map_err(|e| plainly(e.into()))
+            }),
         };
         let h = Harness::builder()
             .with_size([1280.0, 800.0])
@@ -139,7 +146,7 @@ impl Desk {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        panic!("не ушло «{text}»");
+        panic!("не ушло «{text}», на экране: {:#?}", self.screen());
     }
 
     /// Дать окну дорисоваться: окошко в первом кадре ещё без места на экране.
@@ -534,4 +541,31 @@ fn own_file_of_a_part() {
         ["v1"],
         "истории не тронута"
     );
+}
+
+/// Черновик: деталь без папки проекта, потом «Сохранить проект как…» —
+/// проект с историей переезжает, хотя окно держало его открытым.
+#[test]
+fn draft_becomes_a_project() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let mut d = Desk::with_drafts(true);
+    d.wait("Черновик: проект пока во временной папке");
+    d.wait("Без имени");
+    let plate = d.sample("plate-v1.step", "плита.step");
+    d.choose_models(&[&plate]);
+    d.press("Добавить модели…");
+    d.wait("Будет новая деталь «плита»");
+    d.press("Добавить");
+    d.wait("плита   v1");
+
+    let target = d.dir.join("Мастерская");
+    std::fs::create_dir(&target).unwrap();
+    d.answers.folders.lock().unwrap().push_back(target.clone());
+    d.press("Сохранить проект как…");
+    d.wait_gone("Черновик: проект пока во временной папке");
+    d.wait("Мастерская");
+    d.wait("плита   v1");
+    assert_eq!(saved_versions(&target, "плита"), ["v1"]);
+    let drafts = d.dir.join("черновики");
+    assert_eq!(std::fs::read_dir(drafts).unwrap().count(), 0);
 }

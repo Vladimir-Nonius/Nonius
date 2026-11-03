@@ -153,10 +153,10 @@ pub fn create_project(root: &Path, name: Option<&str>) -> Result<Created> {
     }
     let name = match name {
         Some(n) => n.to_string(),
-        None => root
-            .canonicalize()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        // Папки может ещё не быть: имя берётся из пути, а не с диска.
+        None => full
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Проект".into()),
     };
     let p = Project::init(root, &name)?;

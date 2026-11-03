@@ -159,6 +159,11 @@ impl eframe::App for App {
             self.draft_wanted = false;
             self.new_draft(ctx);
         }
+        // Меню выше вкладок: оно у окна одно на все проекты.
+        if self.tab.project.is_some() {
+            file_menu::show(self, ctx);
+        }
+        self.move_when_free(ctx);
         strip::show(self, ctx);
         draft::bar(self, ctx);
         draft::ask(self, ctx);
@@ -167,7 +172,6 @@ impl eframe::App for App {
             start::show(self, ctx);
             return;
         }
-        file_menu::show(self, ctx);
         panels::error_bar(self, ctx);
         panels::status_bar(self, ctx);
         map::show(self, ctx);
