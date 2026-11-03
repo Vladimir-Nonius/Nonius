@@ -153,6 +153,7 @@ fn target(p: &PartEntry) -> Target {
         path: p.model.clone().unwrap_or_else(|| META_FILE.to_string()),
         openable: p.model.is_some(),
         model_slot: true,
+        removable: false,
     }
 }
 

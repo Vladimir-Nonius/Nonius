@@ -288,7 +288,8 @@ fn json_answers_and_stable_error_codes() {
     assert!(nonius(d, &["init"]).0);
     assert_eq!(code(json(d, &["--json", "нет-команды"])), "usage");
     assert_eq!(code(json(d, &["log", "нет", "--json"])), "unknown_item");
-    assert_eq!(code(json(d, &["init", "--json"])), "no_json");
+    assert_eq!(code(json(d, &["init", "--json"])), "already_exists");
+    assert_eq!(code(json(d, &["view", "--json"])), "no_json");
 
     let made = json(d, &["part", "new", "вал", "--json"]);
     assert_eq!(made["data"]["kind"], "part", "{made}");

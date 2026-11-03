@@ -15,6 +15,8 @@ pub enum Dialog {
     Delete(Confirm),
     /// Вернуть деталь к версии?
     Restore(Confirm, u32),
+    /// Убрать файл из папки детали?
+    RemoveFile(Confirm, String),
     /// Список удалённых деталей; `None` — ещё читается.
     Deleted(Option<Vec<DeletedEntry>>, Confirm),
 }
@@ -48,7 +50,10 @@ impl Dialog {
                 d.focused = false;
                 &mut d.base
             }
-            Dialog::Delete(c) | Dialog::Restore(c, _) | Dialog::Deleted(_, c) => c,
+            Dialog::Delete(c)
+            | Dialog::Restore(c, _)
+            | Dialog::RemoveFile(c, _)
+            | Dialog::Deleted(_, c) => c,
         };
         base.busy = false;
         base.error = Some(error);
@@ -57,7 +62,10 @@ impl Dialog {
     pub(super) fn base(&mut self) -> &mut Confirm {
         match self {
             Dialog::Rename(d) => &mut d.base,
-            Dialog::Delete(c) | Dialog::Restore(c, _) | Dialog::Deleted(_, c) => c,
+            Dialog::Delete(c)
+            | Dialog::Restore(c, _)
+            | Dialog::RemoveFile(c, _)
+            | Dialog::Deleted(_, c) => c,
         }
     }
 }
@@ -69,7 +77,8 @@ enum Pressed {
     No,
 }
 
-/// Вопрос с кнопками «да» и «Отмена». `yes` — `None`: сделать нельзя.
+/// Вопрос с кнопками «да» и «Отмена». `yes` — `None`: сделать нельзя или
+/// нечего, тогда окошко только «Закрыть».
 fn question(
     ctx: &egui::Context,
     title: &str,
@@ -95,10 +104,8 @@ fn question(
                     pressed = Some(Pressed::Yes);
                 }
             }
-            if ui
-                .add_enabled(!base.busy, egui::Button::new(t.cancel))
-                .clicked()
-            {
+            let no = if yes.is_some() { t.cancel } else { t.close };
+            if ui.add_enabled(!base.busy, egui::Button::new(no)).clicked() {
                 pressed = Some(Pressed::No);
             }
         });
@@ -127,6 +134,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 if unsaved {
                     ui.add(egui::Label::new(t.delete_unsaved).wrap());
                 }
+            })
+        }
+        Some(Dialog::RemoveFile(base, path)) => {
+            let title = format!("{} {path}?", t.remove_file_title);
+            question(ctx, &title, base, Some(t.remove), |ui| {
+                ui.add(egui::Label::new(t.remove_file_why).wrap());
             })
         }
         Some(Dialog::Restore(base, version)) => {

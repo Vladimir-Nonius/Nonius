@@ -37,6 +37,26 @@ impl App {
         self.dialog = Some(Dialog::Restore(confirm(part), version));
     }
 
+    /// Выбрать свои файлы и положить их в `docs/` детали.
+    pub(super) fn add_files(&mut self, ctx: &egui::Context, part: String) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let files = self.chooser.files();
+        if files.is_empty() {
+            return;
+        }
+        self.jobs.spawn(ctx, move |_| {
+            let added = files.iter().map(|f| project.add_file(&part, f)).collect();
+            Done::FilesAdded(part, added)
+        });
+    }
+
+    /// Спросить, убрать ли файл из папки детали.
+    pub(super) fn ask_remove_file(&mut self, part: &str, path: String) {
+        self.dialog = Some(Dialog::RemoveFile(confirm(part), path));
+    }
+
     /// Показать удалённые детали.
     pub(super) fn show_deleted(&mut self, ctx: &egui::Context) {
         let Some(project) = self.project.clone() else {
@@ -72,6 +92,13 @@ impl App {
                 self.jobs.spawn(ctx, move |_| {
                     let done = project.delete_part(&part);
                     Done::PartDeleted(part, done)
+                });
+            }
+            Some(Dialog::RemoveFile(c, path)) => {
+                let (part, path) = (c.part.clone(), path.clone());
+                self.jobs.spawn(ctx, move |_| {
+                    let done = project.remove_file(&part, &path);
+                    Done::FileRemoved(part, path, done)
                 });
             }
             Some(Dialog::Restore(c, version)) => {

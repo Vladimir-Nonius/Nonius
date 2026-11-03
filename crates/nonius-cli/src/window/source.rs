@@ -508,6 +508,16 @@ impl ProjectSource for AppSource {
         Ok(done.version.get())
     }
 
+    fn add_file(&self, part: &str, file: &Path) -> Result<String> {
+        let _files = self.writing();
+        Ok(self.app.add_file(part, file)?)
+    }
+
+    fn remove_file(&self, part: &str, path: &str) -> Result<()> {
+        let _files = self.writing();
+        Ok(self.app.remove_file(part, path)?)
+    }
+
     fn export_version(&self, part: &str, version: u32, dest: &Path) -> Result<usize> {
         let number = VersionNumber::new(version)?;
         let _files = self.reading();

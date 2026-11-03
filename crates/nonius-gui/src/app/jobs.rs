@@ -67,6 +67,10 @@ pub enum Done {
     Exported(String, u32, PathBuf, anyhow::Result<usize>),
     /// Сравнение с файлом или другой деталью: деталь, подпись, результат.
     ComparedOutside(String, String, anyhow::Result<Comparison>),
+    /// Свои файлы положены в деталь: пути внутри неё.
+    FilesAdded(String, anyhow::Result<Vec<String>>),
+    /// Файл убран из папки детали.
+    FileRemoved(String, String, anyhow::Result<()>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

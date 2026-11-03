@@ -36,6 +36,8 @@ struct Fake {
     hold: Arc<Mutex<()>>,
     /// Какие детали созданы из окна.
     created: Arc<Mutex<Vec<(String, bool)>>>,
+    /// Какие файлы убрали из окна: деталь и путь.
+    removed: Arc<Mutex<Vec<(String, String)>>>,
     /// Название проекта.
     title: &'static str,
 }
@@ -276,6 +278,16 @@ impl ProjectSource for Fake {
     fn restore_version(&self, _part: &str, _version: u32) -> anyhow::Result<u32> {
         Ok(3)
     }
+    fn add_file(&self, _part: &str, file: &Path) -> anyhow::Result<String> {
+        Ok(format!("docs/{}", file.display()))
+    }
+    fn remove_file(&self, part: &str, path: &str) -> anyhow::Result<()> {
+        self.removed
+            .lock()
+            .unwrap()
+            .push((part.to_string(), path.to_string()));
+        Ok(())
+    }
     fn export_version(&self, _part: &str, _version: u32, _dest: &Path) -> anyhow::Result<usize> {
         Ok(2)
     }
@@ -299,6 +311,9 @@ impl Chooser for NoDialogs {
     }
     fn models(&self) -> Vec<PathBuf> {
         Vec::new()
+    }
+    fn files(&self) -> Vec<PathBuf> {
+        vec![PathBuf::from("технология.txt")]
     }
     fn step(&self) -> Option<PathBuf> {
         None
@@ -397,6 +412,7 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         stamp: Arc::default(),
         hold: Arc::default(),
         created: Arc::default(),
+        removed: Arc::default(),
         title,
     }
 }
@@ -999,4 +1015,62 @@ fn right_click_acts_on_its_own_row() {
     assert!(h.query_by_label_contains("Сделать «Было»").is_none());
     h.get_by_label_contains("Вернуть эту версию").click();
     wait_for(&mut h, "«кронштейн» к v1?");
+}
+
+#[test]
+fn own_files_from_the_files_tab() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let removed = project.removed.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Файлы")
+        .click();
+    wait_for(&mut h, "~ docs/заметка.md");
+    for _ in 0..4 {
+        h.step();
+    }
+
+    // Модель так не убирают: пункта нет.
+    h.get_by_label_contains("model.step").click_secondary();
+    wait_for(&mut h, "Показать в папке");
+    assert!(h.query_by_label("Убрать файл…").is_none());
+    h.get_by_label("Показать в папке").click();
+    h.run();
+
+    // Свой файл: меню, вопрос, убран.
+    h.get_by_label_contains("~ docs/заметка.md")
+        .click_secondary();
+    wait_for(&mut h, "Убрать файл…");
+    // Меню встаёт на место со второго кадра.
+    h.run();
+    h.get_by_label("Убрать файл…").click();
+    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    h.run();
+    h.get_by_label("Убрать").click();
+    wait_for(&mut h, "убран из «кронштейн»");
+    let gone = ("кронштейн".to_string(), "docs/заметка.md".to_string());
+    assert_eq!(*removed.lock().unwrap(), [gone]);
+
+    // Delete по выбранному файлу спрашивает так же. Сначала окно перечитает
+    // деталь после «убран».
+    for _ in 0..50 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait_for(&mut h, "~ docs/заметка.md");
+    h.get_by_label_contains("~ docs/заметка.md").click();
+    h.run();
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    h.run();
+    h.get_by_label("Отмена").click();
+    h.run();
+    assert_eq!(removed.lock().unwrap().len(), 1);
+
+    h.get_by_label("Добавить файл…").click();
+    wait_for(&mut h, "добавлено docs/технология.txt");
 }

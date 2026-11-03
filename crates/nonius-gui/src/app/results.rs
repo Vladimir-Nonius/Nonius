@@ -186,7 +186,25 @@ impl App {
                     self.notice = Some(format!("«{name}» {} v{version}: v{n}", t.restored_to));
                     self.refresh(ctx);
                 }
+                Done::FilesAdded(name, result) => match result {
+                    Ok(paths) => {
+                        let text = format!(
+                            "«{name}»: {} {}. {}",
+                            t.files_added,
+                            paths.join(", "),
+                            t.save_to_keep
+                        );
+                        self.reload_on(ctx, name, text);
+                    }
+                    Err(e) => self.message = Some(format!("{}: {e:#}", t.error)),
+                },
+                Done::FileRemoved(name, path, Ok(())) => {
+                    self.dialog = None;
+                    let text = format!("{path} {} «{name}». {}", t.file_removed, t.save_to_keep);
+                    self.reload_on(ctx, name, text);
+                }
                 Done::PartRenamed(_, _, Err(e))
+                | Done::FileRemoved(_, _, Err(e))
                 | Done::PartDeleted(_, Err(e))
                 | Done::PartRecovered(_, Err(e))
                 | Done::Restored(_, _, Err(e)) => match self.dialog.as_mut() {

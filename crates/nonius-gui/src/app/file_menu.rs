@@ -91,14 +91,14 @@ fn part_menu(app: &mut App, ui: &mut egui::Ui) {
         }
         let model = app.parts.iter().find(|p| p.name == part);
         let replace = model.is_some_and(|p| p.model.is_some());
-        let label = if replace {
-            t.replace_model
-        } else {
-            t.add_model
-        };
+        let label = if replace { t.add_version } else { t.add_model };
         if ui.button(label).clicked() {
             ui.close();
             app.start_adding(app.chooser.models(), Some(part.clone()));
+        }
+        if ui.button(t.add_file).clicked() {
+            ui.close();
+            app.add_files(&ctx, part.clone());
         }
         ui.separator();
         if ui.button(t.compare_file).clicked() {

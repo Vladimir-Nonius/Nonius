@@ -33,6 +33,10 @@ impl Chooser for SystemChooser {
             .pick_file()
     }
 
+    fn files(&self) -> Vec<PathBuf> {
+        rfd::FileDialog::new().pick_files().unwrap_or_default()
+    }
+
     fn picture(&self, name: &str) -> Option<PathBuf> {
         rfd::FileDialog::new()
             .set_file_name(name)
@@ -53,6 +57,10 @@ impl Chooser for SystemChooser {
 
     fn step(&self) -> Option<PathBuf> {
         None
+    }
+
+    fn files(&self) -> Vec<PathBuf> {
+        Vec::new()
     }
 
     fn picture(&self, name: &str) -> Option<PathBuf> {
