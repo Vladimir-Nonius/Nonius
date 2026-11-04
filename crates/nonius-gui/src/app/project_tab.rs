@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::jobs::Jobs;
-use super::{add_model, bottom, material, new_part, open_menu, part_dialogs, save};
+use super::{add_model, bottom, material, new_folder, new_part, open_menu, part_dialogs, save};
 use crate::source::{
     Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
     VersionEntry,
@@ -40,6 +40,15 @@ pub(super) struct ProjectTab {
     pub search: String,
     /// Раскрытые в дереве детали.
     pub expanded: BTreeSet<String>,
+    /// Папки-группы проекта: путь от корня через `/`.
+    pub folders: Vec<String>,
+    /// Свёрнутые в дереве папки; новые видны раскрытыми.
+    pub folded: BTreeSet<String>,
+    /// Куда класть новую деталь или папку: последняя выбранная папка,
+    /// пустая строка — корень.
+    pub place: String,
+    /// Открытое окошко «Новая папка».
+    pub new_folder: Option<new_folder::NewFolder>,
     /// Версии раскрытых деталей, кроме выбранной.
     pub listed: HashMap<String, Vec<VersionEntry>>,
     /// С чем сравнивается деталь вне истории: имя файла или детали.

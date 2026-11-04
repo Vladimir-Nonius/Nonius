@@ -48,6 +48,10 @@ impl App {
         self.tab.jobs.forget_all();
         self.tab.parts.clear();
         self.tab.expanded.clear();
+        self.tab.folders.clear();
+        self.tab.folded.clear();
+        self.tab.place.clear();
+        self.tab.new_folder = None;
         self.tab.listed.clear();
         self.tab.dialog = None;
         self.select(None);
@@ -63,7 +67,7 @@ impl App {
         self.tab.search.clear();
         self.tab
             .jobs
-            .spawn(ctx, move |_| Done::Parts(project.parts()));
+            .spawn(ctx, move |_| Done::Parts(project.listing()));
         self.remember_tabs();
     }
 
@@ -94,7 +98,7 @@ impl App {
         if let Some(project) = self.tab.project.clone() {
             self.tab
                 .jobs
-                .spawn(ctx, move |_| Done::Parts(project.parts()));
+                .spawn(ctx, move |_| Done::Parts(project.listing()));
         }
     }
 
@@ -133,20 +137,25 @@ impl App {
             self.tab.reread_wanted = false;
             self.tab
                 .jobs
-                .spawn(ctx, move |_| Done::Reread(project.parts()));
+                .spawn(ctx, move |_| Done::Reread(project.listing()));
         }
     }
 
     /// Пришёл свежий список деталей. Если выбранная изменилась — показать
     /// заново; если её больше нет — снять выбор.
-    pub(super) fn got_parts(&mut self, ctx: &egui::Context, parts: Vec<crate::source::PartEntry>) {
+    pub(super) fn got_parts(&mut self, ctx: &egui::Context, listing: crate::source::Listing) {
+        // Перенос в другую папку показ не меняет: папку не сравниваем.
         let find = |list: &[crate::source::PartEntry], name: &str| {
-            list.iter().find(|p| p.name == name).cloned()
+            let p = list.iter().find(|p| p.name == name)?;
+            Some(crate::source::PartEntry {
+                folder: String::new(),
+                ..p.clone()
+            })
         };
         let chosen = self.tab.part.clone();
         let before = chosen.as_deref().and_then(|n| find(&self.tab.parts, n));
-        let after = chosen.as_deref().and_then(|n| find(&parts, n));
-        self.set_parts(ctx, parts);
+        let after = chosen.as_deref().and_then(|n| find(&listing.parts, n));
+        self.set_parts(ctx, listing);
         if chosen.is_some() && after.is_none() {
             self.clear_part();
         } else if before != after {
@@ -161,10 +170,10 @@ impl App {
         let (Some(project), Some(name)) = (self.tab.project.clone(), self.tab.part.clone()) else {
             return;
         };
-        self.tab.jobs.spawn(ctx, move |_| match project.parts() {
-            Ok(parts) => {
+        self.tab.jobs.spawn(ctx, move |_| match project.listing() {
+            Ok(listing) => {
                 let versions = project.versions(&name);
-                Done::Refreshed(parts, name, versions)
+                Done::Refreshed(listing, name, versions)
             }
             Err(e) => Done::Parts(Err(e)),
         });
@@ -302,12 +311,18 @@ impl App {
     }
 
     /// Создать деталь из окошка «Новая деталь».
-    pub(super) fn create_part(&mut self, ctx: &egui::Context, name: String, assembly: bool) {
+    pub(super) fn create_part(
+        &mut self,
+        ctx: &egui::Context,
+        name: String,
+        assembly: bool,
+        folder: String,
+    ) {
         let Some(project) = self.tab.project.clone() else {
             return;
         };
         self.tab.jobs.spawn(ctx, move |_| {
-            let made = project.new_part(&name, assembly);
+            let made = project.new_part(&name, assembly, &folder);
             Done::PartCreated(name, made)
         });
     }
@@ -324,7 +339,7 @@ impl App {
         self.tab.search.clear();
         self.tab
             .jobs
-            .spawn(ctx, move |_| Done::Parts(project.parts()));
+            .spawn(ctx, move |_| Done::Parts(project.listing()));
     }
 
     /// Человек поменял переключатель — запомнить.

@@ -1,22 +1,41 @@
-//! Дерево слева: поиск, детали проекта, внутри раскрытых — их история.
+//! Дерево слева: поиск, папки и детали проекта, внутри раскрытых деталей —
+//! их история. Папки и перетаскивание — в `tree_folders.rs`.
 
 use eframe::egui::{self, Color32, RichText};
 
 use super::jobs::Done;
-use super::open_menu::{self, Target};
+use super::open_menu::{self, Ask, Target};
+use super::tree_folders::{self, Dragged};
 use super::App;
-use crate::source::{PartEntry, Pick};
+use crate::source::{Listing, PartEntry, Pick};
 use crate::texts::texts;
 
 /// Паспорт детали: он есть всегда, даже без файла модели.
 const META_FILE: &str = nonius_core::project::META_FILE;
 
+/// Что человек сделал в дереве за этот кадр. Исполняется после рисования:
+/// пока дерево рисуется, окно занято им.
+#[derive(Default)]
+pub(super) struct Acts {
+    pub clicked: Option<String>,
+    pub unfolded: Option<String>,
+    pub asked: Option<Ask>,
+    /// Деталь и папка, куда её бросили.
+    pub moved: Option<(String, String)>,
+    /// Папку раскрыли или свернули.
+    pub toggled: Option<String>,
+    /// Новая папка для новых деталей.
+    pub place: Option<String>,
+    /// «Новая деталь здесь…» в этой папке.
+    pub new_part: Option<String>,
+    /// «Новая папка…» внутри этой.
+    pub new_folder: Option<String>,
+}
+
 /// Нарисовать дерево.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let t = texts();
-    let mut clicked = None;
-    let mut asked = None;
-    let mut unfolded = None;
+    let mut acts = Acts::default();
     egui::SidePanel::left("parts")
         .default_width(250.0)
         .show(ctx, |ui| {
@@ -28,10 +47,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .hint_text(t.search_parts)
                 .desired_width(f32::INFINITY);
             ui.add(search);
+            tree_folders::buttons(app, ui, &mut acts);
             ui.separator();
-            if app.tab.parts.is_empty() && !app.tab.jobs.busy() {
+            if app.tab.parts.is_empty() && app.tab.folders.is_empty() && !app.tab.jobs.busy() {
                 ui.label(RichText::new(t.no_parts).weak());
             }
+            let searching = !app.tab.search.trim().is_empty();
             let found: Vec<PartEntry> = app
                 .tab
                 .parts
@@ -39,48 +60,64 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .filter(|p| matches(&p.name, &app.tab.search))
                 .cloned()
                 .collect();
-            if found.is_empty() && !app.tab.parts.is_empty() {
+            if found.is_empty() && searching {
                 ui.label(RichText::new(t.nothing_found).weak());
             }
+            let folders = tree_folders::visible(&app.tab.folders, &found, searching);
             egui::ScrollArea::vertical()
                 .id_salt("tree")
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    for p in &found {
-                        let selected = app.tab.part.as_ref() == Some(&p.name);
-                        let open = app.tab.expanded.contains(&p.name);
-                        ui.horizontal(|ui| {
-                            let arrow = if open { "▾" } else { "▸" };
-                            let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
-                            let r = part_row(ui, p, selected);
-                            if toggle && open {
-                                app.tab.expanded.remove(&p.name);
-                            } else if toggle {
-                                app.tab.expanded.insert(p.name.clone());
-                                if !selected {
-                                    unfolded = Some(p.name.clone());
-                                }
-                            } else if r.clicked() && selected {
-                                app.tab.expanded.insert(p.name.clone());
-                            } else if r.clicked() || (r.secondary_clicked() && !selected) {
-                                // Правый щелчок тоже выделяет: видно, к чему меню.
-                                clicked = Some(p.name.clone());
-                            }
-                            open_menu::attach(&r, &app.tab.programs, || target(p), &mut asked);
-                        });
-                        if open {
-                            ui.indent(&p.name, |ui| super::history::show(app, ui, p));
-                        }
-                    }
+                    let tree = tree_folders::Tree {
+                        folders: &folders,
+                        parts: &found,
+                        searching,
+                    };
+                    tree_folders::dir(app, ui, &tree, "", &mut acts);
+                    tree_folders::root_drop(ui, &mut acts);
                 });
         });
-    if let Some(name) = clicked {
+    tree_folders::apply(app, ctx, &mut acts);
+    if let Some(name) = acts.clicked {
         app.select_part(ctx, &name);
     }
-    if let Some(name) = unfolded {
+    if let Some(name) = acts.unfolded {
         app.list_versions(ctx, &name);
     }
-    app.answer_menu(ctx, asked);
+    app.answer_menu(ctx, acts.asked);
+}
+
+/// Строка детали со стрелкой, а под раскрытой — её история.
+pub(super) fn part_line(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, acts: &mut Acts) {
+    let selected = app.tab.part.as_ref() == Some(&p.name);
+    let open = app.tab.expanded.contains(&p.name);
+    ui.horizontal(|ui| {
+        let arrow = if open { "▾" } else { "▸" };
+        let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
+        let r = tree_folders::drag_part(part_row(ui, p, selected), p);
+        if let Some(d) = r.dnd_release_payload::<Dragged>() {
+            // Брошена на деталь — в ту же папку, где она лежит.
+            acts.moved = Some((d.0.clone(), p.folder.clone()));
+        }
+        if toggle && open {
+            app.tab.expanded.remove(&p.name);
+        } else if toggle {
+            app.tab.expanded.insert(p.name.clone());
+            if !selected {
+                acts.unfolded = Some(p.name.clone());
+            }
+        } else if r.clicked() && selected {
+            app.tab.expanded.insert(p.name.clone());
+        } else if r.clicked() || (r.secondary_clicked() && !selected) {
+            // Правый щелчок тоже выделяет: видно, к чему меню.
+            acts.clicked = Some(p.name.clone());
+            acts.place = Some(p.folder.clone());
+        }
+        open_menu::attach(&r, &app.tab.programs, || target(p), &mut acts.asked);
+    });
+    if open {
+        ui.indent(&p.name, |ui| super::history::show(app, ui, p));
+    }
 }
 
 impl App {
@@ -96,9 +133,10 @@ impl App {
         });
     }
 
-    /// Новый список деталей: раскрытые, что изменились, перечитать.
-    pub(super) fn set_parts(&mut self, ctx: &egui::Context, parts: Vec<PartEntry>) {
-        let old = std::mem::replace(&mut self.tab.parts, parts);
+    /// Новый список деталей и папок: раскрытые, что изменились, перечитать.
+    pub(super) fn set_parts(&mut self, ctx: &egui::Context, listing: Listing) {
+        let old = std::mem::replace(&mut self.tab.parts, listing.parts);
+        self.tab.folders = listing.folders;
         let names = self.tab.parts.iter().map(|p| p.name.clone());
         let names: std::collections::BTreeSet<String> = names.collect();
         self.tab.expanded.retain(|n| names.contains(n));

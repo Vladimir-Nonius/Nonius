@@ -19,6 +19,7 @@ mod legend;
 mod map;
 mod material;
 mod model_names;
+mod new_folder;
 mod new_part;
 mod numbers;
 mod open_menu;
@@ -33,6 +34,7 @@ mod start;
 mod strip;
 mod toolbar;
 mod tree;
+mod tree_folders;
 mod upgrade;
 
 use std::path::{Path, PathBuf};
@@ -188,6 +190,7 @@ impl eframe::App for App {
         bottom::show(self, ctx);
         save::show(self, ctx);
         new_part::show(self, ctx);
+        new_folder::show(self, ctx);
         add_model::show(self, ctx);
         part_dialogs::show(self, ctx);
         // Заливка нужна: зазор между полосой и 3D иначе показывает чёрный фон.

@@ -36,7 +36,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
                 if ui.button(t.new_part).clicked() {
                     ui.close();
-                    app.tab.new_part = Some(NewPart::default());
+                    app.tab.new_part = Some(NewPart::in_folder(&app.tab.place));
                 }
                 if ui.button(t.deleted_parts).clicked() {
                     ui.close();

@@ -97,6 +97,7 @@ mod tests {
             dirty: false,
             model: Some("model.step".into()),
             stamp: String::new(),
+            folder: String::new(),
         }
     }
 

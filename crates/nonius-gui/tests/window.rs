@@ -44,6 +44,18 @@ struct Fake {
     title: &'static str,
     /// Проект старого формата; обновление его снимает.
     old: Arc<Mutex<bool>>,
+    /// Папки-группы проекта.
+    folders: Arc<Mutex<Vec<String>>>,
+    /// Где лежат детали: деталь и папка, последнее — главное.
+    moved: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl Fake {
+    fn folder_of(&self, part: &str) -> String {
+        let moved = self.moved.lock().unwrap();
+        let last = moved.iter().rev().find(|m| m.0 == part);
+        last.map(|m| m.1.clone()).unwrap_or_default()
+    }
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -74,6 +86,7 @@ impl ProjectSource for Fake {
                 dirty: false,
                 model: Some("model.step".into()),
                 stamp: self.stamp.lock().unwrap().clone(),
+                folder: self.folder_of("кронштейн"),
             },
             PartEntry {
                 name: "корпус".into(),
@@ -82,6 +95,7 @@ impl ProjectSource for Fake {
                 dirty: true,
                 model: None,
                 stamp: String::new(),
+                folder: self.folder_of("корпус"),
             },
         ];
         let made = self.created.lock().unwrap();
@@ -93,6 +107,7 @@ impl ProjectSource for Fake {
         for name in names {
             if !list.iter().any(|p| p.name == name) {
                 list.push(PartEntry {
+                    folder: self.folder_of(&name),
                     name,
                     assembly: false,
                     latest: None,
@@ -103,6 +118,9 @@ impl ProjectSource for Fake {
             }
         }
         Ok(list)
+    }
+    fn folders(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.folders.lock().unwrap().clone())
     }
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>> {
         let v = |number| VersionEntry {
@@ -245,7 +263,7 @@ impl ProjectSource for Fake {
     fn programs(&self, _path: &str) -> Vec<ProgramEntry> {
         vec![program()]
     }
-    fn new_part(&self, name: &str, assembly: bool) -> anyhow::Result<()> {
+    fn new_part(&self, name: &str, assembly: bool, folder: &str) -> anyhow::Result<()> {
         if name == "кронштейн" {
             anyhow::bail!("такая деталь уже есть");
         }
@@ -253,6 +271,22 @@ impl ProjectSource for Fake {
             .lock()
             .unwrap()
             .push((name.to_string(), assembly));
+        if !folder.is_empty() {
+            self.move_part(name, folder)?;
+        }
+        Ok(())
+    }
+    fn new_folder(&self, folder: &str) -> anyhow::Result<()> {
+        let mut folders = self.folders.lock().unwrap();
+        if folders.iter().any(|f| f == folder) {
+            anyhow::bail!("папка {folder} уже есть");
+        }
+        folders.push(folder.to_string());
+        Ok(())
+    }
+    fn move_part(&self, part: &str, folder: &str) -> anyhow::Result<()> {
+        let moved = (part.to_string(), folder.to_string());
+        self.moved.lock().unwrap().push(moved);
         Ok(())
     }
     fn add_model(&self, file: &Path, part: &str, message: &str) -> anyhow::Result<AddedModel> {
@@ -441,6 +475,8 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         hidden: Arc::default(),
         title,
         old: Arc::default(),
+        folders: Arc::default(),
+        moved: Arc::default(),
     }
 }
 
@@ -1279,4 +1315,99 @@ fn old_project_is_upgraded_from_the_window() {
     wait_for(&mut h, "Второй");
     assert!(!*old.lock().unwrap(), "обновлён");
     assert!(h.query_by_label_contains("только просмотр").is_none());
+}
+
+/// Протащить мышью от одной строки к другой и отпустить.
+fn drag(h: &mut Harness<'_, App>, from: egui::Rect, to: egui::Rect) {
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    let start = from.center();
+    let steps = [start, start + egui::vec2(0.0, 12.0), to.center()];
+    h.input_mut().events.push(egui::Event::PointerMoved(start));
+    h.input_mut().events.push(press(start, true));
+    h.run();
+    for pos in steps {
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        h.run();
+    }
+    h.input_mut().events.push(press(to.center(), false));
+    h.run();
+}
+
+#[test]
+fn folders_in_the_tree() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    project.move_part("кронштейн", "Стена").unwrap();
+    let (moved, created) = (project.moved.clone(), project.created.clone());
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    assert!(h.query_by_label_contains("Стена").is_some());
+
+    // Свернуть папку — деталь в ней не видна, раскрыть — снова видна.
+    h.get_by_label_contains("Стена").click();
+    h.run();
+    assert!(h.query_by_label_contains("кронштейн").is_none());
+    h.get_by_label_contains("Стена").click();
+    h.run();
+    assert!(h.query_by_label_contains("кронштейн").is_some());
+
+    // Папка выбрана щелчком: новая папка ляжет внутрь неё.
+    h.get_by_label("+ папка").click();
+    wait_for(&mut h, "В папке «Стена»");
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("Рейка");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Создана папка «Стена/Рейка»");
+
+    // Новая деталь — в только что созданную папку.
+    h.get_by_label("+ деталь").click();
+    wait_for(&mut h, "В папке «Стена/Рейка»");
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("крюк");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Создана деталь «крюк»");
+    assert_eq!(created.lock().unwrap()[0].0, "крюк");
+    assert!(moved
+        .lock()
+        .unwrap()
+        .contains(&("крюк".to_string(), "Стена/Рейка".to_string())));
+}
+
+#[test]
+fn drag_part_into_folder() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let moved = project.moved.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+
+    let part = h.get_by_label_contains("корпус").rect();
+    let folder = h.get_by_label_contains("Стена").rect();
+    drag(&mut h, part, folder);
+    wait_for(&mut h, "«корпус» перенесена в «Стена»");
+    assert_eq!(
+        *moved.lock().unwrap(),
+        [("корпус".to_string(), "Стена".to_string())]
+    );
+    // Щелчок без сдвига мыши — по-прежнему выбор, а не перенос.
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "2026-10-27");
+    assert_eq!(moved.lock().unwrap().len(), 1);
 }

@@ -18,7 +18,7 @@
 | Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Удалить, вернуть, переименовать деталь, убрать версию с карты | `nonius-store/src/items.rs`, чьи версии — `lineage.rs`, отметки в истории — `message.rs` |
-| Папки проекта: где детали, папки-группы, перенос детали, обновление старого проекта | обход — `nonius-core/src/project/layout.rs`; перенос и `upgrade` — `nonius-store/src/layout.rs`; действия и карта — `nonius-app/src/layout.rs`; команды `map`, `folder new`, `part move`, `upgrade` — `nonius-cli/src/commands/layout.rs`; окошко и полоса — `nonius-gui/src/app/upgrade.rs` |
+| Папки проекта: где детали, папки-группы, перенос детали, обновление старого проекта | обход — `nonius-core/src/project/layout.rs`; перенос и `upgrade` — `nonius-store/src/layout.rs`; действия и карта — `nonius-app/src/layout.rs`; команды `map`, `folder new`, `part move`, `upgrade` — `nonius-cli/src/commands/layout.rs`; окошко и полоса — `nonius-gui/src/app/upgrade.rs`; дерево с папками и перетаскивание в окне — `app/tree_folders.rs`, окошко «Новая папка» и перенос — `app/new_folder.rs` |
 | Сравнить с файлом или другой деталью | `nonius-app/src/outside.rs`; в окне — `compare_with` в `nonius-gui/src/app/part_actions.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
@@ -44,11 +44,11 @@
 | Один проект в одном окне | `nonius-cli/src/window_lock.rs` |
 | Окно: вкладки проектов | `nonius-gui/src/app/strip.rs` (полоса, переключение, память), состояние вкладки — `app/project_tab.rs` |
 | Окно: черновик без папки, «Новый проект», «Сохранить проект как…» | `nonius-gui/src/app/draft.rs`; перенос проекта — `nonius-app/src/moving.rs`; Корзина и замыкания `mover`, `discard` — `nonius-cli/src/window.rs` |
-| Окно: дерево деталей, карта версий | `nonius-gui/src/app/tree.rs`, `app/map.rs` |
-| Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source.rs` и `nonius-cli/src/window/source/` |
+| Окно: дерево деталей и папок, карта версий | `nonius-gui/src/app/tree.rs`, `app/tree_folders.rs`, `app/map.rs` |
+| Окно: история, сохранение версии, материал и масса | `nonius-gui/src/app/history.rs`, `save.rs`, `material.rs`; данные — `source/` и `nonius-cli/src/window/source/` |
 | Окно: вкладки под 3D | `nonius-gui/src/app/bottom.rs` (панель, «Числа»), `app/files.rs` (`«Файлы»`) |
 | 3D-вид: мышь, камера, отрисовка | `nonius-gui/src/view/controls.rs` (мышь и клавиши), `view/camera.rs`, `view/model.rs` (режимы и цвета), `view/gpu/mod.rs` |
-| Откуда окно берёт проект | `nonius-gui/src/source.rs` (трейт), `nonius-cli/src/window/source/` (реализация на `nonius-app`) |
+| Откуда окно берёт проект | `nonius-gui/src/source/mod.rs` (трейт), `source/entries.rs` (что приходит: деталь, версия, файл…), `nonius-cli/src/window/source/` (реализация на `nonius-app`) |
 | Сценарии человека на настоящем проекте | `nonius-cli/src/window/scenarios.rs` |
 | Картинка изменений, цвета | `nonius-occt/src/modules/highlight.rs`, `render/mod.rs`; сама отрисовка — `render/raster.rs` |
 | Новая функция OpenCascade | `nonius-occt/cpp/nonius_occt.h` и `.cpp`, `src/ffi.rs`, `src/shape.rs` |
@@ -147,7 +147,8 @@
 | Файл | Что внутри |
 |---|---|
 | `lib.rs` | `run` — открыть окно, `show_error` — сообщение без консоли |
-| `source.rs` | `ProjectSource`: детали, версии, сравнение, сохранение, материал и масса — всё, что окно берёт у программы; `Progress` (ход и отмена) |
+| `source/mod.rs` | `ProjectSource`: детали, папки, версии, сравнение, сохранение, материал и масса — всё, что окно берёт у программы; `Progress` (ход и отмена) |
+| `source/entries.rs` | что приходит в окно: `PartEntry` (с папкой), `Listing` (детали и папки), версии, файлы, массы |
 | `texts.rs` | все надписи окна (русский) |
 | `app/mod.rs` | `App`: состояние окна, раскладка панелей |
 | `app/actions.rs` | действия: открыть проект, выбрать деталь и версии, сравнить, отменить, сохранить, назначить материал |
@@ -160,8 +161,10 @@
 | `app/model_names.rs` | что за деталь в файле: то же имя или то же без хвоста версии |
 | `app/dropped.rs` | перетаскивание: модели, папка с моделями, папка проекта |
 | `app/first_run.rs` | окошко первого запуска: имя автора, нет git |
-| `app/new_part.rs` | окошко «Новая деталь» |
-| `app/tree.rs` | дерево слева: поиск, детали, внутри раскрытых — история |
+| `app/new_part.rs` | окошко «Новая деталь» (в выбранную папку) |
+| `app/new_folder.rs` | окошко «Новая папка», перенос детали в папку |
+| `app/tree.rs` | дерево слева: поиск, строки деталей, внутри раскрытых — история |
+| `app/tree_folders.rs` | папки в дереве: раскрытие, кнопки «+ деталь», «+ папка», «свернуть всё», перетаскивание детали на папку или в корень |
 | `app/map.rs` | карта версий снизу: кружки на линии, щелчок и правая кнопка как в истории |
 | `app/panels.rs` | полоса ошибки, «Что изменилось» справа, строка состояния с «Отменить», пустые состояния и надписи поверх 3D |
 | `app/legend.rs` | цвета с объёмами, список мест, мелкие места одной строкой |

@@ -275,6 +275,8 @@ impl App {
                 dirty: false,
                 model: None,
                 stamp: String::new(),
+                // Новая деталь из модели ложится в корень проекта.
+                folder: String::new(),
             }),
         }
         let parts = self.tab.parts.clone();
@@ -310,6 +312,7 @@ mod tests {
             dirty: false,
             model: None,
             stamp: String::new(),
+            folder: String::new(),
         }];
         let mut d = AddModel {
             name: "КРОНШТЕЙН".into(),
