@@ -49,6 +49,10 @@ pub(super) struct ProjectTab {
     pub loose: Vec<String>,
     /// Где на экране строки, на которые можно бросить файл: с прошлого кадра.
     pub zones: Vec<(eframe::egui::Rect, drop_zones::Zone)>,
+    /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.
+    pub drop_aim: Option<drop_zones::Zone>,
+    /// Над какой свёрнутой папкой держат курсор и с какого мига.
+    pub hover_since: Option<(String, f64)>,
     /// Свёрнутые в дереве папки; новые видны раскрытыми.
     pub folded: BTreeSet<String>,
     /// Куда класть новую деталь или папку: последняя выбранная папка,

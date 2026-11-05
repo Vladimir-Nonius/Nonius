@@ -1,8 +1,7 @@
 //! Куда бросили файл из Проводника. Система отдаёт окну только сами файлы,
 //! без места: строки дерева и блоки «Структуры» каждый кадр запоминают, где
-//! они на экране, а место броска — курсор в этот миг. Пока файл несут над
-//! окном, папка или деталь под курсором подсвечена. Здесь же — открыть
-//! обычный файл папки.
+//! они на экране, а место броска — курсор, пока файл несли (`drag_hint.rs`
+//! показывает это у курсора). Здесь же — открыть обычный файл папки.
 
 use std::path::PathBuf;
 
@@ -25,7 +24,7 @@ pub enum Zone {
 
 impl App {
     /// Где сейчас курсор в окне: у системы, а без неё — у egui.
-    fn pointer_in_window(&self, ctx: &egui::Context) -> Option<egui::Pos2> {
+    pub(super) fn pointer_in_window(&self, ctx: &egui::Context) -> Option<egui::Pos2> {
         let Some((x, y)) = self.chooser.cursor() else {
             return ctx.input(|i| i.pointer.latest_pos());
         };
@@ -37,26 +36,19 @@ impl App {
     /// Папка или деталь под курсором. Строки, нарисованные позже, лежат
     /// глубже (деталь внутри папки): они главнее.
     fn zone_under(&self, ctx: &egui::Context) -> Option<(egui::Rect, Zone)> {
-        let pos = self.pointer_in_window(ctx)?;
+        self.zone_at(self.pointer_in_window(ctx)?)
+    }
+
+    /// Строка, на которую показывает курсор.
+    pub(super) fn zone_at(&self, pos: egui::Pos2) -> Option<(egui::Rect, Zone)> {
         let zones = &self.tab.zones;
         zones.iter().rev().find(|(r, _)| r.contains(pos)).cloned()
     }
 
-    /// Пока файлы несут над окном — подсветить, куда они лягут.
-    pub(super) fn show_drop_target(&self, ctx: &egui::Context) {
-        if ctx.input(|i| i.raw.hovered_files.is_empty()) {
-            return;
-        }
-        // Курсор системы двигается без событий окна: смотреть каждый кадр.
-        ctx.request_repaint();
-        if let Some((rect, _)) = self.zone_under(ctx) {
-            let stroke = ctx.style().visuals.selection.stroke;
-            let painter = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("drop-target"),
-            ));
-            painter.rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Outside);
-        }
+    /// Папка, где лежит деталь.
+    pub(super) fn folder_of(&self, part: &str) -> String {
+        let p = self.tab.parts.iter().find(|p| p.name == part);
+        p.map(|p| p.folder.clone()).unwrap_or_default()
     }
 
     /// Файлы бросили: на папку — копия в неё, на деталь — модель новой
@@ -66,7 +58,9 @@ impl App {
         if self.tab.project.is_none() || paths.iter().any(|p| p.is_dir()) {
             return false;
         }
-        let Some((_, zone)) = self.zone_under(ctx) else {
+        // Цель запомнена, пока файл несли; без неё — где курсор сейчас.
+        let aim = self.tab.drop_aim.take();
+        let Some(zone) = aim.or_else(|| self.zone_under(ctx).map(|(_, z)| z)) else {
             return false;
         };
         match zone {

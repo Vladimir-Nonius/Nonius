@@ -179,7 +179,10 @@ pub(super) fn drag_part(row: egui::Response, p: &PartEntry) -> egui::Response {
     let row = row.interact(egui::Sense::drag());
     row.dnd_set_drag_payload(Dragged(p.name.clone()));
     if row.dragged() {
-        row.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        // Строка на старом месте бледнеет: видно, что её несут.
+        let fill = row.ctx.style().visuals.panel_fill.gamma_multiply(0.7);
+        let painter = row.ctx.layer_painter(row.layer_id);
+        painter.rect_filled(row.rect, 3.0, fill);
     }
     row
 }
@@ -193,11 +196,6 @@ pub(super) fn root_drop(ui: &mut egui::Ui, acts: &mut Acts) {
         let stroke = ui.visuals().selection.stroke;
         ui.painter()
             .rect_stroke(r.rect, 3.0, stroke, egui::StrokeKind::Inside);
-        let text = RichText::new(texts().drop_to_root).weak();
-        ui.put(
-            egui::Rect::from_min_size(r.rect.min, egui::vec2(r.rect.width(), 32.0)),
-            egui::Label::new(text).wrap(),
-        );
     }
     if let Some(d) = r.dnd_release_payload::<Dragged>() {
         acts.moved = Some((d.0.clone(), String::new()));

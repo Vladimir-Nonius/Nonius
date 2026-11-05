@@ -9,6 +9,7 @@ mod add_model;
 mod bottom;
 mod choose;
 mod draft;
+mod drag_hint;
 mod drop_zones;
 mod dropped;
 mod file_menu;
@@ -223,6 +224,7 @@ impl eframe::App for App {
                 panels::overlay(self, ui);
             });
         self.show_drop_target(ctx);
+        self.show_drag_ghost(ctx);
         self.remember_look();
     }
 }

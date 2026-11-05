@@ -1624,3 +1624,38 @@ fn files_from_explorer_go_where_dropped() {
     wait_for(&mut h, "«корпус»: добавлено");
     assert_eq!(*attached.lock().unwrap(), [("корпус".to_string(), pdf)]);
 }
+
+#[test]
+fn dropped_file_goes_where_it_was_carried() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let loose = project.loose.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let pdf = dir.path().join("лист.pdf");
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // Файл несут над папкой: у курсора написано, куда он ляжет.
+    let folder = h.get_by_label_contains("Стена").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(folder));
+    h.input_mut().hovered_files.push(egui::HoveredFile {
+        path: Some(pdf.clone()),
+        ..Default::default()
+    });
+    h.step();
+    h.step();
+    assert!(h.query_by_label("Скопировать в «Стена»").is_some());
+
+    // Кадр броска пришёл, когда мышь уже ушла, — файл всё равно в «Стена».
+    let away = h.get_by_label_contains("корпус").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(away));
+    h.input_mut().dropped_files.push(egui::DroppedFile {
+        path: Some(pdf),
+        ..Default::default()
+    });
+    h.step();
+    wait_for(&mut h, "🗋 лист.pdf");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
+}
