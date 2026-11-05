@@ -75,12 +75,12 @@ pub(super) fn visible(folders: &[String], parts: &[PartEntry], searching: bool) 
 }
 
 /// Папка над `path`: пустая строка — корень.
-fn parent(path: &str) -> &str {
+pub(super) fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(p, _)| p)
 }
 
 /// Последнее имя в пути.
-fn last(path: &str) -> &str {
+pub(super) fn last(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 

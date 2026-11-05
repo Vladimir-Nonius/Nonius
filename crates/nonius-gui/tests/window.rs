@@ -1458,12 +1458,13 @@ fn structure_shows_folders_and_blanks() {
     h.get_by_label("Структура").click();
     wait_for(&mut h, "Корень проекта");
     // У корпуса модели нет: это заготовка, модель добавляется прямо здесь.
-    assert!(h.query_by_label("заготовка: модели нет · сборка").is_some());
+    assert!(h.query_by_label("сборка · заготовка").is_some());
+    assert!(h.query_by_label("1 деталь · 1 сборка").is_some());
     assert!(h.query_by_label("Добавить модель…").is_some());
-    assert!(h.query_by_label_contains("Пусто").is_some());
+    assert!(h.query_all_by_label_contains("Пусто").next().is_some());
 
     let card = h.get_by_label("корпус").rect();
-    let folder = h.get_by_label("🗀 Стена").rect();
+    let folder = h.get_all_by_label("🗀 Стена").next().unwrap().rect();
     drag(&mut h, card, folder);
     wait_for(&mut h, "«корпус» перенесена в «Стена»");
     assert_eq!(
