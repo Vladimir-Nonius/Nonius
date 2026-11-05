@@ -88,6 +88,8 @@ pub trait ProjectSource: Send + Sync {
     /// Положить копию своего файла в папку-группу (пустая строка — корень) и
     /// сразу сохранить в истории проекта. Возвращает путь от корня.
     fn add_folder_file(&self, folder: &str, file: &Path) -> anyhow::Result<String>;
+    /// Удалить файл из папки-группы: в истории проекта он останется.
+    fn remove_folder_file(&self, path: &str) -> anyhow::Result<()>;
     /// Открыть файл из папки-группы или показать его в папке.
     fn open_folder_file(&self, path: &str, way: &OpenWay) -> anyhow::Result<PathBuf>;
     /// Версии детали, новые первыми.

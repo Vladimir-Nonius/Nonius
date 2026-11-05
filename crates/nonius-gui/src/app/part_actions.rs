@@ -116,6 +116,13 @@ impl App {
                     Done::PartDeleted(part, done)
                 });
             }
+            Some(Dialog::RemoveFile(c, path)) if c.part.is_empty() => {
+                let path = path.clone();
+                self.tab.jobs.spawn(ctx, move |_| {
+                    let done = project.remove_folder_file(&path).map(|()| false);
+                    Done::FileRemoved(String::new(), path, done)
+                });
+            }
             Some(Dialog::RemoveFile(c, path)) => {
                 let (part, path) = (c.part.clone(), path.clone());
                 self.tab.jobs.spawn(ctx, move |_| {

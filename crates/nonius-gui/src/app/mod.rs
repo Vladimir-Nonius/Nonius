@@ -100,6 +100,8 @@ pub struct App {
     no_lfs: bool,
     /// Окно было в фокусе в прошлом кадре.
     was_focused: bool,
+    /// Окно поднято поверх всех, пока над ним несут файл из Проводника.
+    raised: bool,
     /// Папка черновиков.
     drafts: Option<PathBuf>,
     mover: Mover,
@@ -141,6 +143,7 @@ impl App {
             first_run: first_run::FirstRun::check(options.machine, ready),
             no_lfs: ready.git && !ready.lfs,
             was_focused: true,
+            raised: false,
             drafts: options.drafts,
             mover: options.mover,
             discard: options.discard,

@@ -47,6 +47,8 @@ pub(super) struct ProjectTab {
     pub folders: Vec<String>,
     /// Обычные файлы в папках-группах: путь от корня через `/`.
     pub loose: Vec<String>,
+    /// Выделенный в дереве обычный файл: его удаляет Delete.
+    pub loose_chosen: Option<String>,
     /// Где на экране строки, на которые можно бросить файл: с прошлого кадра.
     pub zones: Vec<(eframe::egui::Rect, drop_zones::Zone)>,
     /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.

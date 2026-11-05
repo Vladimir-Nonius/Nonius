@@ -10,9 +10,10 @@ use eframe::egui::{self, RichText};
 use super::drop_zones::Zone;
 use super::new_folder::NewFolder;
 use super::new_part::NewPart;
+use super::open_menu::{self, Target};
 use super::tree::{part_line, Acts};
 use super::App;
-use crate::source::PartEntry;
+use crate::source::{PartEntry, Pick};
 use crate::texts::texts;
 
 /// Что тащат мышью: имя детали.
@@ -103,34 +104,45 @@ pub(super) fn dir(app: &mut App, ui: &mut egui::Ui, tree: &Tree, dir: &str, acts
         part_line(app, ui, p, acts);
     }
     for f in tree.files.iter().filter(|f| parent(f) == dir) {
-        file_row(ui, f, acts);
+        file_row(app, ui, f, acts);
     }
 }
 
-/// Строка обычного файла: двойной щелчок открывает, правый — меню.
-fn file_row(ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
-    let t = texts();
+/// Строка обычного файла: щелчок выделяет (Delete — удалить), двойной
+/// открывает, правый — то же меню, что у файлов детали.
+fn file_row(app: &App, ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
     ui.horizontal(|ui| {
         // Под стрелкой папки или детали: файл раскрывать некуда.
         ui.add_space(14.0);
+        let chosen = app.tab.loose_chosen.as_deref() == Some(path);
         let text = RichText::new(format!("🗋 {}", last(path))).weak();
-        let r = ui.selectable_label(false, text).on_hover_text(path);
+        let r = ui.selectable_label(chosen, text).on_hover_text(path);
         acts.zones
             .push((r.rect, Zone::Folder(parent(path).to_string())));
         if r.double_clicked() {
             acts.open_file = Some((path.to_string(), false));
+        } else if r.clicked() || r.secondary_clicked() {
+            acts.chosen_file = Some(path.to_string());
         }
-        r.context_menu(|ui| {
-            if ui.button(t.open_file).clicked() {
-                ui.close();
-                acts.open_file = Some((path.to_string(), false));
-            }
-            if ui.button(t.show_in_folder).clicked() {
-                ui.close();
-                acts.open_file = Some((path.to_string(), true));
-            }
-        });
+        open_menu::attach(
+            &r,
+            &app.tab.programs,
+            || loose_target(path),
+            &mut acts.asked,
+        );
     });
+}
+
+/// Обычный файл папки для меню правого щелчка.
+pub(super) fn loose_target(path: &str) -> Target {
+    Target {
+        part: String::new(),
+        pick: Pick::Current,
+        path: path.to_string(),
+        openable: true,
+        model_slot: false,
+        removable: true,
+    }
 }
 
 /// Строка папки: стрелка, имя; на неё бросают детали.
@@ -211,6 +223,16 @@ pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
     app.tab.zones.append(&mut acts.zones);
     if let Some((path, folder)) = acts.open_file.take() {
         app.open_loose(ctx, path, folder);
+    }
+    if let Some(path) = acts.chosen_file.take() {
+        app.tab.loose_chosen = Some(path);
+    }
+    // Delete по выделенному файлу — как в Проводнике, с вопросом.
+    let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !ctx.wants_keyboard_input();
+    if let (true, Some(path)) = (delete, app.tab.loose_chosen.clone()) {
+        if app.tab.loose.contains(&path) {
+            app.ask_remove_file("", path);
+        }
     }
     if let Some(path) = acts.toggled.take() {
         if path == FOLD_ALL {

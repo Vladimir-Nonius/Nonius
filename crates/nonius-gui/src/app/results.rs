@@ -240,6 +240,11 @@ impl App {
                     }
                     Err(e) => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
+                Done::FileRemoved(name, path, Ok(_)) if name.is_empty() => {
+                    self.tab.dialog = None;
+                    self.tab.notice = Some(format!("{path}: {}", t.loose_removed));
+                    self.reload(ctx);
+                }
                 Done::FileRemoved(name, path, Ok(dirty)) => {
                     self.tab.dialog = None;
                     let mut text = format!("{path} {} «{name}».", t.file_removed);

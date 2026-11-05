@@ -35,6 +35,8 @@ pub(super) struct Acts {
     pub zones: Vec<(egui::Rect, Zone)>,
     /// Открыть обычный файл папки (`true` — показать в папке).
     pub open_file: Option<(String, bool)>,
+    /// Выделили обычный файл папки.
+    pub chosen_file: Option<String>,
 }
 
 /// Нарисовать дерево.

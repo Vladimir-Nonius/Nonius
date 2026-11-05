@@ -138,8 +138,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
         Some(Dialog::RemoveFile(base, path)) => {
             let title = format!("{} {path}?", t.remove_file_title);
+            let why = if base.part.is_empty() {
+                t.loose_remove_why
+            } else {
+                t.remove_file_why
+            };
             question(ctx, &title, base, Some(t.remove), |ui| {
-                ui.add(egui::Label::new(t.remove_file_why).wrap());
+                ui.add(egui::Label::new(why).wrap());
             })
         }
         Some(Dialog::Restore(base, version)) => {

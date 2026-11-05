@@ -33,16 +33,19 @@ impl App {
         Some(egui::pos2(x / ppp, y / ppp) - inner.min.to_vec2())
     }
 
-    /// Папка или деталь под курсором. Строки, нарисованные позже, лежат
-    /// глубже (деталь внутри папки): они главнее.
+    /// Папка или деталь под курсором.
     fn zone_under(&self, ctx: &egui::Context) -> Option<(egui::Rect, Zone)> {
         self.zone_at(self.pointer_in_window(ctx)?)
     }
 
     /// Строка, на которую показывает курсор.
     pub(super) fn zone_at(&self, pos: egui::Pos2) -> Option<(egui::Rect, Zone)> {
-        let zones = &self.tab.zones;
-        zones.iter().rev().find(|(r, _)| r.contains(pos)).cloned()
+        // Место целиком — вся папка, внутри неё деталь или вложенная папка:
+        // главнее самое мелкое.
+        let zones = self.tab.zones.iter().filter(|(r, _)| r.contains(pos));
+        zones
+            .min_by(|a, b| a.0.area().total_cmp(&b.0.area()))
+            .cloned()
     }
 
     /// Папка, где лежит деталь.

@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use nonius_core::meta::ItemKind;
-use nonius_core::project::Item;
+use nonius_core::project::{Item, KEEP_FILE};
 use nonius_core::PartName;
 
 use crate::system::{self, OpenWay};
@@ -69,8 +69,21 @@ impl App {
     }
 
     /// Создать папку-группу (путь от корня, можно сразу несколько уровней).
+    /// Пустая папка держится файлом `.gitkeep`: он сразу сохраняется в истории,
+    /// иначе папка висела бы несохранённой.
     pub fn new_folder(&self, folder: &Path) -> Result<PathBuf> {
-        Ok(self.project.create_folder(folder)?)
+        let store = self.store()?;
+        let dir = self.project.create_folder(folder)?;
+        let keep = rel_path(self.project.root(), &dir.join(KEEP_FILE));
+        let path = rel_path(self.project.root(), &dir);
+        let message = format!(
+            "{path}: папка создана
+
+Создано в Nonius.
+"
+        );
+        store.commit_project_file(&keep, &message)?;
+        Ok(dir)
     }
 
     /// Добавить деталь или сборку в папку (путь от корня, пустой — корень).
@@ -117,6 +130,35 @@ impl App {
             return Err(e.into());
         }
         Ok(path)
+    }
+
+    /// Убрать файл из папки-группы. Он остаётся в истории проекта: файл, которого
+    /// там ещё не было (положили мимо Nonius), сначала сохраняется.
+    pub fn remove_folder_file(&self, path: &str) -> Result<()> {
+        self.project.writable()?;
+        let file = self.project.folder_dir(Path::new(path))?;
+        if !file.is_file() {
+            return Err(Error::FileNotFound(file));
+        }
+        let store = self.store()?;
+        let rel = rel_path(self.project.root(), &file);
+        // Уже сохранён и не менялся — git скажет «нечего сохранять»: это не беда.
+        let keep = format!(
+            "{rel}: файл сохранён в истории
+
+Перед удалением в Nonius.
+"
+        );
+        let _ = store.commit_project_file(&rel, &keep);
+        fs::remove_file(&file).map_err(|e| Error::io(&file, e))?;
+        let message = format!(
+            "{rel}: файл удалён
+
+В истории проекта он остался.
+"
+        );
+        store.commit_project_file(&rel, &message)?;
+        Ok(())
     }
 
     /// Открыть файл из папки-группы (путь от корня через `/`) программой или
@@ -196,5 +238,34 @@ mod tests {
             .output()
             .unwrap();
         assert!(status.stdout.is_empty(), "файл сохранён в истории");
+
+        // Свой файл, положенный мимо Nonius, удаляется, но остаётся в истории.
+        fs::write(root.join("Стена").join("заметка.txt"), "своё").unwrap();
+        app.remove_folder_file("Стена/заметка.txt").unwrap();
+        app.remove_folder_file(&path).unwrap();
+        assert!(!root.join(&path).exists());
+        let log = std::process::Command::new("git")
+            .args([
+                "-C",
+                &root.to_string_lossy(),
+                "log",
+                "--all",
+                "--format=%s",
+                "--",
+                "Стена/заметка.txt",
+            ])
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&log.stdout);
+        assert!(log.contains("сохранён") && log.contains("удалён"), "{log}");
+        let status = std::process::Command::new("git")
+            .args(["-C", &root.to_string_lossy(), "status", "--porcelain"])
+            .output()
+            .unwrap();
+        assert!(
+            status.stdout.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&status.stdout)
+        );
     }
 }

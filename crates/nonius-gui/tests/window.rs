@@ -355,6 +355,10 @@ impl ProjectSource for Fake {
         self.loose.lock().unwrap().push(path.clone());
         Ok(path)
     }
+    fn remove_folder_file(&self, path: &str) -> anyhow::Result<()> {
+        self.loose.lock().unwrap().retain(|f| f != path);
+        Ok(())
+    }
     fn open_folder_file(&self, path: &str, way: &OpenWay) -> anyhow::Result<PathBuf> {
         let opened = (path.to_string(), way.clone());
         self.opened.lock().unwrap().push(opened);
@@ -1173,20 +1177,20 @@ fn own_files_from_the_files_tab() {
     // Модель так не убирают: пункта нет.
     h.get_by_label_contains("model.step").click_secondary();
     wait_for(&mut h, "Показать в папке");
-    assert!(h.query_by_label("Убрать файл…").is_none());
+    assert!(h.query_by_label("Удалить файл…").is_none());
     h.get_by_label("Показать в папке").click();
     h.run();
 
     // Свой файл: меню, вопрос, убран.
     h.get_by_label_contains("~ docs/заметка.md")
         .click_secondary();
-    wait_for(&mut h, "Убрать файл…");
+    wait_for(&mut h, "Удалить файл…");
     // Меню встаёт на место со второго кадра.
     h.run();
-    h.get_by_label("Убрать файл…").click();
-    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    h.get_by_label("Удалить файл…").click();
+    wait_for(&mut h, "Удалить файл docs/заметка.md?");
     h.run();
-    h.get_by_label("Убрать").click();
+    h.get_by_label("Удалить").click();
     wait_for(&mut h, "убран из «кронштейн»");
     let gone = ("кронштейн".to_string(), "docs/заметка.md".to_string());
     assert_eq!(*removed.lock().unwrap(), [gone]);
@@ -1201,7 +1205,7 @@ fn own_files_from_the_files_tab() {
     h.get_by_label_contains("~ docs/заметка.md").click();
     h.run();
     h.key_press(egui::Key::Delete);
-    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    wait_for(&mut h, "Удалить файл docs/заметка.md?");
     h.run();
     h.get_by_label("Отмена").click();
     h.run();
@@ -1657,5 +1661,65 @@ fn dropped_file_goes_where_it_was_carried() {
     });
     h.step();
     wait_for(&mut h, "🗋 лист.pdf");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
+}
+
+#[test]
+fn folder_files_have_the_same_menu_and_delete() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let loose = project.loose.clone();
+    loose.lock().unwrap().push("Стена/лист.dxf".into());
+    loose.lock().unwrap().push("Стена/ТЗ.pdf".into());
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "🗋 лист.dxf");
+
+    // Правый щелчок — то же меню, что у файлов детали.
+    h.get_all_by_label("🗋 лист.dxf")
+        .next()
+        .unwrap()
+        .click_secondary();
+    wait_for(&mut h, "Открыть в…");
+    assert!(h.query_by_label("Показать в папке").is_some());
+    h.get_by_label("Удалить файл…").click();
+    wait_for(&mut h, "Удалить файл Стена/лист.dxf?");
+    // Окошко ещё выплывает: щелчок раньше времени попал бы мимо.
+    h.run_steps(10);
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "файл удалён");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/ТЗ.pdf"]);
+
+    // Delete по выделенному файлу — тот же вопрос.
+    h.get_all_by_label("🗋 ТЗ.pdf").next().unwrap().click();
+    h.run_steps(2);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить файл Стена/ТЗ.pdf?");
+}
+
+#[test]
+fn file_dropped_anywhere_in_a_structure_folder_lands_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let loose = project.loose.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    let pdf = dir.path().join("лист.pdf");
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // Не на заголовок, а на «Пусто…» внутри блока папки.
+    let inside = h
+        .get_all_by_label_contains("Пусто")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    drop_at(&mut h, inside, std::slice::from_ref(&pdf));
+    wait_for(&mut h, "Скопировано");
     assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
 }

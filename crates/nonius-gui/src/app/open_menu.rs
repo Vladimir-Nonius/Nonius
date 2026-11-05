@@ -18,7 +18,7 @@ pub type Programs = HashMap<String, Option<Vec<ProgramEntry>>>;
 /// Над чем щёлкнули.
 #[derive(Debug, Clone)]
 pub struct Target {
-    /// Деталь.
+    /// Деталь; пустая строка — обычный файл папки, `path` от корня проекта.
     pub part: String,
     /// Версия или «Сейчас».
     pub pick: Pick,
@@ -159,7 +159,11 @@ impl App {
             Some(Ask::Open(target, way)) => {
                 self.tab.jobs.spawn(ctx, move |_| {
                     let folder = way == OpenWay::Folder;
-                    let opened = project.open_file(&target.part, target.pick, &target.path, &way);
+                    let opened = if target.part.is_empty() {
+                        project.open_folder_file(&target.path, &way)
+                    } else {
+                        project.open_file(&target.part, target.pick, &target.path, &way)
+                    };
                     Done::FileOpened(target.pick, folder, opened)
                 });
             }

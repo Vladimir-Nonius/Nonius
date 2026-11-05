@@ -5,6 +5,7 @@
 use eframe::egui::{self, Color32, RichText};
 
 use super::super::drop_zones::Zone;
+use super::super::open_menu;
 use super::super::tree_folders::{self, Dragged};
 use super::super::App;
 use super::{Acts, View};
@@ -61,13 +62,15 @@ pub(super) fn legend(ui: &mut egui::Ui) {
 }
 
 /// Обычные файлы папки строками: двойной щелчок открывает.
-pub(super) fn file_lines(ui: &mut egui::Ui, files: &[&String], acts: &mut Acts) {
+pub(super) fn file_lines(app: &App, ui: &mut egui::Ui, files: &[&String], acts: &mut Acts) {
     for f in files {
         let text = RichText::new(format!("🗋 {}", tree_folders::last(f))).weak();
         let r = ui.selectable_label(false, text).on_hover_text(f.as_str());
         if r.double_clicked() {
             acts.open_file = Some(f.to_string());
         }
+        let target = || tree_folders::loose_target(f);
+        open_menu::attach(&r, &app.tab.programs, target, &mut acts.asked);
     }
 }
 

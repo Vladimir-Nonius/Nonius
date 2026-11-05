@@ -149,6 +149,11 @@ impl ProjectSource for AppSource {
         self.open_loose(path, way)
     }
 
+    fn remove_folder_file(&self, path: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app.remove_folder_file(path).map_err(in_words)
+    }
+
     fn versions(&self, part: &str) -> Result<Vec<VersionEntry>> {
         let _files = self.reading();
         let mut list: Vec<VersionEntry> = self

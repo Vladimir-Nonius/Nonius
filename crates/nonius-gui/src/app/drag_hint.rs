@@ -29,6 +29,7 @@ impl App {
     /// лягут. Цель запоминается: кадр после броска может прийти позже,
     /// когда мышь уже ушла.
     pub(super) fn show_drop_target(&mut self, ctx: &egui::Context) {
+        self.raise_while_carried(ctx);
         if ctx.input(|i| i.raw.hovered_files.is_empty()) {
             if ctx.input(|i| i.raw.dropped_files.is_empty()) {
                 self.tab.drop_aim = None;
@@ -83,6 +84,25 @@ impl App {
             None => t.drop_nowhere.to_string(),
         };
         cursor_label(ctx, pos, &format!("{}\n{line}", dragged.0), found.is_none());
+    }
+
+    /// Файл из Проводника коснулся окна — поднять его поверх всех, чтобы
+    /// Проводник не закрывал папки; отпустили или унесли — вернуть как было.
+    fn raise_while_carried(&mut self, ctx: &egui::Context) {
+        let carried = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        if carried == self.raised {
+            return;
+        }
+        self.raised = carried;
+        let level = if carried {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+        if !carried {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
     }
 
     /// Курсор держат над свёрнутой папкой — раскрыть её, как в Проводнике.

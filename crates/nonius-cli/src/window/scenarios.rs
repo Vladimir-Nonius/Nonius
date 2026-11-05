@@ -532,8 +532,8 @@ fn own_file_of_a_part() {
     d.h.get_by_label_contains("+ docs/технология.txt").click();
     d.settle();
     d.h.key_press(egui::Key::Delete);
-    d.wait("Убрать файл docs/технология.txt?");
-    d.press("Убрать");
+    d.wait("Удалить файл docs/технология.txt?");
+    d.press("Удалить");
     d.wait("убран из «плита»");
     assert!(!d.sees("Сохраните версию"), "сохранять нечего");
     assert!(!file.exists());

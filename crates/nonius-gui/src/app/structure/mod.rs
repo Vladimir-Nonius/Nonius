@@ -7,6 +7,7 @@
 use eframe::egui::{self, RichText};
 
 use super::drop_zones::Zone;
+use super::open_menu::Ask;
 use super::tree_folders;
 use super::App;
 use crate::source::PartEntry;
@@ -47,6 +48,7 @@ struct Acts {
     moved: Option<(String, String)>,
     zones: Vec<(egui::Rect, Zone)>,
     open_file: Option<String>,
+    asked: Option<Ask>,
 }
 
 /// Что рисовать: все папки и детали проекта.
@@ -82,6 +84,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             }
         });
     app.tab.zones.append(&mut acts.zones);
+    app.answer_menu(ui.ctx(), acts.asked.take());
     if let Some(path) = acts.open_file {
         app.open_loose(ui.ctx(), path, false);
     }
@@ -116,7 +119,7 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
         .collect();
     subs.sort_by_key(|f| tree_folders::last(f).to_lowercase());
     let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-    egui::Frame::NONE
+    let whole = egui::Frame::NONE
         .stroke(stroke)
         .corner_radius(8.0)
         .show(ui, |ui| {
@@ -135,7 +138,7 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
                         ui.label(RichText::new(t.empty_folder).weak());
                     }
                     cards(app, ui, &inside, acts);
-                    file_lines(ui, &files, acts);
+                    file_lines(app, ui, &files, acts);
                     for sub in subs {
                         ui.horizontal_top(|ui| {
                             ui.add_space(NESTED);
@@ -143,7 +146,11 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
                         });
                     }
                 });
-        });
+        })
+        .response;
+    // Бросить можно в любое место папки, не только на заголовок.
+    acts.zones
+        .push((whole.rect, Zone::Folder(folder.to_string())));
     ui.add_space(10.0);
 }
 
