@@ -12,6 +12,8 @@ use eframe::egui;
 
 use nonius_scene::Scene;
 
+use super::batch::Report;
+
 use crate::source::{
     AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, Listing, MassEntry, Pick,
     ProgramEntry, Progress, ProjectSource, VersionEntry,
@@ -55,8 +57,6 @@ pub enum Done {
     FolderFilesAdded(Vec<anyhow::Result<String>>),
     /// Настройки проекта записаны.
     SettingsSaved(anyhow::Result<()>),
-    /// Деталь перенесена в папку.
-    PartMoved(String, String, anyhow::Result<()>),
     /// Файл добавлен в деталь и сохранён версией.
     Added(anyhow::Result<AddedModel>),
     /// Версии раскрытой, но не выбранной детали.
@@ -85,6 +85,8 @@ pub enum Done {
     /// Черновик перенесён: проект в новой папке (или прежний, если перенос
     /// не удался) и ошибка переноса.
     Moved(anyhow::Result<Box<dyn ProjectSource>>, Option<String>),
+    /// Очередь закончилась.
+    Batch(Report),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::jobs::Jobs;
 use super::{
-    add_model, bottom, material, new_folder, new_part, node, open_menu, part_dialogs, save,
+    add_model, batch, bottom, material, new_folder, new_part, node, open_menu, part_dialogs, save,
     selection, settings_window, shown, structure,
 };
 use crate::source::{
@@ -52,6 +52,13 @@ pub(super) struct ProjectTab {
     /// Последним выбрали файл на вкладке «Файлы»: Delete — про него, а не
     /// про выделенное в дереве.
     pub keys_to_files: bool,
+    /// Порядок предметов на экране для Ctrl+A: дерево и «Структура».
+    pub tree_order: Vec<node::Node>,
+    pub structure_order: Vec<node::Node>,
+    /// Последний щелчок был в «Структуре»: Ctrl+A выделяет там.
+    pub in_structure: bool,
+    /// Идёт очередь: перенос или удаление нескольких.
+    pub batch: Option<batch::Batch>,
     /// Что где на экране: строки дерева и «Структуры» с прошлого кадра.
     pub on_screen: Vec<shown::Shown>,
     /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.

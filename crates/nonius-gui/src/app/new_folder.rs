@@ -120,21 +120,6 @@ impl App {
         self.reload(ctx);
     }
 
-    /// Перенести деталь в папку (пустая строка — корень).
-    pub(super) fn move_part(&mut self, ctx: &egui::Context, part: String, folder: String) {
-        let Some(project) = self.tab.project.clone() else {
-            return;
-        };
-        let here = self.tab.parts.iter().find(|p| p.name == part);
-        if here.is_none_or(|p| p.folder == folder) {
-            return;
-        }
-        self.tab.jobs.spawn(ctx, move |_| {
-            let moved = project.move_part(&part, &folder);
-            Done::PartMoved(part, folder, moved)
-        });
-    }
-
     /// Деталь перенесена: показать её на новом месте.
     pub(super) fn part_moved(&mut self, ctx: &egui::Context, part: String, folder: String) {
         let t = texts();

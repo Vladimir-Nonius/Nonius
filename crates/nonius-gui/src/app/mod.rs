@@ -6,8 +6,10 @@
 
 mod actions;
 mod add_model;
+mod batch;
 mod bottom;
 mod choose;
+mod command;
 mod draft;
 mod drag_hint;
 mod drop_zones;
@@ -230,6 +232,8 @@ impl eframe::App for App {
                 }
                 panels::overlay(self, ui);
             });
+        // Клавиши — когда оба вида уже отметили порядок предметов.
+        command::keys(self, ctx);
         self.show_drop_target(ctx);
         self.show_drag_ghost(ctx);
         self.remember_look();

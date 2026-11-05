@@ -137,9 +137,12 @@ pub(super) fn part_line(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, acts: &
             }
         } else if r.clicked() || r.secondary_clicked() {
             // Правый щелчок тоже выделяет: видно, к чему меню.
-            acts.picked = Some((node, r.secondary_clicked()));
+            acts.picked = Some((node.clone(), r.secondary_clicked()));
         }
-        open_menu::attach(&r, &app.tab.programs, || target(p), &mut acts.asked);
+        let many = app.tab.selection.many_with(&node);
+        let busy = app.tab.batch.is_some();
+        let target = || target(p);
+        open_menu::attach_node(&r, &app.tab.programs, target, many, busy, &mut acts.asked);
     });
     if open {
         ui.indent(&p.name, |ui| super::history::show(app, ui, p));

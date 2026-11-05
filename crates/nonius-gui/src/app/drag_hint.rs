@@ -7,6 +7,7 @@
 
 use eframe::egui;
 
+use super::command::Command;
 use super::node::Node;
 use super::tree_folders::{self, Dragged};
 use super::App;
@@ -68,7 +69,8 @@ impl App {
         if ctx.input(|i| i.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(ctx);
             if let Some(Node::Folder(folder)) = found.map(|at| at.node) {
-                self.move_part(ctx, dragged.0.clone(), folder);
+                let nodes = vec![Node::Part(dragged.0.clone())];
+                self.command(ctx, Command::Move(nodes, folder));
             }
             return;
         }

@@ -47,6 +47,7 @@ impl App {
         self.tab.project = Some(project.clone());
         // Всё от прошлого проекта: и работы, и то, что на экране.
         self.tab.jobs.forget_all();
+        self.tab.batch = None;
         self.tab.parts.clear();
         self.tab.expanded.clear();
         self.tab.folders.clear();

@@ -9,7 +9,6 @@ use eframe::egui;
 
 use super::node::Node;
 use super::App;
-use crate::texts::texts;
 
 /// Отмеченные предметы и тот, от которого считает Shift.
 #[derive(Default)]
@@ -105,8 +104,21 @@ impl Selection {
         self.items.contains(node)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+    /// Сколько выделено, если `node` — среди нескольких выделенных: меню
+    /// правой кнопки тогда про всё выделенное.
+    pub fn many_with(&self, node: &Node) -> Option<usize> {
+        (self.items.len() > 1 && self.items.contains(node)).then_some(self.items.len())
+    }
+
+    /// Всё выделенное по порядку.
+    pub fn nodes(&self) -> Vec<Node> {
+        self.items.iter().cloned().collect()
+    }
+
+    /// Выделить всё, что видно в виде (Ctrl+A), кроме корня.
+    pub fn all(&mut self, order: &[Node]) {
+        self.items = order.iter().filter(|n| !is_root(n)).cloned().collect();
+        self.anchor = order.iter().find(|n| !is_root(n)).cloned();
     }
 
     /// Единственный выделенный предмет.
@@ -175,6 +187,7 @@ impl App {
         tree: bool,
     ) {
         self.tab.keys_to_files = false;
+        self.tab.in_structure = !tree;
         if secondary && self.tab.selection.contains(&node) {
             return;
         }
@@ -207,18 +220,6 @@ impl App {
                 self.tab.place = path;
             }
             Node::Folder(_) | Node::File(_) => {}
-        }
-    }
-
-    /// Delete в дереве или «Структуре»: удалить выделенное, с вопросом.
-    pub(super) fn delete_selected(&mut self) {
-        let t = texts();
-        match self.tab.selection.single().cloned() {
-            Some(Node::Part(name)) => self.ask_delete(&name),
-            Some(Node::File(path)) => self.ask_remove_file("", path),
-            Some(Node::Folder(_)) => self.tab.notice = Some(t.cant_delete_folder.to_string()),
-            None if self.tab.selection.is_empty() => {}
-            None => self.tab.notice = Some(t.cant_delete_many.to_string()),
         }
     }
 }
@@ -296,7 +297,7 @@ mod tests {
         let mut s = Selection::default();
         s.only(part("A"));
         s.retain(|n| *n != part("A"));
-        assert!(s.is_empty());
+        assert!(s.items.is_empty());
         s.range(part("C"), &order);
         assert_eq!(items(&s), [part("C")]);
     }
@@ -310,10 +311,10 @@ mod tests {
             s.click(root.clone(), egui::Modifiers::COMMAND, &[]),
             Click::Plain
         );
-        assert!(s.is_empty());
+        assert!(s.items.is_empty());
         s.toggle(root.clone());
         s.only(root);
-        assert!(s.is_empty());
+        assert!(s.items.is_empty());
     }
 
     #[test]
@@ -331,7 +332,7 @@ mod tests {
         assert_eq!(items(&s), [part("B"), part("C")]);
         s.swept();
         s.sweep(Vec::new(), false);
-        assert!(s.is_empty());
+        assert!(s.items.is_empty());
     }
 
     #[test]

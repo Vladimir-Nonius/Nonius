@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, RichText};
 
+use super::command::Command;
 use super::jobs::Done;
 use super::App;
 use crate::source::{OpenWay, Pick, ProgramEntry};
@@ -48,6 +49,8 @@ pub enum Ask {
     Rename(String),
     /// Спросить, удалить ли деталь.
     Delete(String),
+    /// Спросить, удалить ли всё выделенное.
+    DeleteSelected,
 }
 
 /// Тип файла для списка программ: расширение маленькими буквами.
@@ -100,6 +103,35 @@ pub fn attach(
                 *ask = Some(Ask::Delete(target.part.clone()));
                 ui.close();
             }
+        }
+    });
+}
+
+/// Меню строки дерева или карточки. Щёлкнули по одному из нескольких
+/// выделенных (`many`) — меню про всё выделенное, иначе — про эту строку.
+/// Пока идёт очередь (`busy`), пишущие пункты выделенного серые.
+pub fn attach_node(
+    response: &egui::Response,
+    programs: &Programs,
+    target: impl FnOnce() -> Target,
+    many: Option<usize>,
+    busy: bool,
+    ask: &mut Option<Ask>,
+) {
+    let Some(n) = many else {
+        attach(response, programs, target, ask);
+        return;
+    };
+    response.context_menu(|ui| {
+        let t = texts();
+        ui.set_min_width(240.0);
+        ui.label(RichText::new(format!("{} {n}", t.chosen_count)).weak());
+        ui.separator();
+        let delete = format!("{} ({n})…", t.delete_selected);
+        let button = ui.add_enabled(!busy, egui::Button::new(delete));
+        if button.on_disabled_hover_text(t.batch_busy).clicked() {
+            *ask = Some(Ask::DeleteSelected);
+            ui.close();
         }
     });
 }
@@ -188,6 +220,10 @@ impl App {
             Some(Ask::RemoveFile(part, path)) => self.ask_remove_file(&part, path),
             Some(Ask::Rename(part)) => self.ask_rename(&part),
             Some(Ask::Delete(part)) => self.ask_delete(&part),
+            Some(Ask::DeleteSelected) => {
+                let nodes = self.tab.selection.nodes();
+                self.command(ctx, Command::Delete(nodes));
+            }
             None => {}
         }
     }

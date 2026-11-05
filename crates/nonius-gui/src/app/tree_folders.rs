@@ -137,14 +137,12 @@ fn file_row(app: &App, ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
         if r.double_clicked() {
             acts.open_file = Some((path.to_string(), false));
         } else if r.clicked() || r.secondary_clicked() {
-            acts.picked = Some((node, r.secondary_clicked()));
+            acts.picked = Some((node.clone(), r.secondary_clicked()));
         }
-        open_menu::attach(
-            &r,
-            &app.tab.programs,
-            || loose_target(path),
-            &mut acts.asked,
-        );
+        let many = app.tab.selection.many_with(&node);
+        let busy = app.tab.batch.is_some();
+        let target = || loose_target(path);
+        open_menu::attach_node(&r, &app.tab.programs, target, many, busy, &mut acts.asked);
     });
 }
 
@@ -231,15 +229,7 @@ pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
     if let Some((node, secondary)) = acts.picked.take() {
         app.pick(ctx, node, secondary, &order, true);
     }
-    // Delete по выделенному — как в Проводнике, с вопросом. Последним
-    // выбрали файл на вкладке «Файлы» — Delete про него, это решает она.
-    let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete))
-        && !ctx.wants_keyboard_input()
-        && app.tab.dialog.is_none()
-        && !app.tab.keys_to_files;
-    if delete {
-        app.delete_selected();
-    }
+    app.tab.tree_order = order;
     if std::mem::take(&mut acts.fold_all) {
         app.tab.folded = app.tab.folders.iter().cloned().collect();
         app.tab.expanded.clear();

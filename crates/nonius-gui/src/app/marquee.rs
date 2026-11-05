@@ -65,6 +65,7 @@ impl App {
             let touched = shown::touched(list, area, rows);
             self.tab.selection.sweep(touched, add);
             self.tab.keys_to_files = false;
+            self.tab.in_structure = !rows;
         }
         if sweep.done {
             self.tab.selection.swept();

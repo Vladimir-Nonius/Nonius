@@ -109,6 +109,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if let Some((node, secondary)) = acts.picked.take() {
         app.pick(ui.ctx(), node, secondary, &order, false);
     }
+    app.tab.structure_order = order;
     app.answer_menu(ui.ctx(), acts.asked.take());
     if let Some(path) = acts.open_file {
         app.open_loose(ui.ctx(), path, false);

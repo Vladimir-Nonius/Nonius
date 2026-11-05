@@ -54,6 +54,10 @@ struct Fake {
     loose: Arc<Mutex<Vec<String>>>,
     /// Какие свои файлы положили в детали: деталь и файл.
     attached: Arc<Mutex<Vec<(String, PathBuf)>>>,
+    /// Какие детали удалили из окна.
+    deleted: Arc<Mutex<Vec<String>>>,
+    /// Держит удаление, пока тест смотрит на очередь.
+    gate: Arc<Mutex<()>>,
 }
 
 impl Fake {
@@ -123,6 +127,8 @@ impl ProjectSource for Fake {
                 });
             }
         }
+        let deleted = self.deleted.lock().unwrap();
+        list.retain(|p| !deleted.contains(&p.name));
         Ok(list)
     }
     fn settings(&self) -> ProjectSettings {
@@ -325,7 +331,9 @@ impl ProjectSource for Fake {
         anyhow::ensure!(new != "корпус", "такая деталь уже есть");
         Ok(())
     }
-    fn delete_part(&self, _part: &str) -> anyhow::Result<()> {
+    fn delete_part(&self, part: &str) -> anyhow::Result<()> {
+        let _wait = self.gate.lock().unwrap();
+        self.deleted.lock().unwrap().push(part.to_string());
         Ok(())
     }
     fn deleted_parts(&self) -> anyhow::Result<Vec<DeletedEntry>> {
@@ -524,6 +532,8 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         settings: Arc::default(),
         loose: Arc::default(),
         attached: Arc::default(),
+        deleted: Arc::default(),
+        gate: Arc::default(),
     }
 }
 
@@ -1999,18 +2009,96 @@ fn vanished_part_leaves_the_selection() {
 }
 
 #[test]
-fn delete_with_two_chosen_only_says_so() {
+fn delete_two_with_one_question() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
-    wait_for(&mut h, "корпус");
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let loose = project.loose.clone();
+    loose.lock().unwrap().push("ТЗ.pdf".into());
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "ТЗ.pdf");
     h.get_by_label_contains("корпус").click();
     h.run_steps(3);
-    let other = row(&h, "кронштейн");
-    click_with(&mut h, other, egui::Modifiers::COMMAND);
+    let file = row(&h, "🗋 ТЗ.pdf");
+    click_with(&mut h, file, egui::Modifiers::COMMAND);
     h.key_press(egui::Key::Delete);
-    wait_for(&mut h, "Удалить несколько сразу пока нельзя");
-    assert!(h.query_all_by_label_contains("Удалить «").next().is_none());
+    // Одно окошко на всё: детали и файлы по отдельности.
+    wait_for(&mut h, "Удалить выделенное (2)?");
+    // Окошко встаёт на место со второго кадра.
+    h.run();
+    assert!(h.query_by_label_contains("«корпус»").is_some());
+    assert!(h.query_by_label_contains("«ТЗ.pdf»").is_some());
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удалено 2 из 2");
+    assert_eq!(*deleted.lock().unwrap(), ["корпус"]);
+    assert!(loose.lock().unwrap().is_empty());
+    for _ in 0..100 {
+        h.step();
+        if h.query_all_by_label_contains("корпус").next().is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(h.query_all_by_label_contains("корпус").next().is_none());
+}
+
+#[test]
+fn queue_stops_after_the_current_one() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let gate = project.gate.clone();
+    project.created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    // Правая кнопка по одному из выделенных — меню про все три.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    for name in ["кронштейн", "корпус", "щит"] {
+        assert!(chosen(&h, name), "выделен «{name}»");
+    }
+    let held = gate.lock().unwrap();
+    h.get_by_label_contains("корпус").click_secondary();
+    wait_for(&mut h, "Удалить выделенное (3)…");
+    h.run();
+    h.get_by_label("Удалить выделенное (3)…").click();
+    wait_for(&mut h, "Удалить выделенное (3)?");
+    h.run();
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удаляю 1 из 3");
+    h.get_by_label("Остановить").click();
+    h.run_steps(2);
+    drop(held);
+    wait_for(&mut h, "Удалено 1 из 3, остановлено");
+    assert_eq!(deleted.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn keys_for_the_chosen() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    // Ctrl+A — всё в дереве, Esc — ничего.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    assert!(chosen(&h, "кронштейн") && chosen(&h, "корпус"));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(!chosen(&h, "кронштейн") && !chosen(&h, "корпус"));
+    // Ctrl выделяет, не открывая; Enter открывает.
+    let body = row(&h, "кронштейн");
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    assert!(compared.lock().unwrap().is_empty());
+    h.key_press(egui::Key::Enter);
+    wait_for(&mut h, "Добавлено 1");
+    // F2 — переименовать.
+    h.key_press(egui::Key::F2);
+    wait_for(&mut h, "Переименовать «кронштейн»");
 }
 
 #[test]

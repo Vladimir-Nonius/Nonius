@@ -187,10 +187,7 @@ impl App {
                     Some(d) => d.failed(format!("{e:#}")),
                     None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
-                Done::PartMoved(part, folder, Ok(())) => self.part_moved(ctx, part, folder),
-                Done::PartMoved(_, _, Err(e)) => {
-                    self.tab.message = Some(format!("{}: {e:#}", t.error))
-                }
+                Done::Batch(report) => self.batch_done(ctx, report),
                 Done::Added(Ok(added)) => self.added(ctx, added),
                 Done::Added(Err(e)) => match self.tab.add.as_mut() {
                     Some(d) => d.failed(format!("{e:#}")),

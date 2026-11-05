@@ -74,10 +74,12 @@ pub(super) fn file_lines(app: &App, ui: &mut egui::Ui, files: &[&String], acts: 
         if r.double_clicked() {
             acts.open_file = Some(f.to_string());
         } else if r.clicked() || r.secondary_clicked() {
-            acts.picked = Some((node, r.secondary_clicked()));
+            acts.picked = Some((node.clone(), r.secondary_clicked()));
         }
+        let many = app.tab.selection.many_with(&node);
+        let busy = app.tab.batch.is_some();
         let target = || tree_folders::loose_target(f);
-        open_menu::attach(&r, &app.tab.programs, target, &mut acts.asked);
+        open_menu::attach_node(&r, &app.tab.programs, target, many, busy, &mut acts.asked);
     }
 }
 
@@ -159,7 +161,10 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
         .interact(egui::Sense::click_and_drag())
         .on_hover_text(t.open_in_3d);
     let r = tree_folders::drag_part(r, p);
-    open_menu::attach(&r, &app.tab.programs, || tree::target(p), &mut acts.asked);
+    let many = app.tab.selection.many_with(&node);
+    let busy = app.tab.batch.is_some();
+    let target = || tree::target(p);
+    open_menu::attach_node(&r, &app.tab.programs, target, many, busy, &mut acts.asked);
     if r.double_clicked() {
         acts.open = Some(p.name.clone());
         app.tab.view = View::Part;

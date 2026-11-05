@@ -52,6 +52,12 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
                 if app.tab.jobs.can_cancel() && ui.button(t.cancel_compare).clicked() {
                     cancel = true;
                 }
+                // Очередь останавливается после текущего предмета.
+                if let Some(batch) = &app.tab.batch {
+                    if ui.button(t.stop).clicked() {
+                        batch.stop();
+                    }
+                }
             } else if let Some(n) = &app.tab.notice {
                 ui.label(n);
             } else if app.no_lfs {

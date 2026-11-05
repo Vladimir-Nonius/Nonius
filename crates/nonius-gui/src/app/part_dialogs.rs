@@ -3,6 +3,8 @@
 
 use eframe::egui::{self, RichText};
 
+use super::node::Node;
+use super::tree_folders::last;
 use super::App;
 use crate::source::DeletedEntry;
 use crate::texts::texts;
@@ -19,6 +21,8 @@ pub enum Dialog {
     RemoveFile(Confirm, String),
     /// Список удалённых деталей; `None` — ещё читается.
     Deleted(Option<Vec<DeletedEntry>>, Confirm),
+    /// Удалить выделенное: детали и файлы папок.
+    DeleteMany(Vec<Node>, Confirm),
 }
 
 /// Окошко-вопрос про деталь.
@@ -53,7 +57,8 @@ impl Dialog {
             Dialog::Delete(c)
             | Dialog::Restore(c, _)
             | Dialog::RemoveFile(c, _)
-            | Dialog::Deleted(_, c) => c,
+            | Dialog::Deleted(_, c)
+            | Dialog::DeleteMany(_, c) => c,
         };
         base.busy = false;
         base.error = Some(error);
@@ -65,7 +70,8 @@ impl Dialog {
             Dialog::Delete(c)
             | Dialog::Restore(c, _)
             | Dialog::RemoveFile(c, _)
-            | Dialog::Deleted(_, c) => c,
+            | Dialog::Deleted(_, c)
+            | Dialog::DeleteMany(_, c) => c,
         }
     }
 }
@@ -134,6 +140,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 if unsaved {
                     ui.add(egui::Label::new(t.delete_unsaved).wrap());
                 }
+            })
+        }
+        Some(Dialog::DeleteMany(nodes, base)) => {
+            let title = format!("{} ({})?", t.delete_many_title, nodes.len());
+            let unsaved = nodes.iter().any(|n| matches!(n, Node::Part(p) if dirty(p)));
+            question(ctx, &title, base, Some(t.delete), |ui| {
+                many_list(ui, nodes, unsaved);
             })
         }
         Some(Dialog::RemoveFile(base, path)) => {
@@ -215,6 +228,32 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         Some(Pressed::No) => app.tab.dialog = None,
         Some(Pressed::Yes) => app.confirmed(ctx),
         None => {}
+    }
+}
+
+/// Что удалится, по видам: детали можно вернуть, файлы остаются в истории.
+fn many_list(ui: &mut egui::Ui, nodes: &[Node], unsaved: bool) {
+    let t = texts();
+    let names = |part: bool| {
+        let list: Vec<String> = nodes
+            .iter()
+            .filter_map(|n| match n {
+                Node::Part(name) if part => Some(format!("«{name}»")),
+                Node::File(path) if !part => Some(format!("«{}»", last(path))),
+                _ => None,
+            })
+            .collect();
+        (!list.is_empty()).then(|| list.join(", "))
+    };
+    for (part, why) in [(true, t.delete_many_parts), (false, t.delete_many_files)] {
+        if let Some(list) = names(part) {
+            ui.label(RichText::new(list).strong());
+            ui.add(egui::Label::new(RichText::new(why).weak()).wrap());
+            ui.add_space(4.0);
+        }
+    }
+    if unsaved {
+        ui.add(egui::Label::new(t.delete_unsaved).wrap());
     }
 }
 
