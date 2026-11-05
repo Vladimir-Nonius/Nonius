@@ -202,7 +202,8 @@ fn part_row(ui: &mut egui::Ui, p: &PartEntry, selected: bool) -> egui::Response 
     }
 }
 
-fn target(p: &PartEntry) -> Target {
+/// Деталь для меню правого щелчка: её модель или паспорт.
+pub(super) fn target(p: &PartEntry) -> Target {
     Target {
         part: p.name.clone(),
         pick: Pick::Current,

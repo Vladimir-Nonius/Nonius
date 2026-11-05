@@ -1723,3 +1723,30 @@ fn file_dropped_anywhere_in_a_structure_folder_lands_there() {
     wait_for(&mut h, "Скопировано");
     assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
 }
+
+#[test]
+fn delete_key_asks_about_the_chosen_part() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "корпус");
+    h.get_by_label_contains("корпус").click();
+    h.run_steps(3);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+}
+
+#[test]
+fn structure_card_has_the_part_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "корпус");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    h.get_by_label("корпус").click_secondary();
+    wait_for(&mut h, "Переименовать…");
+    h.run_steps(5);
+    h.get_by_label("Удалить…").click();
+    wait_for(&mut h, "Удалить «корпус»?");
+}

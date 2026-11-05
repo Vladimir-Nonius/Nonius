@@ -5,9 +5,9 @@
 use eframe::egui::{self, Color32, RichText};
 
 use super::super::drop_zones::Zone;
-use super::super::open_menu;
 use super::super::tree_folders::{self, Dragged};
 use super::super::App;
+use super::super::{open_menu, tree};
 use super::{Acts, View};
 use crate::source::PartEntry;
 use crate::texts::texts;
@@ -114,6 +114,8 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
                     .selectable_label(selected, RichText::new(&p.name).strong())
                     .on_hover_text(t.open_in_3d);
                 let name = tree_folders::drag_part(name, p);
+                let programs = &app.tab.programs;
+                open_menu::attach(&name, programs, || tree::target(p), &mut acts.asked);
                 if name.double_clicked() {
                     acts.open = Some(p.name.clone());
                     app.tab.view = View::Part;

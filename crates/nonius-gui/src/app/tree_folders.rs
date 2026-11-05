@@ -227,12 +227,25 @@ pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
     if let Some(path) = acts.chosen_file.take() {
         app.tab.loose_chosen = Some(path);
     }
-    // Delete по выделенному файлу — как в Проводнике, с вопросом.
+    if acts.clicked.is_some() {
+        app.tab.loose_chosen = None;
+    }
+    // Delete по выделенному — как в Проводнике, с вопросом: файл папки,
+    // а если его нет — выбранная деталь.
     let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !ctx.wants_keyboard_input();
-    if let (true, Some(path)) = (delete, app.tab.loose_chosen.clone()) {
-        if app.tab.loose.contains(&path) {
-            app.ask_remove_file("", path);
+    let file = app
+        .tab
+        .loose_chosen
+        .clone()
+        .filter(|f| app.tab.loose.contains(f));
+    match (delete, file, app.tab.part.clone()) {
+        (false, _, _) => {}
+        (true, Some(path), _) => app.ask_remove_file("", path),
+        // Выбран файл на вкладке «Файлы» — Delete про него, это решает она.
+        (true, None, Some(part)) if app.tab.dialog.is_none() && app.tab.file.is_none() => {
+            app.ask_delete(&part)
         }
+        _ => {}
     }
     if let Some(path) = acts.toggled.take() {
         if path == FOLD_ALL {
