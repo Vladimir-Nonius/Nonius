@@ -7,6 +7,7 @@ use eframe::egui;
 use nonius_core::project::PROJECT_FILE;
 
 use super::new_part::NewPart;
+use super::settings_window::SettingsDialog;
 use super::App;
 use crate::source::{Other, Pick};
 use crate::texts::texts;
@@ -37,6 +38,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 if ui.button(t.new_part).clicked() {
                     ui.close();
                     app.tab.new_part = Some(NewPart::in_folder(&app.tab.place));
+                }
+                if ui.button(t.settings).clicked() {
+                    ui.close();
+                    if let Some(p) = &app.tab.project {
+                        let dialog = SettingsDialog::new(p.settings());
+                        app.tab.settings = Some(dialog);
+                    }
                 }
                 if ui.button(t.deleted_parts).clicked() {
                     ui.close();

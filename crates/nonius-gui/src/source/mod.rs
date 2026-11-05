@@ -158,6 +158,11 @@ pub trait ProjectSource: Send + Sync {
     fn set_hidden(&self, part: &str, version: u32, hidden: bool) -> anyhow::Result<()>;
     /// Выгрузить файлы версии в папку. Возвращает, сколько файлов записано.
     fn export_version(&self, part: &str, version: u32, dest: &Path) -> anyhow::Result<usize>;
+    /// Настройки проекта: название и допуск сравнения.
+    fn settings(&self) -> ProjectSettings;
+    /// Записать настройки проекта одной записью истории. После этого проект
+    /// открывают заново: открытый видит старые значения.
+    fn save_settings(&self, settings: &ProjectSettings) -> anyhow::Result<()>;
     /// Проект старого формата (`parts/`, `assemblies/`): только просмотр,
     /// пока его не обновят.
     fn old_layout(&self) -> bool {

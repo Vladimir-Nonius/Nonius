@@ -30,8 +30,10 @@ mod project_tab;
 mod results;
 mod save;
 mod settings;
+mod settings_window;
 mod start;
 mod strip;
+mod structure;
 mod toolbar;
 mod tree;
 mod tree_folders;
@@ -171,7 +173,7 @@ impl eframe::App for App {
             file_menu::show(self, ctx);
         }
         self.move_when_free(ctx);
-        self.upgrade_when_free(ctx);
+        self.reopen_when_free(ctx);
         strip::show(self, ctx);
         draft::bar(self, ctx);
         upgrade::bar(self, ctx);
@@ -191,6 +193,7 @@ impl eframe::App for App {
         save::show(self, ctx);
         new_part::show(self, ctx);
         new_folder::show(self, ctx);
+        settings_window::show(self, ctx);
         add_model::show(self, ctx);
         part_dialogs::show(self, ctx);
         // Заливка нужна: зазор между полосой и 3D иначе показывает чёрный фон.
@@ -198,6 +201,11 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(fill))
             .show(ctx, |ui| {
+                structure::switch(self, ui);
+                if self.tab.view == structure::View::Structure {
+                    structure::show(self, ui);
+                    return;
+                }
                 toolbar::show(self, ui);
                 let event = self.viewport.show(
                     ui,

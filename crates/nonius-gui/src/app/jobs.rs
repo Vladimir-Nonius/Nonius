@@ -51,6 +51,8 @@ pub enum Done {
     PartCreated(String, anyhow::Result<()>),
     /// Создана папка: путь от корня.
     FolderCreated(String, anyhow::Result<()>),
+    /// Настройки проекта записаны.
+    SettingsSaved(anyhow::Result<()>),
     /// Деталь перенесена в папку.
     PartMoved(String, String, anyhow::Result<()>),
     /// Файл добавлен в деталь и сохранён версией.

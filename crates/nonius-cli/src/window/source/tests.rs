@@ -374,3 +374,43 @@ fn folders_from_the_window() {
     let e = src.new_folder("RAIL-01/внутри").unwrap_err();
     assert!(format!("{e:#}").contains("внутрь детали"), "{e:#}");
 }
+
+#[test]
+fn project_settings_from_the_window() {
+    for (k, v) in [
+        ("GIT_AUTHOR_NAME", "Тестировщик"),
+        ("GIT_AUTHOR_EMAIL", "test@example.com"),
+        ("GIT_COMMITTER_NAME", "Тестировщик"),
+        ("GIT_COMMITTER_EMAIL", "test@example.com"),
+    ] {
+        std::env::set_var(k, v);
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path().join("Станок");
+    std::fs::create_dir(&d).unwrap();
+    let src = AppSource::create(&d).unwrap();
+    let s = src.settings();
+    assert_eq!((s.name.as_str(), s.tolerance_mm), ("Станок", 0.01));
+
+    let new = ProjectSettings {
+        name: "Станок ЧПУ".into(),
+        tolerance_mm: 0.05,
+    };
+    src.save_settings(&new).unwrap();
+    let bad = ProjectSettings {
+        tolerance_mm: 0.0,
+        ..new.clone()
+    };
+    let e = src.save_settings(&bad).unwrap_err();
+    assert!(format!("{e:#}").contains("допуск"), "{e:#}");
+    // Открытый проект видит старое: окно открывает его заново.
+    drop(src);
+    let src = AppSource::open(&d).unwrap();
+    assert_eq!(src.settings(), new);
+    assert_eq!(src.title(), "Станок ЧПУ");
+    let git = std::process::Command::new("git")
+        .args(["-C", &d.to_string_lossy(), "status", "--porcelain"])
+        .output()
+        .unwrap();
+    assert!(git.stdout.is_empty(), "project.yaml сохранён в истории");
+}

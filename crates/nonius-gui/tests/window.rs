@@ -12,7 +12,7 @@ use nonius_core::compare::{Change, ChangeKind, ChangeReport};
 use nonius_gui::source::{
     AddedModel, Chooser, Comparison, DeletedEntry, DiffEntry, DiffKind, FileEntry, FileState,
     Machine, MassEntry, MaterialEntry, OpenWay, Other, PartEntry, Pick, ProgramEntry, Progress,
-    ProjectSource, Readiness, VersionEntry,
+    ProjectSettings, ProjectSource, Readiness, VersionEntry,
 };
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
@@ -48,6 +48,8 @@ struct Fake {
     folders: Arc<Mutex<Vec<String>>>,
     /// Где лежат детали: деталь и папка, последнее — главное.
     moved: Arc<Mutex<Vec<(String, String)>>>,
+    /// Что записали в настройки проекта.
+    settings: Arc<Mutex<Vec<ProjectSettings>>>,
 }
 
 impl Fake {
@@ -118,6 +120,20 @@ impl ProjectSource for Fake {
             }
         }
         Ok(list)
+    }
+    fn settings(&self) -> ProjectSettings {
+        let saved = self.settings.lock().unwrap();
+        saved.last().cloned().unwrap_or(ProjectSettings {
+            name: self.title.into(),
+            tolerance_mm: 0.01,
+        })
+    }
+    fn save_settings(&self, settings: &ProjectSettings) -> anyhow::Result<()> {
+        if settings.name.contains('!') {
+            anyhow::bail!("название «{}» не годится", settings.name);
+        }
+        self.settings.lock().unwrap().push(settings.clone());
+        Ok(())
     }
     fn folders(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.folders.lock().unwrap().clone())
@@ -477,6 +493,7 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         old: Arc::default(),
         folders: Arc::default(),
         moved: Arc::default(),
+        settings: Arc::default(),
     }
 }
 
@@ -1329,13 +1346,13 @@ fn drag(h: &mut Harness<'_, App>, from: egui::Rect, to: egui::Rect) {
     let steps = [start, start + egui::vec2(0.0, 12.0), to.center()];
     h.input_mut().events.push(egui::Event::PointerMoved(start));
     h.input_mut().events.push(press(start, true));
-    h.run();
+    h.run_steps(3);
     for pos in steps {
         h.input_mut().events.push(egui::Event::PointerMoved(pos));
-        h.run();
+        h.run_steps(3);
     }
     h.input_mut().events.push(press(to.center(), false));
-    h.run();
+    h.run_steps(3);
 }
 
 #[test]
@@ -1410,4 +1427,112 @@ fn drag_part_into_folder() {
     h.get_by_label_contains("кронштейн").click();
     wait_for(&mut h, "2026-10-27");
     assert_eq!(moved.lock().unwrap().len(), 1);
+}
+
+/// Поле ввода с этим текстом.
+fn field<'a>(h: &'a Harness<'_, App>, value: &str) -> egui_kittest::Node<'a> {
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.value().as_deref() == Some(value))
+        .unwrap_or_else(|| panic!("нет поля «{value}»"))
+}
+
+/// Дописать в конец поля.
+fn append(h: &mut Harness<'_, App>, value: &str, text: &str) {
+    field(h, value).click();
+    h.run_steps(3);
+    h.key_press(egui::Key::End);
+    field(h, value).type_text(text);
+    h.run_steps(3);
+}
+
+#[test]
+fn structure_shows_folders_and_blanks() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let moved = project.moved.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    // У корпуса модели нет: это заготовка, модель добавляется прямо здесь.
+    assert!(h.query_by_label("заготовка: модели нет · сборка").is_some());
+    assert!(h.query_by_label("Добавить модель…").is_some());
+    assert!(h.query_by_label_contains("Пусто").is_some());
+
+    let card = h.get_by_label("корпус").rect();
+    let folder = h.get_by_label("🗀 Стена").rect();
+    drag(&mut h, card, folder);
+    wait_for(&mut h, "«корпус» перенесена в «Стена»");
+    assert_eq!(
+        *moved.lock().unwrap(),
+        [("корпус".to_string(), "Стена".to_string())]
+    );
+
+    // Двойной щелчок по карточке — деталь в 3D.
+    // Оба щелчка в одном кадре: между кадрами проверка ждёт дольше,
+    // чем длится двойной щелчок.
+    let at = h.get_by_label("кронштейн").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    for pressed in [true, false, true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    wait_for(&mut h, "2026-10-27");
+    assert!(
+        h.query_by_label("Корень проекта").is_none(),
+        "показана деталь"
+    );
+}
+
+#[test]
+fn project_settings_from_the_window() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let saved = project.settings.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+
+    h.get_by_label("Файл").click();
+    wait_for(&mut h, "Настройки…");
+    h.get_by_label("Настройки…").click();
+    wait_for(&mut h, "Допуск сравнения, мм");
+    // Окошко ещё выплывает: щелчок по нему раньше времени попал бы мимо.
+    h.run_steps(10);
+
+    h.get_by_label("Программа").click();
+    wait_for(&mut h, "Колесо мыши наоборот");
+    h.get_by_label("Проект").click();
+    wait_for(&mut h, "Допуск сравнения, мм");
+
+    // Не вышло — окно остаётся и говорит почему.
+    append(&mut h, "Стенд", "!");
+    h.get_by_label("Сохранить").click();
+    wait_for(&mut h, "не годится");
+    // Щелчок по «Сохранить» увёл фокус: сначала снова в поле.
+    field(&h, "Стенд!").click();
+    h.run_steps(3);
+    h.key_press(egui::Key::End);
+    h.key_press(egui::Key::Backspace);
+    h.run_steps(3);
+
+    append(&mut h, "0.01", "5");
+    h.get_by_label("Сохранить").click();
+    // Проект открывается заново: его заменит «Второй» из открывателя проверки.
+    wait_for(&mut h, "Второй");
+    let last = saved.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(
+        last,
+        ProjectSettings {
+            name: "Стенд".into(),
+            tolerance_mm: 0.015
+        }
+    );
 }

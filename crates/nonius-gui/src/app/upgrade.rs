@@ -1,7 +1,8 @@
 //! Проект старого формата: детали в `parts/` и `assemblies/`. Его можно
 //! смотреть, но не менять. При открытии окно один раз спрашивает, обновить
 //! ли его; потом над проектом остаётся полоса с той же кнопкой. Обновление —
-//! одна запись истории, после него проект открывается заново.
+//! одна запись истории, после него проект открывается заново. Так же заново
+//! открывается проект после «Настроек».
 
 use eframe::egui::{self, RichText};
 
@@ -11,21 +12,30 @@ use super::App;
 use crate::texts::texts;
 
 impl App {
-    /// Обновить проект, как только вкладка свободна: фоновые работы ещё
-    /// могут читать файлы, которые переедут.
-    pub(super) fn upgrade_when_free(&mut self, ctx: &egui::Context) {
+    /// Обновить проект или просто открыть его заново (после настроек), как
+    /// только вкладка свободна: фоновые работы ещё могут читать файлы,
+    /// которые переедут. Выбранная деталь и вид остаются.
+    pub(super) fn reopen_when_free(&mut self, ctx: &egui::Context) {
         let free = !self.tab.jobs.busy() && self.tab.jobs.all_finished();
-        if !self.tab.upgrading || !free {
+        if !(self.tab.upgrading || self.tab.reopen) || !free {
             return;
         }
         let Some(project) = self.tab.project.take() else {
             return;
         };
+        let upgrade = self.tab.upgrading;
+        let (part, view) = (self.tab.part.take(), self.tab.view);
         self.tab = ProjectTab::default();
+        self.tab.want = part.map(|p| (p, None));
+        self.tab.view = view;
         let opener = self.opener.clone();
         self.tab.jobs.spawn(ctx, move |_| {
             let root = project.root().to_path_buf();
-            let error = project.upgrade().err().map(|e| format!("{e:#}"));
+            let error = if upgrade {
+                project.upgrade().err().map(|e| format!("{e:#}"))
+            } else {
+                None
+            };
             // Проект открывается заново: прежний держит старые пути.
             drop(project);
             Done::Moved(opener(&root), error)

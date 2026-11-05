@@ -30,6 +30,7 @@ mod model_view;
 mod moving;
 mod outside;
 mod passport;
+mod settings;
 mod system;
 
 use std::path::{Path, PathBuf};
@@ -49,6 +50,7 @@ pub use materials::{find_material, similar_materials, Material, MATERIALS};
 pub use moving::move_project;
 pub use outside::{Other, Outside};
 pub use passport::{Mass, MaterialChoice, Passport};
+pub use settings::{ProjectSettings, MAX_TOLERANCE_MM};
 pub use system::{programs_for, OpenWay, Program};
 
 // Типы хранилища, которые возвращают действия: вызывающему не нужен nonius-store.

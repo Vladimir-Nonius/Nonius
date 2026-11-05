@@ -7,7 +7,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::jobs::Jobs;
-use super::{add_model, bottom, material, new_folder, new_part, open_menu, part_dialogs, save};
+use super::{
+    add_model, bottom, material, new_folder, new_part, open_menu, part_dialogs, save,
+    settings_window, structure,
+};
 use crate::source::{
     Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
     VersionEntry,
@@ -86,4 +89,11 @@ pub(super) struct ProjectTab {
     pub ask_upgrade: bool,
     /// Проект обновляется, как только вкладка освободится.
     pub upgrading: bool,
+    /// Настройки проекта записаны: открыть его заново, как только вкладка
+    /// освободится.
+    pub reopen: bool,
+    /// Что показано в центре: деталь в 3D или структура проекта.
+    pub view: structure::View,
+    /// Открытое окно «Настройки».
+    pub settings: Option<settings_window::SettingsDialog>,
 }

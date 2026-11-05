@@ -27,7 +27,7 @@ use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
     AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, MassEntry, MaterialEntry, OpenWay,
-    Other, PartEntry, Pick, ProgramEntry, Progress, ProjectSource, VersionEntry,
+    Other, PartEntry, Pick, ProgramEntry, Progress, ProjectSettings, ProjectSource, VersionEntry,
 };
 
 /// Проект для окна поверх `nonius-app`.
@@ -362,6 +362,24 @@ impl ProjectSource for AppSource {
         progress: &dyn Progress,
     ) -> Result<Comparison> {
         self.compare_with(part, pick, other, progress)
+    }
+
+    fn settings(&self) -> ProjectSettings {
+        let s = self.app.project_settings();
+        ProjectSettings {
+            name: s.name,
+            tolerance_mm: s.tolerance_mm,
+        }
+    }
+
+    fn save_settings(&self, settings: &ProjectSettings) -> Result<()> {
+        let new = nonius_app::ProjectSettings {
+            name: settings.name.clone(),
+            tolerance_mm: settings.tolerance_mm,
+        };
+        let _files = self.writing();
+        self.app.set_project_settings(&new).map_err(in_words)?;
+        Ok(())
     }
 
     fn old_layout(&self) -> bool {

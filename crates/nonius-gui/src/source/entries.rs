@@ -25,6 +25,15 @@ pub struct PartEntry {
     pub folder: String,
 }
 
+/// Настройки проекта, которые меняют в окне «Настройки».
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectSettings {
+    /// Название проекта.
+    pub name: String,
+    /// Допуск сравнения, мм.
+    pub tolerance_mm: f64,
+}
+
 /// Всё, что рисует дерево: детали и папки-группы.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Listing {
