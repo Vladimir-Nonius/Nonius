@@ -1158,6 +1158,29 @@ fn right_click_acts_on_its_own_row() {
 }
 
 #[test]
+fn version_model_opens_from_its_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let opened = project.opened.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "версия 1");
+
+    // Правая кнопка по старой версии: открыть её модель копией.
+    h.get_by_label("v1").click_secondary();
+    wait_for(&mut h, "Открыть в…");
+    assert!(h.query_by_label("Показать в папке").is_some());
+    h.get_by_label("Открыть").click();
+    wait_for(&mut h, "(копия, правки в ней не попадут в историю)");
+    assert_eq!(
+        *opened.lock().unwrap(),
+        [("model.step".to_string(), OpenWay::Default)]
+    );
+}
+
+#[test]
 fn own_files_from_the_files_tab() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();

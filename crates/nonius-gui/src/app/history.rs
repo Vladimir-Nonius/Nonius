@@ -5,6 +5,7 @@
 
 use eframe::egui::{self, Color32, RichText};
 
+use super::open_menu::{self, Ask, Programs, Target};
 use super::part_actions::old_version;
 use super::App;
 use crate::source::{PartEntry, Pick, VersionEntry};
@@ -22,6 +23,24 @@ pub enum Act {
     Export(String, u32),
     /// Убрать версию с карты (`true`) или вернуть на неё.
     Hide(String, u32, bool),
+    /// Открыть модель версии: то же, что в меню файла.
+    File(Ask),
+}
+
+/// Над какой версией щёлкнули правой кнопкой.
+pub struct Menu<'a> {
+    /// Деталь.
+    pub part: &'a str,
+    /// Эта версия.
+    pub me: Pick,
+    /// «Было» и «Стало» — только у выбранной детали.
+    pub picks: Option<(Pick, Pick)>,
+    /// Последняя версия: её вернуть и убрать с карты незачем.
+    pub latest: Option<u32>,
+    /// Версия уже убрана с карты.
+    pub hidden: bool,
+    /// Модель версии и программы для неё; `None` — у детали нет модели.
+    pub model: Option<(&'a Programs, Target)>,
 }
 
 /// Метка версии в выбранной паре.
@@ -76,20 +95,27 @@ pub fn now_pair(versions: &[VersionEntry]) -> Option<(Pick, Pick)> {
     Some((Pick::Version(latest.number), Pick::Current))
 }
 
-/// Правая кнопка по версии детали `part`. «Было» и «Стало» — только у
-/// выбранной (`picks` есть), остальное — у любой. `latest` вернуть и убрать с
-/// карты незачем; `hidden` — версия уже убрана.
-pub fn version_menu(
-    r: &egui::Response,
-    part: &str,
-    me: Pick,
-    picks: Option<(Pick, Pick)>,
-    latest: Option<u32>,
-    hidden: bool,
-    act: &mut Option<Act>,
-) {
+/// Правая кнопка по версии: открыть её модель (копией), «Было» и «Стало»,
+/// вернуть, выгрузить, убрать с карты.
+pub fn version_menu(r: &egui::Response, menu: Menu, act: &mut Option<Act>) {
     let t = texts();
+    let Menu {
+        part,
+        me,
+        picks,
+        latest,
+        hidden,
+        model,
+    } = menu;
     r.context_menu(|ui| {
+        if let Some((programs, target)) = &model {
+            let mut ask = None;
+            open_menu::open_items(ui, programs, target, &mut ask);
+            if let Some(ask) = ask {
+                *act = Some(Act::File(ask));
+            }
+            ui.separator();
+        }
         if let Some(picks) = picks {
             if ui.button(t.make_before).clicked() {
                 *act = Some(Act::Show((me, picks.1)));
@@ -153,8 +179,24 @@ impl App {
             Some(Act::Restore(part, n)) => self.ask_restore_of(&part, n),
             Some(Act::Export(part, n)) => self.export_of(ctx, part, n),
             Some(Act::Hide(part, n, hidden)) => self.set_hidden(ctx, part, n, hidden),
+            Some(Act::File(ask)) => self.answer_menu(ctx, Some(ask)),
             _ => {}
         }
+    }
+
+    /// Модель детали в версии `me` для меню: открыть копией, программой,
+    /// показать в папке. Без модели — `None`.
+    pub(super) fn version_model(&self, part: &str, me: Pick) -> Option<(&Programs, Target)> {
+        let entry = self.tab.parts.iter().find(|p| p.name == part)?;
+        let target = Target {
+            part: part.to_string(),
+            pick: me,
+            path: entry.model.clone()?,
+            openable: true,
+            model_slot: false,
+            removable: false,
+        };
+        Some((&self.tab.programs, target))
     }
 
     /// Есть несохранённое у выбранной детали.
@@ -216,7 +258,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
         if r.clicked() {
             act = Some(go(version_pair(&shown, i)));
         }
-        version_menu(&r, &part.name, me, picks, latest, false, &mut act);
+        let menu = Menu {
+            part: &part.name,
+            me,
+            picks,
+            latest,
+            hidden: false,
+            model: app.version_model(&part.name, me),
+        };
+        version_menu(&r, menu, &mut act);
     }
     let hidden = versions.len() - shown.len();
     if hidden > 0 {
@@ -231,7 +281,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, part: &PartEntry) {
                     if r.clicked() {
                         act = Some(go(version_pair(versions, i)));
                     }
-                    version_menu(&r, &part.name, me, picks, latest, true, &mut act);
+                    let menu = Menu {
+                        part: &part.name,
+                        me,
+                        picks,
+                        latest,
+                        hidden: true,
+                        model: app.version_model(&part.name, me),
+                    };
+                    version_menu(&r, menu, &mut act);
                 }
             });
     }

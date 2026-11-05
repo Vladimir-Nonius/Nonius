@@ -68,23 +68,7 @@ pub fn attach(
         let t = texts();
         let target = target();
         ui.set_min_width(240.0);
-        if matches!(target.pick, Pick::Version(_)) {
-            ui.label(RichText::new(t.menu_copy_warning).weak());
-            ui.separator();
-        }
-        if target.openable {
-            if ui.button(t.open_file).clicked() {
-                *ask = Some(Ask::Open(target.clone(), OpenWay::Default));
-                ui.close();
-            }
-            ui.menu_button(t.open_in, |ui| {
-                choose_program(ui, programs, &target, ask);
-            });
-        }
-        if ui.button(t.show_in_folder).clicked() {
-            *ask = Some(Ask::Open(target.clone(), OpenWay::Folder));
-            ui.close();
-        }
+        open_items(ui, programs, &target, ask);
         if target.removable {
             ui.separator();
             if ui.button(t.remove_file).clicked() {
@@ -118,6 +102,29 @@ pub fn attach(
             }
         }
     });
+}
+
+/// «Открыть», «Открыть в…», «Показать в папке»; у версии — сперва
+/// предупреждение, что откроется копия. Общие для файлов, деталей и версий.
+pub fn open_items(ui: &mut egui::Ui, programs: &Programs, target: &Target, ask: &mut Option<Ask>) {
+    let t = texts();
+    if matches!(target.pick, Pick::Version(_)) {
+        ui.label(RichText::new(t.menu_copy_warning).weak());
+        ui.separator();
+    }
+    if target.openable {
+        if ui.button(t.open_file).clicked() {
+            *ask = Some(Ask::Open(target.clone(), OpenWay::Default));
+            ui.close();
+        }
+        ui.menu_button(t.open_in, |ui| {
+            choose_program(ui, programs, target, ask);
+        });
+    }
+    if ui.button(t.show_in_folder).clicked() {
+        *ask = Some(Ask::Open(target.clone(), OpenWay::Folder));
+        ui.close();
+    }
 }
 
 fn choose_program(ui: &mut egui::Ui, programs: &Programs, target: &Target, ask: &mut Option<Ask>) {

@@ -66,7 +66,15 @@ fn nodes(app: &App, ui: &mut egui::Ui, act: &mut Option<Act>) {
         if r.clicked() {
             *act = Some(Act::Show(history::version_pair(&versions, i)));
         }
-        history::version_menu(&r, part, me, Some(picks), latest, false, act);
+        let menu = history::Menu {
+            part,
+            me,
+            picks: Some(picks),
+            latest,
+            hidden: false,
+            model: app.version_model(part, me),
+        };
+        history::version_menu(&r, menu, act);
     }
     if dirty {
         let at = center(count - 1);
