@@ -9,6 +9,7 @@ mod add_model;
 mod bottom;
 mod choose;
 mod draft;
+mod drop_zones;
 mod dropped;
 mod file_menu;
 mod files;
@@ -187,6 +188,8 @@ impl eframe::App for App {
         panels::error_bar(self, ctx);
         panels::status_bar(self, ctx);
         map::show(self, ctx);
+        // Места для броска файлов строки дерева и «Структуры» отметят заново.
+        self.tab.zones.clear();
         tree::show(self, ctx);
         panels::changes(self, ctx);
         bottom::show(self, ctx);
@@ -219,6 +222,7 @@ impl eframe::App for App {
                 }
                 panels::overlay(self, ui);
             });
+        self.show_drop_target(ctx);
         self.remember_look();
     }
 }

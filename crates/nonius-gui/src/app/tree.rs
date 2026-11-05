@@ -3,6 +3,7 @@
 
 use eframe::egui::{self, Color32, RichText};
 
+use super::drop_zones::Zone;
 use super::jobs::Done;
 use super::open_menu::{self, Ask, Target};
 use super::tree_folders::{self, Dragged};
@@ -30,6 +31,10 @@ pub(super) struct Acts {
     pub new_part: Option<String>,
     /// «Новая папка…» внутри этой.
     pub new_folder: Option<String>,
+    /// Где строки, на которые можно бросить файл из Проводника.
+    pub zones: Vec<(egui::Rect, Zone)>,
+    /// Открыть обычный файл папки (`true` — показать в папке).
+    pub open_file: Option<(String, bool)>,
 }
 
 /// Нарисовать дерево.
@@ -63,6 +68,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if found.is_empty() && searching {
                 ui.label(RichText::new(t.nothing_found).weak());
             }
+            let files: Vec<String> = app
+                .tab
+                .loose
+                .iter()
+                .filter(|f| matches(tree_folders::last(f), &app.tab.search))
+                .cloned()
+                .collect();
             let folders = tree_folders::visible(&app.tab.folders, &found, searching);
             egui::ScrollArea::vertical()
                 .id_salt("tree")
@@ -71,6 +83,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     let tree = tree_folders::Tree {
                         folders: &folders,
                         parts: &found,
+                        files: &files,
                         searching,
                     };
                     tree_folders::dir(app, ui, &tree, "", &mut acts);
@@ -95,6 +108,7 @@ pub(super) fn part_line(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, acts: &
         let arrow = if open { "▾" } else { "▸" };
         let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
         let r = tree_folders::drag_part(part_row(ui, p, selected), p);
+        acts.zones.push((r.rect, Zone::Part(p.name.clone())));
         if let Some(d) = r.dnd_release_payload::<Dragged>() {
             // Брошена на деталь — в ту же папку, где она лежит.
             acts.moved = Some((d.0.clone(), p.folder.clone()));
@@ -137,6 +151,7 @@ impl App {
     pub(super) fn set_parts(&mut self, ctx: &egui::Context, listing: Listing) {
         let old = std::mem::replace(&mut self.tab.parts, listing.parts);
         self.tab.folders = listing.folders;
+        self.tab.loose = listing.files;
         let names = self.tab.parts.iter().map(|p| p.name.clone());
         let names: std::collections::BTreeSet<String> = names.collect();
         self.tab.expanded.retain(|n| names.contains(n));

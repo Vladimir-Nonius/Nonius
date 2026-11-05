@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::jobs::Jobs;
 use super::{
-    add_model, bottom, material, new_folder, new_part, open_menu, part_dialogs, save,
+    add_model, bottom, drop_zones, material, new_folder, new_part, open_menu, part_dialogs, save,
     settings_window, structure,
 };
 use crate::source::{
@@ -45,6 +45,10 @@ pub(super) struct ProjectTab {
     pub expanded: BTreeSet<String>,
     /// Папки-группы проекта: путь от корня через `/`.
     pub folders: Vec<String>,
+    /// Обычные файлы в папках-группах: путь от корня через `/`.
+    pub loose: Vec<String>,
+    /// Где на экране строки, на которые можно бросить файл: с прошлого кадра.
+    pub zones: Vec<(eframe::egui::Rect, drop_zones::Zone)>,
     /// Свёрнутые в дереве папки; новые видны раскрытыми.
     pub folded: BTreeSet<String>,
     /// Куда класть новую деталь или папку: последняя выбранная папка,

@@ -18,6 +18,9 @@ impl App {
                 .filter_map(|f| f.path.clone())
                 .collect()
         });
+        if !paths.is_empty() && self.drop_on_zone(ctx, &paths) {
+            return;
+        }
         self.take_paths(ctx, paths);
     }
 

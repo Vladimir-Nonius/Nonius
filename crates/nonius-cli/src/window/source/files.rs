@@ -1,12 +1,12 @@
 //! Файлы детали для окна: список версии, разница текста, открыть файл.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use nonius_app::{is_text_file, DiffLineKind, FileChangeKind};
 use nonius_gui::source::{DiffEntry, DiffKind, FileEntry, FileState, OpenWay, Pick, ProgramEntry};
 
-use super::{pair, version, AppSource};
+use super::{in_words, pair, version, AppSource};
 
 impl AppSource {
     pub(super) fn file_list(
@@ -68,17 +68,37 @@ impl AppSource {
         path: &str,
         way: &OpenWay,
     ) -> Result<PathBuf> {
-        let way = match way {
-            OpenWay::Default => nonius_app::OpenWay::Default,
-            OpenWay::Program(p) => nonius_app::OpenWay::Program(nonius_app::Program {
-                name: p.name.clone(),
-                command: p.command.clone(),
-            }),
-            OpenWay::Choose => nonius_app::OpenWay::Choose,
-            OpenWay::Folder => nonius_app::OpenWay::Folder,
-        };
+        let way = system_way(way);
         let _files = self.reading();
         Ok(self.app.open_file(part, version(pick)?, path, &way)?)
+    }
+
+    /// Открыть файл из папки-группы.
+    pub(super) fn open_loose(&self, path: &str, way: &OpenWay) -> Result<PathBuf> {
+        let way = system_way(way);
+        let _files = self.reading();
+        Ok(self.app.open_folder_file(path, &way)?)
+    }
+
+    /// Копия своего файла — в папку-группу и сразу в историю.
+    pub(super) fn add_loose(&self, folder: &str, file: &Path) -> Result<String> {
+        let _files = self.writing();
+        self.app
+            .add_folder_file(Path::new(folder), file)
+            .map_err(in_words)
+    }
+}
+
+/// Чем открыть — словами `nonius-app`.
+fn system_way(way: &OpenWay) -> nonius_app::OpenWay {
+    match way {
+        OpenWay::Default => nonius_app::OpenWay::Default,
+        OpenWay::Program(p) => nonius_app::OpenWay::Program(nonius_app::Program {
+            name: p.name.clone(),
+            command: p.command.clone(),
+        }),
+        OpenWay::Choose => nonius_app::OpenWay::Choose,
+        OpenWay::Folder => nonius_app::OpenWay::Folder,
     }
 }
 

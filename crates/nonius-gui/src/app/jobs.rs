@@ -51,6 +51,8 @@ pub enum Done {
     PartCreated(String, anyhow::Result<()>),
     /// Создана папка: путь от корня.
     FolderCreated(String, anyhow::Result<()>),
+    /// Файлы скопированы в папку-группу: пути от корня или ошибки.
+    FolderFilesAdded(Vec<anyhow::Result<String>>),
     /// Настройки проекта записаны.
     SettingsSaved(anyhow::Result<()>),
     /// Деталь перенесена в папку.

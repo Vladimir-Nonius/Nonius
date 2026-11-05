@@ -136,6 +136,19 @@ impl ProjectSource for AppSource {
         Ok(self.app.map()?.folders)
     }
 
+    fn folder_files(&self) -> Result<Vec<String>> {
+        let _files = self.reading();
+        Ok(self.app.map()?.files)
+    }
+
+    fn add_folder_file(&self, folder: &str, file: &Path) -> Result<String> {
+        self.add_loose(folder, file)
+    }
+
+    fn open_folder_file(&self, path: &str, way: &OpenWay) -> Result<PathBuf> {
+        self.open_loose(path, way)
+    }
+
     fn versions(&self, part: &str) -> Result<Vec<VersionEntry>> {
         let _files = self.reading();
         let mut list: Vec<VersionEntry> = self

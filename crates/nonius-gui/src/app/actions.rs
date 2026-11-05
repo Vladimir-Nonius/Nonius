@@ -49,6 +49,7 @@ impl App {
         self.tab.parts.clear();
         self.tab.expanded.clear();
         self.tab.folders.clear();
+        self.tab.loose.clear();
         self.tab.folded.clear();
         self.tab.place.clear();
         self.tab.new_folder = None;

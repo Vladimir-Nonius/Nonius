@@ -1,11 +1,13 @@
 //! Папки в дереве, как в Obsidian: папка раскрывается стрелкой, деталь
 //! перетаскивается мышью на папку, на другую деталь (в её папку) или на
-//! пустое место внизу (в корень). Папка в дереве — папка на диске.
+//! пустое место внизу (в корень). Папка в дереве — папка на диске, её
+//! обычные файлы (заметки, чертежи) — строки под деталями.
 
 use std::collections::BTreeSet;
 
 use eframe::egui::{self, RichText};
 
+use super::drop_zones::Zone;
 use super::new_folder::NewFolder;
 use super::new_part::NewPart;
 use super::tree::{part_line, Acts};
@@ -20,6 +22,8 @@ pub(super) struct Dragged(pub String);
 pub(super) struct Tree<'a> {
     pub folders: &'a [String],
     pub parts: &'a [PartEntry],
+    /// Обычные файлы папок, путь от корня через `/`.
+    pub files: &'a [String],
     /// Идёт поиск: видны только папки с найденным, все раскрыты.
     pub searching: bool,
 }
@@ -98,6 +102,35 @@ pub(super) fn dir(app: &mut App, ui: &mut egui::Ui, tree: &Tree, dir: &str, acts
     for p in tree.parts.iter().filter(|p| p.folder == dir) {
         part_line(app, ui, p, acts);
     }
+    for f in tree.files.iter().filter(|f| parent(f) == dir) {
+        file_row(ui, f, acts);
+    }
+}
+
+/// Строка обычного файла: двойной щелчок открывает, правый — меню.
+fn file_row(ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
+    let t = texts();
+    ui.horizontal(|ui| {
+        // Под стрелкой папки или детали: файл раскрывать некуда.
+        ui.add_space(14.0);
+        let text = RichText::new(format!("🗋 {}", last(path))).weak();
+        let r = ui.selectable_label(false, text).on_hover_text(path);
+        acts.zones
+            .push((r.rect, Zone::Folder(parent(path).to_string())));
+        if r.double_clicked() {
+            acts.open_file = Some((path.to_string(), false));
+        }
+        r.context_menu(|ui| {
+            if ui.button(t.open_file).clicked() {
+                ui.close();
+                acts.open_file = Some((path.to_string(), false));
+            }
+            if ui.button(t.show_in_folder).clicked() {
+                ui.close();
+                acts.open_file = Some((path.to_string(), true));
+            }
+        });
+    });
 }
 
 /// Строка папки: стрелка, имя; на неё бросают детали.
@@ -108,6 +141,7 @@ fn folder_row(app: &App, ui: &mut egui::Ui, path: &str, open: bool, acts: &mut A
         let arrow = if open { "▾" } else { "▸" };
         let chosen = app.tab.place == path;
         let r = ui.selectable_label(chosen, format!("{arrow} 🗀 {}", last(path)));
+        acts.zones.push((r.rect, Zone::Folder(path.to_string())));
         drop_target(ui, &r, path, acts);
         if r.clicked() {
             acts.toggled = Some(path.to_string());
@@ -171,10 +205,15 @@ pub(super) fn root_drop(ui: &mut egui::Ui, acts: &mut Acts) {
     if r.clicked() {
         acts.place = Some(String::new());
     }
+    acts.zones.push((r.rect, Zone::Folder(String::new())));
 }
 
 /// Исполнить то, что сделали с папками.
 pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
+    app.tab.zones.append(&mut acts.zones);
+    if let Some((path, folder)) = acts.open_file.take() {
+        app.open_loose(ctx, path, folder);
+    }
     if let Some(path) = acts.toggled.take() {
         if path == FOLD_ALL {
             app.tab.folded = app.tab.folders.iter().cloned().collect();

@@ -39,10 +39,20 @@ impl App {
 
     /// Выбрать свои файлы и положить их в `docs/` детали.
     pub(super) fn add_files(&mut self, ctx: &egui::Context, part: String) {
+        let files = self.chooser.files();
+        self.add_files_from(ctx, part, files);
+    }
+
+    /// Положить эти файлы в `docs/` детали: выбранные или перетащенные.
+    pub(super) fn add_files_from(
+        &mut self,
+        ctx: &egui::Context,
+        part: String,
+        files: Vec<std::path::PathBuf>,
+    ) {
         let Some(project) = self.tab.project.clone() else {
             return;
         };
-        let files = self.chooser.files();
         if files.is_empty() {
             return;
         }

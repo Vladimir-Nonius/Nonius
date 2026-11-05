@@ -25,6 +25,11 @@ pub trait Chooser: Send + Sync {
     fn files(&self) -> Vec<PathBuf>;
     /// Куда сохранить картинку с предложенным именем.
     fn picture(&self, name: &str) -> Option<PathBuf>;
+    /// Где сейчас курсор на экране, в пикселях. Файл из Проводника окно
+    /// получает без места, куда его бросили: место спрашивают здесь.
+    fn cursor(&self) -> Option<(f32, f32)> {
+        None
+    }
 }
 
 /// Что есть на компьютере для истории версий.
@@ -75,8 +80,16 @@ pub trait ProjectSource: Send + Sync {
         Ok(Listing {
             parts: self.parts()?,
             folders: self.folders()?,
+            files: self.folder_files()?,
         })
     }
+    /// Обычные файлы в папках-группах и в корне: заметки, чертежи, ТЗ.
+    fn folder_files(&self) -> anyhow::Result<Vec<String>>;
+    /// Положить копию своего файла в папку-группу (пустая строка — корень) и
+    /// сразу сохранить в истории проекта. Возвращает путь от корня.
+    fn add_folder_file(&self, folder: &str, file: &Path) -> anyhow::Result<String>;
+    /// Открыть файл из папки-группы или показать его в папке.
+    fn open_folder_file(&self, path: &str, way: &OpenWay) -> anyhow::Result<PathBuf>;
     /// Версии детали, новые первыми.
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>>;
     /// Сравнить две версии. `before` — сохранённая версия; `before == after`

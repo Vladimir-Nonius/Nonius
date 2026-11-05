@@ -181,6 +181,7 @@ impl App {
                     Some(d) => d.failed(format!("{e:#}")),
                     None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
+                Done::FolderFilesAdded(added) => self.folder_files_added(ctx, added),
                 Done::SettingsSaved(Ok(())) => self.settings_saved(),
                 Done::SettingsSaved(Err(e)) => match self.tab.settings.as_mut() {
                     Some(d) => d.failed(format!("{e:#}")),

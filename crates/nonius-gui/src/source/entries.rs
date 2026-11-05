@@ -41,6 +41,8 @@ pub struct Listing {
     pub parts: Vec<PartEntry>,
     /// Папки-группы, путь от корня через `/`, родитель раньше детей.
     pub folders: Vec<String>,
+    /// Обычные файлы в папках-группах и в корне, путь от корня через `/`.
+    pub files: Vec<String>,
 }
 
 /// Версия детали.

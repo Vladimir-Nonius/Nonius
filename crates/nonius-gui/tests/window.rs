@@ -50,6 +50,10 @@ struct Fake {
     moved: Arc<Mutex<Vec<(String, String)>>>,
     /// Что записали в настройки проекта.
     settings: Arc<Mutex<Vec<ProjectSettings>>>,
+    /// Обычные файлы папок, путь от корня.
+    loose: Arc<Mutex<Vec<String>>>,
+    /// Какие свои файлы положили в детали: деталь и файл.
+    attached: Arc<Mutex<Vec<(String, PathBuf)>>>,
 }
 
 impl Fake {
@@ -333,8 +337,28 @@ impl ProjectSource for Fake {
     fn restore_version(&self, _part: &str, _version: u32) -> anyhow::Result<u32> {
         Ok(3)
     }
-    fn add_file(&self, _part: &str, file: &Path) -> anyhow::Result<String> {
+    fn add_file(&self, part: &str, file: &Path) -> anyhow::Result<String> {
+        let added = (part.to_string(), file.to_path_buf());
+        self.attached.lock().unwrap().push(added);
         Ok(format!("docs/{}", file.display()))
+    }
+    fn folder_files(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.loose.lock().unwrap().clone())
+    }
+    fn add_folder_file(&self, folder: &str, file: &Path) -> anyhow::Result<String> {
+        let name = file.file_name().unwrap().to_string_lossy();
+        let path = if folder.is_empty() {
+            name.to_string()
+        } else {
+            format!("{folder}/{name}")
+        };
+        self.loose.lock().unwrap().push(path.clone());
+        Ok(path)
+    }
+    fn open_folder_file(&self, path: &str, way: &OpenWay) -> anyhow::Result<PathBuf> {
+        let opened = (path.to_string(), way.clone());
+        self.opened.lock().unwrap().push(opened);
+        Ok(self.root.join(path))
     }
     fn remove_file(&self, part: &str, path: &str) -> anyhow::Result<()> {
         self.removed
@@ -494,6 +518,8 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         folders: Arc::default(),
         moved: Arc::default(),
         settings: Arc::default(),
+        loose: Arc::default(),
+        attached: Arc::default(),
     }
 }
 
@@ -1536,4 +1562,65 @@ fn project_settings_from_the_window() {
             tolerance_mm: 0.015
         }
     );
+}
+
+/// Бросить файлы из Проводника, когда курсор над этим местом.
+fn drop_at(h: &mut Harness<'_, App>, at: egui::Pos2, files: &[PathBuf]) {
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    h.run_steps(2);
+    for f in files {
+        h.input_mut().dropped_files.push(egui::DroppedFile {
+            path: Some(f.clone()),
+            ..Default::default()
+        });
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn files_from_explorer_go_where_dropped() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let (loose, attached, opened) = (
+        project.loose.clone(),
+        project.attached.clone(),
+        project.opened.clone(),
+    );
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let pdf = dir.path().join("ТЗ стены.pdf");
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // На папку — копия прямо в неё, и она видна в дереве.
+    let folder = h.get_by_label_contains("Стена").rect().center();
+    drop_at(&mut h, folder, std::slice::from_ref(&pdf));
+    wait_for(&mut h, "🗋 ТЗ стены.pdf");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/ТЗ стены.pdf"]);
+
+    // Двойной щелчок по файлу открывает его.
+    let at = h
+        .get_all_by_label("🗋 ТЗ стены.pdf")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    for pressed in [true, false, true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    wait_for(&mut h, "Открыт");
+    assert_eq!(opened.lock().unwrap()[0].0, "Стена/ТЗ стены.pdf");
+
+    // На деталь — в её docs/.
+    let part = h.get_by_label_contains("корпус").rect().center();
+    drop_at(&mut h, part, std::slice::from_ref(&pdf));
+    wait_for(&mut h, "«корпус»: добавлено");
+    assert_eq!(*attached.lock().unwrap(), [("корпус".to_string(), pdf)]);
 }

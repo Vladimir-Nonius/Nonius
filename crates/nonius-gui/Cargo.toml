@@ -24,6 +24,8 @@ pollster = "0.4"
 [target.'cfg(windows)'.dependencies]
 # Окна выбора папки и файла Windows.
 rfd = { version = "0.15", default-features = false }
+# Где курсор, когда из Проводника бросили файл: система места не сообщает.
+mouse_position = "0.1"
 
 [dev-dependencies]
 egui_kittest = { version = "0.32", features = ["eframe"] }
