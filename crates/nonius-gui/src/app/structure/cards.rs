@@ -94,14 +94,23 @@ pub(super) fn cards(app: &mut App, ui: &mut egui::Ui, inside: &[&PartEntry], act
     ui.add_space(4.0);
 }
 
-/// Карточка детали: полоска вида, имя, версия или «заготовка».
+/// Карточка детали: полоска вида, имя, версия или «заготовка». Вся
+/// карточка — одно целое: щелчок, двойной щелчок, правая кнопка и
+/// перетаскивание за любое её место, а не только за имя.
 fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut Acts) {
     let t = texts();
     let kind = Kind::of(p);
     let selected = app.tab.part.as_ref() == Some(&p.name);
-    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    let visuals = ui.visuals().clone();
+    let fill = if selected {
+        visuals.selection.bg_fill
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let mut slot = None;
     let inner = egui::Frame::NONE
-        .stroke(stroke)
+        .fill(fill)
+        .stroke(visuals.widgets.noninteractive.bg_stroke)
         .inner_margin(egui::Margin {
             left: 10,
             right: 6,
@@ -111,18 +120,9 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
         .show(ui, |ui| {
             ui.set_width(width - 16.0);
             ui.vertical(|ui| {
-                let name = ui
-                    .selectable_label(selected, RichText::new(&p.name).strong())
-                    .on_hover_text(t.open_in_3d);
-                let name = tree_folders::drag_part(name, p);
-                let programs = &app.tab.programs;
-                open_menu::attach(&name, programs, || tree::target(p), &mut acts.asked);
-                if name.double_clicked() {
-                    acts.open = Some(p.name.clone());
-                    app.tab.view = View::Part;
-                } else if name.clicked() {
-                    acts.select = Some(p.name.clone());
-                }
+                // Надписи не ловят мышь: её ловит карточка целиком.
+                let name = RichText::new(&p.name).strong();
+                ui.add(egui::Label::new(name).selectable(false));
                 let version = match (&p.latest, kind) {
                     (Some(v), _) => v.clone(),
                     (None, Kind::Blank) => t.blank_part.to_string(),
@@ -137,15 +137,47 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
                     Kind::Part => ui.visuals().weak_text_color(),
                     other => other.color(ui),
                 };
-                ui.label(RichText::new(line).small().color(color));
-                if kind == Kind::Blank && ui.small_button(t.add_model).clicked() {
-                    acts.add_model = Some(p.name.clone());
+                let line = RichText::new(line).small().color(color);
+                ui.add(egui::Label::new(line).selectable(false));
+                if kind == Kind::Blank {
+                    // Место под кнопку: сама кнопка ляжет поверх карточки.
+                    slot = Some(ui.allocate_space(add_model_size(ui)).1);
                 }
             });
         });
-    let rect = inner.response.rect;
+    let r = inner
+        .response
+        .interact(egui::Sense::click_and_drag())
+        .on_hover_text(t.open_in_3d);
+    let r = tree_folders::drag_part(r, p);
+    open_menu::attach(&r, &app.tab.programs, || tree::target(p), &mut acts.asked);
+    if r.double_clicked() {
+        acts.open = Some(p.name.clone());
+        app.tab.view = View::Part;
+    } else if r.clicked() {
+        acts.select = Some(p.name.clone());
+    }
+    if let Some(slot) = slot {
+        let button = egui::Button::new(RichText::new(t.add_model).small());
+        if ui.put(slot, button).clicked() {
+            acts.add_model = Some(p.name.clone());
+        }
+    }
+    let rect = r.rect;
+    if r.hovered() && !selected {
+        let stroke = visuals.widgets.hovered.bg_stroke;
+        ui.painter()
+            .rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+    }
     acts.shown
         .push(Shown::on(ui, rect, Node::Part(p.name.clone())));
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
     ui.painter().rect_filled(stripe, 0.0, kind.color(ui));
+}
+
+/// Размер кнопки «Добавить модель…» мелким шрифтом.
+fn add_model_size(ui: &egui::Ui) -> egui::Vec2 {
+    let text = egui::WidgetText::from(RichText::new(texts().add_model).small());
+    let galley = text.into_galley(ui, None, f32::INFINITY, egui::TextStyle::Small);
+    galley.size() + 2.0 * ui.spacing().button_padding
 }

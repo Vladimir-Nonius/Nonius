@@ -1736,8 +1736,9 @@ fn part_dropped_anywhere_in_a_folder_moves_there() {
     h.get_by_label("Структура").click();
     wait_for(&mut h, "Корень проекта");
 
-    // Карточку — не на заголовок, а на «Пусто…» внутри блока папки.
-    let card = h.get_by_label("корпус").rect();
+    // Карточку — за строку версии, не за имя; не на заголовок, а на
+    // «Пусто…» внутри блока папки.
+    let card = h.get_by_label("сборка · заготовка").rect();
     let inside = h.get_all_by_label_contains("Пусто").next().unwrap().rect();
     drag(&mut h, card, inside);
     wait_for(&mut h, "«корпус» перенесена в «Стена»");
@@ -1787,7 +1788,8 @@ fn structure_card_has_the_part_menu() {
     wait_for(&mut h, "корпус");
     h.get_by_label("Структура").click();
     wait_for(&mut h, "Корень проекта");
-    h.get_by_label("корпус").click_secondary();
+    // Правая кнопка по любому месту карточки, а не только по имени.
+    h.get_by_label("сборка · заготовка").click_secondary();
     wait_for(&mut h, "Переименовать…");
     h.run_steps(5);
     h.get_by_label("Удалить…").click();
