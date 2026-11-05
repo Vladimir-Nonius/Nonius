@@ -7,7 +7,7 @@
 
 use eframe::egui;
 
-use super::drop_zones::Zone;
+use super::node::Node;
 use super::tree_folders::{self, Dragged};
 use super::App;
 use crate::texts::texts;
@@ -41,17 +41,17 @@ impl App {
         let Some(pos) = self.pointer_in_window(ctx) else {
             return;
         };
-        let found = self.zone_at(pos);
+        let found = self.landing_at(pos);
         let text = match &found {
-            Some((rect, zone)) => {
-                highlight(ctx, *rect);
-                self.unfold_on_hover(ctx, zone);
-                words(Carry::Copy, zone)
+            Some(at) => {
+                highlight(ctx, at.rect);
+                self.unfold_on_hover(ctx, &at.node);
+                words(Carry::Copy, &at.node)
             }
             None => texts().drop_nowhere.to_string(),
         };
         cursor_label(ctx, pos, &text, found.is_none());
-        self.tab.drop_aim = found.map(|(_, zone)| zone);
+        self.tab.drop_aim = found.map(|at| at.node);
     }
 
     /// Деталь тащат по дереву или «Структуре»: её имя летит за курсором,
@@ -65,20 +65,21 @@ impl App {
         };
         ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         let t = texts();
-        let found = self.zone_at(pos);
+        let found = self.landing_at(pos);
         let line = match &found {
-            Some((rect, zone)) => {
-                highlight(ctx, *rect);
-                self.unfold_on_hover(ctx, zone);
+            Some(at) => {
+                highlight(ctx, at.rect);
+                self.unfold_on_hover(ctx, &at.node);
                 // Брошенная на деталь ложится рядом с ней, в её папку.
-                let folder = match zone {
-                    Zone::Folder(f) => f.clone(),
-                    Zone::Part(p) => self.folder_of(p),
+                let folder = match &at.node {
+                    Node::Part(p) => self.folder_of(p),
+                    Node::Folder(f) => f.clone(),
+                    Node::File(f) => tree_folders::parent(f).to_string(),
                 };
                 if folder == self.folder_of(&dragged.0) {
                     t.same_place.to_string()
                 } else {
-                    words(Carry::Move, &Zone::Folder(folder))
+                    words(Carry::Move, &Node::Folder(folder))
                 }
             }
             None => t.drop_nowhere.to_string(),
@@ -106,9 +107,9 @@ impl App {
     }
 
     /// Курсор держат над свёрнутой папкой — раскрыть её, как в Проводнике.
-    fn unfold_on_hover(&mut self, ctx: &egui::Context, zone: &Zone) {
-        let folded = match zone {
-            Zone::Folder(f) if self.tab.folded.contains(f) => f,
+    fn unfold_on_hover(&mut self, ctx: &egui::Context, node: &Node) {
+        let folded = match node {
+            Node::Folder(f) if self.tab.folded.contains(f) => f,
             _ => {
                 self.tab.hover_since = None;
                 return;
@@ -130,16 +131,17 @@ impl App {
 
 /// «Переместить в «Стена»», «Скопировать в корень проекта», «Добавить в
 /// деталь «RAIL-01»».
-fn words(carry: Carry, zone: &Zone) -> String {
+fn words(carry: Carry, node: &Node) -> String {
     let t = texts();
     let verb = match carry {
         Carry::Move => t.carry_move,
         Carry::Copy => t.carry_copy,
     };
-    match zone {
-        Zone::Folder(f) if f.is_empty() => format!("{verb} {}", t.to_root),
-        Zone::Folder(f) => format!("{verb} в «{}»", tree_folders::last(f)),
-        Zone::Part(p) => format!("{} «{p}»", t.add_to_part),
+    match node {
+        Node::Folder(f) if f.is_empty() => format!("{verb} {}", t.to_root),
+        Node::Folder(f) => format!("{verb} в «{}»", tree_folders::last(f)),
+        Node::Part(p) => format!("{} «{p}»", t.add_to_part),
+        Node::File(f) => words(carry, &Node::Folder(tree_folders::parent(f).into())),
     }
 }
 

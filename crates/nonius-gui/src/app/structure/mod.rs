@@ -6,8 +6,9 @@
 
 use eframe::egui::{self, RichText};
 
-use super::drop_zones::Zone;
+use super::node::Node;
 use super::open_menu::Ask;
+use super::shown::Shown;
 use super::tree_folders;
 use super::App;
 use crate::source::PartEntry;
@@ -46,7 +47,7 @@ struct Acts {
     open: Option<String>,
     add_model: Option<String>,
     moved: Option<(String, String)>,
-    zones: Vec<(egui::Rect, Zone)>,
+    shown: Vec<Shown>,
     open_file: Option<String>,
     asked: Option<Ask>,
 }
@@ -83,7 +84,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 block(app, ui, &map, top, &mut acts);
             }
         });
-    app.tab.zones.append(&mut acts.zones);
+    app.tab.on_screen.append(&mut acts.shown);
     app.answer_menu(ui.ctx(), acts.asked.take());
     if let Some(path) = acts.open_file {
         app.open_loose(ui.ctx(), path, false);
@@ -149,8 +150,8 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
         })
         .response;
     // Бросить можно в любое место папки, не только на заголовок.
-    acts.zones
-        .push((whole.rect, Zone::Folder(folder.to_string())));
+    acts.shown
+        .push(Shown::new(whole.rect, Node::Folder(folder.to_string())));
     ui.add_space(10.0);
 }
 
@@ -178,7 +179,8 @@ fn header(ui: &mut egui::Ui, title: &str, count: &str, folder: &str, acts: &mut 
         .response;
     let line = ui.visuals().widgets.noninteractive.bg_stroke;
     ui.painter().hline(r.rect.x_range(), r.rect.bottom(), line);
-    acts.zones.push((r.rect, Zone::Folder(folder.to_string())));
+    acts.shown
+        .push(Shown::new(r.rect, Node::Folder(folder.to_string())));
     drop_here(ui, &r, folder, acts);
 }
 

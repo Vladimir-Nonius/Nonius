@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use super::jobs::Jobs;
 use super::{
-    add_model, bottom, drop_zones, material, new_folder, new_part, open_menu, part_dialogs, save,
-    settings_window, structure,
+    add_model, bottom, material, new_folder, new_part, node, open_menu, part_dialogs, save,
+    settings_window, shown, structure,
 };
 use crate::source::{
     Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
@@ -49,10 +49,10 @@ pub(super) struct ProjectTab {
     pub loose: Vec<String>,
     /// Выделенный в дереве обычный файл: его удаляет Delete.
     pub loose_chosen: Option<String>,
-    /// Где на экране строки, на которые можно бросить файл: с прошлого кадра.
-    pub zones: Vec<(eframe::egui::Rect, drop_zones::Zone)>,
+    /// Что где на экране: строки дерева и «Структуры» с прошлого кадра.
+    pub on_screen: Vec<shown::Shown>,
     /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.
-    pub drop_aim: Option<drop_zones::Zone>,
+    pub drop_aim: Option<node::Node>,
     /// Над какой свёрнутой папкой держат курсор и с какого мига.
     pub hover_since: Option<(String, f64)>,
     /// Свёрнутые в дереве папки; новые видны раскрытыми.

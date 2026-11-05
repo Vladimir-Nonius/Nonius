@@ -23,6 +23,7 @@ mod material;
 mod model_names;
 mod new_folder;
 mod new_part;
+mod node;
 mod numbers;
 mod open_menu;
 mod panels;
@@ -33,6 +34,7 @@ mod results;
 mod save;
 mod settings;
 mod settings_window;
+mod shown;
 mod start;
 mod strip;
 mod structure;
@@ -192,8 +194,8 @@ impl eframe::App for App {
         panels::error_bar(self, ctx);
         panels::status_bar(self, ctx);
         map::show(self, ctx);
-        // Места для броска файлов строки дерева и «Структуры» отметят заново.
-        self.tab.zones.clear();
+        // Строки дерева и «Структуры» отметят свои места заново.
+        self.tab.on_screen.clear();
         tree::show(self, ctx);
         panels::changes(self, ctx);
         bottom::show(self, ctx);

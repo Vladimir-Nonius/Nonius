@@ -3,9 +3,10 @@
 
 use eframe::egui::{self, Color32, RichText};
 
-use super::drop_zones::Zone;
 use super::jobs::Done;
+use super::node::Node;
 use super::open_menu::{self, Ask, Target};
+use super::shown::Shown;
 use super::tree_folders::{self, Dragged};
 use super::App;
 use crate::source::{Listing, PartEntry, Pick};
@@ -31,8 +32,8 @@ pub(super) struct Acts {
     pub new_part: Option<String>,
     /// «Новая папка…» внутри этой.
     pub new_folder: Option<String>,
-    /// Где строки, на которые можно бросить файл из Проводника.
-    pub zones: Vec<(egui::Rect, Zone)>,
+    /// Что где на экране: строки папок, деталей и файлов.
+    pub shown: Vec<Shown>,
     /// Открыть обычный файл папки (`true` — показать в папке).
     pub open_file: Option<(String, bool)>,
     /// Выделили обычный файл папки.
@@ -110,7 +111,8 @@ pub(super) fn part_line(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, acts: &
         let arrow = if open { "▾" } else { "▸" };
         let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
         let r = tree_folders::drag_part(part_row(ui, p, selected), p);
-        acts.zones.push((r.rect, Zone::Part(p.name.clone())));
+        acts.shown
+            .push(Shown::new(r.rect, Node::Part(p.name.clone())));
         if let Some(d) = r.dnd_release_payload::<Dragged>() {
             // Брошена на деталь — в ту же папку, где она лежит.
             acts.moved = Some((d.0.clone(), p.folder.clone()));

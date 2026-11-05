@@ -1,7 +1,8 @@
 //! Куда бросили файл из Проводника. Система отдаёт окну только сами файлы,
-//! без места: строки дерева и блоки «Структуры» каждый кадр запоминают, где
-//! они на экране, а место броска — курсор, пока файл несли (`drag_hint.rs`
-//! показывает это у курсора). Здесь же — открыть обычный файл папки.
+//! без места: строки дерева и блоки «Структуры» каждый кадр отмечают, где
+//! они на экране (`shown.rs`), а место броска — курсор, пока файл несли
+//! (`drag_hint.rs` показывает это у курсора). Здесь же — открыть обычный
+//! файл папки.
 
 use std::path::PathBuf;
 
@@ -9,18 +10,11 @@ use eframe::egui;
 
 use super::file_menu::is_model;
 use super::jobs::Done;
+use super::node::Node;
+use super::shown::{self, Shown};
 use super::App;
 use crate::source::{OpenWay, Pick};
 use crate::texts::texts;
-
-/// На что можно бросить файл.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Zone {
-    /// Папка-группа: путь от корня, пустой — корень.
-    Folder(String),
-    /// Деталь.
-    Part(String),
-}
 
 impl App {
     /// Где сейчас курсор в окне: у системы, а без неё — у egui.
@@ -33,19 +27,16 @@ impl App {
         Some(egui::pos2(x / ppp, y / ppp) - inner.min.to_vec2())
     }
 
-    /// Папка или деталь под курсором.
-    fn zone_under(&self, ctx: &egui::Context) -> Option<(egui::Rect, Zone)> {
-        self.zone_at(self.pointer_in_window(ctx)?)
+    /// Куда ляжет брошенное под курсором.
+    fn landing_under(&self, ctx: &egui::Context) -> Option<Shown> {
+        self.landing_at(self.pointer_in_window(ctx)?)
     }
 
-    /// Строка, на которую показывает курсор.
-    pub(super) fn zone_at(&self, pos: egui::Pos2) -> Option<(egui::Rect, Zone)> {
-        // Место целиком — вся папка, внутри неё деталь или вложенная папка:
-        // главнее самое мелкое.
-        let zones = self.tab.zones.iter().filter(|(r, _)| r.contains(pos));
-        zones
-            .min_by(|a, b| a.0.area().total_cmp(&b.0.area()))
-            .cloned()
+    /// Куда ляжет брошенное в эту точку: папка или деталь и место, которое
+    /// подсветить. Брошенное на файл ложится в его папку.
+    pub(super) fn landing_at(&self, pos: egui::Pos2) -> Option<Shown> {
+        let found = shown::under(&self.tab.on_screen, pos)?;
+        Some(Shown::new(found.rect, found.node.landing()))
     }
 
     /// Папка, где лежит деталь.
@@ -63,17 +54,19 @@ impl App {
         }
         // Цель запомнена, пока файл несли; без неё — где курсор сейчас.
         let aim = self.tab.drop_aim.take();
-        let Some(zone) = aim.or_else(|| self.zone_under(ctx).map(|(_, z)| z)) else {
+        let Some(node) = aim.or_else(|| self.landing_under(ctx).map(|s| s.node)) else {
             return false;
         };
-        match zone {
-            Zone::Folder(folder) => self.copy_into_folder(ctx, folder, paths.to_vec()),
-            Zone::Part(part) => {
+        match node {
+            Node::Folder(folder) => self.copy_into_folder(ctx, folder, paths.to_vec()),
+            Node::Part(part) => {
                 let (models, other): (Vec<PathBuf>, Vec<PathBuf>) =
                     paths.iter().cloned().partition(|p| is_model(p));
                 self.start_adding(models, Some(part.clone()));
                 self.add_files_from(ctx, part, other);
             }
+            // `landing` уже увёл файл в его папку.
+            Node::File(_) => return false,
         }
         true
     }

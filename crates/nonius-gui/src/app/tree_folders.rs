@@ -7,10 +7,11 @@ use std::collections::BTreeSet;
 
 use eframe::egui::{self, RichText};
 
-use super::drop_zones::Zone;
 use super::new_folder::NewFolder;
 use super::new_part::NewPart;
+use super::node::Node;
 use super::open_menu::{self, Target};
+use super::shown::Shown;
 use super::tree::{part_line, Acts};
 use super::App;
 use crate::source::{PartEntry, Pick};
@@ -117,8 +118,8 @@ fn file_row(app: &App, ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
         let chosen = app.tab.loose_chosen.as_deref() == Some(path);
         let text = RichText::new(format!("🗋 {}", last(path))).weak();
         let r = ui.selectable_label(chosen, text).on_hover_text(path);
-        acts.zones
-            .push((r.rect, Zone::Folder(parent(path).to_string())));
+        acts.shown
+            .push(Shown::new(r.rect, Node::File(path.to_string())));
         if r.double_clicked() {
             acts.open_file = Some((path.to_string(), false));
         } else if r.clicked() || r.secondary_clicked() {
@@ -153,7 +154,8 @@ fn folder_row(app: &App, ui: &mut egui::Ui, path: &str, open: bool, acts: &mut A
         let arrow = if open { "▾" } else { "▸" };
         let chosen = app.tab.place == path;
         let r = ui.selectable_label(chosen, format!("{arrow} 🗀 {}", last(path)));
-        acts.zones.push((r.rect, Zone::Folder(path.to_string())));
+        acts.shown
+            .push(Shown::new(r.rect, Node::Folder(path.to_string())));
         drop_target(ui, &r, path, acts);
         if r.clicked() {
             acts.toggled = Some(path.to_string());
@@ -215,12 +217,13 @@ pub(super) fn root_drop(ui: &mut egui::Ui, acts: &mut Acts) {
     if r.clicked() {
         acts.place = Some(String::new());
     }
-    acts.zones.push((r.rect, Zone::Folder(String::new())));
+    acts.shown
+        .push(Shown::new(r.rect, Node::Folder(String::new())));
 }
 
 /// Исполнить то, что сделали с папками.
 pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
-    app.tab.zones.append(&mut acts.zones);
+    app.tab.on_screen.append(&mut acts.shown);
     if let Some((path, folder)) = acts.open_file.take() {
         app.open_loose(ctx, path, folder);
     }

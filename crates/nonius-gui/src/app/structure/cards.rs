@@ -4,7 +4,8 @@
 
 use eframe::egui::{self, Color32, RichText};
 
-use super::super::drop_zones::Zone;
+use super::super::node::Node;
+use super::super::shown::Shown;
 use super::super::tree_folders::{self, Dragged};
 use super::super::App;
 use super::super::{open_menu, tree};
@@ -143,7 +144,8 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
             });
         });
     let rect = inner.response.rect;
-    acts.zones.push((rect, Zone::Part(p.name.clone())));
+    acts.shown
+        .push(Shown::new(rect, Node::Part(p.name.clone())));
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
     ui.painter().rect_filled(stripe, 0.0, kind.color(ui));
     // Брошена на карточку — в ту же папку, где лежит эта деталь.
