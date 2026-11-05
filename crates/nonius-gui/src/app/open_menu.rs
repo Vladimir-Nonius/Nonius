@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, RichText};
 
+use super::command::Command;
 use super::jobs::Done;
 use super::App;
 use crate::source::{OpenWay, Pick, ProgramEntry};
@@ -18,7 +19,7 @@ pub type Programs = HashMap<String, Option<Vec<ProgramEntry>>>;
 /// Над чем щёлкнули.
 #[derive(Debug, Clone)]
 pub struct Target {
-    /// Деталь.
+    /// Деталь; пустая строка — обычный файл папки, `path` от корня проекта.
     pub part: String,
     /// Версия или «Сейчас».
     pub pick: Pick,
@@ -48,6 +49,8 @@ pub enum Ask {
     Rename(String),
     /// Спросить, удалить ли деталь.
     Delete(String),
+    /// Спросить, удалить ли всё выделенное.
+    DeleteSelected,
 }
 
 /// Тип файла для списка программ: расширение маленькими буквами.
@@ -68,23 +71,7 @@ pub fn attach(
         let t = texts();
         let target = target();
         ui.set_min_width(240.0);
-        if matches!(target.pick, Pick::Version(_)) {
-            ui.label(RichText::new(t.menu_copy_warning).weak());
-            ui.separator();
-        }
-        if target.openable {
-            if ui.button(t.open_file).clicked() {
-                *ask = Some(Ask::Open(target.clone(), OpenWay::Default));
-                ui.close();
-            }
-            ui.menu_button(t.open_in, |ui| {
-                choose_program(ui, programs, &target, ask);
-            });
-        }
-        if ui.button(t.show_in_folder).clicked() {
-            *ask = Some(Ask::Open(target.clone(), OpenWay::Folder));
-            ui.close();
-        }
+        open_items(ui, programs, &target, ask);
         if target.removable {
             ui.separator();
             if ui.button(t.remove_file).clicked() {
@@ -118,6 +105,58 @@ pub fn attach(
             }
         }
     });
+}
+
+/// Меню строки дерева или карточки. Щёлкнули по одному из нескольких
+/// выделенных (`many`) — меню про всё выделенное, иначе — про эту строку.
+/// Пока идёт очередь (`busy`), пишущие пункты выделенного серые.
+pub fn attach_node(
+    response: &egui::Response,
+    programs: &Programs,
+    target: impl FnOnce() -> Target,
+    many: Option<usize>,
+    busy: bool,
+    ask: &mut Option<Ask>,
+) {
+    let Some(n) = many else {
+        attach(response, programs, target, ask);
+        return;
+    };
+    response.context_menu(|ui| {
+        let t = texts();
+        ui.set_min_width(240.0);
+        ui.label(RichText::new(format!("{} {n}", t.chosen_count)).weak());
+        ui.separator();
+        let delete = format!("{} ({n})…", t.delete_selected);
+        let button = ui.add_enabled(!busy, egui::Button::new(delete));
+        if button.on_disabled_hover_text(t.batch_busy).clicked() {
+            *ask = Some(Ask::DeleteSelected);
+            ui.close();
+        }
+    });
+}
+
+/// «Открыть», «Открыть в…», «Показать в папке»; у версии — сперва
+/// предупреждение, что откроется копия. Общие для файлов, деталей и версий.
+pub fn open_items(ui: &mut egui::Ui, programs: &Programs, target: &Target, ask: &mut Option<Ask>) {
+    let t = texts();
+    if matches!(target.pick, Pick::Version(_)) {
+        ui.label(RichText::new(t.menu_copy_warning).weak());
+        ui.separator();
+    }
+    if target.openable {
+        if ui.button(t.open_file).clicked() {
+            *ask = Some(Ask::Open(target.clone(), OpenWay::Default));
+            ui.close();
+        }
+        ui.menu_button(t.open_in, |ui| {
+            choose_program(ui, programs, target, ask);
+        });
+    }
+    if ui.button(t.show_in_folder).clicked() {
+        *ask = Some(Ask::Open(target.clone(), OpenWay::Folder));
+        ui.close();
+    }
 }
 
 fn choose_program(ui: &mut egui::Ui, programs: &Programs, target: &Target, ask: &mut Option<Ask>) {
@@ -159,7 +198,11 @@ impl App {
             Some(Ask::Open(target, way)) => {
                 self.tab.jobs.spawn(ctx, move |_| {
                     let folder = way == OpenWay::Folder;
-                    let opened = project.open_file(&target.part, target.pick, &target.path, &way);
+                    let opened = if target.part.is_empty() {
+                        project.open_folder_file(&target.path, &way)
+                    } else {
+                        project.open_file(&target.part, target.pick, &target.path, &way)
+                    };
                     Done::FileOpened(target.pick, folder, opened)
                 });
             }
@@ -177,6 +220,10 @@ impl App {
             Some(Ask::RemoveFile(part, path)) => self.ask_remove_file(&part, path),
             Some(Ask::Rename(part)) => self.ask_rename(&part),
             Some(Ask::Delete(part)) => self.ask_delete(&part),
+            Some(Ask::DeleteSelected) => {
+                let nodes = self.tab.selection.nodes();
+                self.command(ctx, Command::Delete(nodes));
+            }
             None => {}
         }
     }

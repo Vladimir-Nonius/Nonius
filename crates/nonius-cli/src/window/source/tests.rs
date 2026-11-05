@@ -125,8 +125,8 @@ fn project_and_model_from_the_window() {
         "второй раз проект не создаётся"
     );
 
-    src.new_part("корпус", true).unwrap();
-    assert!(src.new_part("корпус", false).is_err(), "имя занято");
+    src.new_part("корпус", true, "").unwrap();
+    assert!(src.new_part("корпус", false, "").is_err(), "имя занято");
     let step = tmp.path().join("пластина.step");
     std::fs::write(&step, STEP).unwrap();
     let added = src.add_model(&step, "пластина", "Первая").unwrap();
@@ -149,7 +149,7 @@ fn project_and_model_from_the_window() {
 
     // Деталь без единой версии видна как есть: сравнивать не требуется.
     let said = Said::default();
-    src.new_part("пустая", false).unwrap();
+    src.new_part("пустая", false, "").unwrap();
     let shown = src
         .compare("пустая", Pick::Current, Pick::Current, &said)
         .unwrap();
@@ -182,7 +182,7 @@ fn model_first_then_colors() {
     use nonius_scene::Role;
 
     // Модель видна и до первой версии: сравнивать не требуется.
-    src.new_part("плита", false).unwrap();
+    src.new_part("плита", false, "").unwrap();
     let v1 = smoke.join("plate-v1.step");
     let added = src.add_model(&v1, "плита", "Первая").unwrap();
     assert_eq!(added.version, Some(1), "{:?}", added.warnings);
@@ -333,4 +333,84 @@ fn material_and_saving_from_the_window() {
     let cleared = src.set_material("пластина", None, None).unwrap();
     assert_eq!(cleared.material, None);
     assert!(cleared.no_mass.is_some());
+}
+
+#[test]
+fn folders_from_the_window() {
+    for (k, v) in [
+        ("GIT_AUTHOR_NAME", "Тестировщик"),
+        ("GIT_AUTHOR_EMAIL", "test@example.com"),
+        ("GIT_COMMITTER_NAME", "Тестировщик"),
+        ("GIT_COMMITTER_EMAIL", "test@example.com"),
+    ] {
+        std::env::set_var(k, v);
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path().join("Мастерская");
+    std::fs::create_dir(&d).unwrap();
+    let src = AppSource::create(&d).unwrap();
+
+    src.new_folder("Стена/Рейка").unwrap();
+    // notes/ — папка для заметок, она тоже видна в дереве.
+    assert_eq!(src.folders().unwrap(), ["notes", "Стена", "Стена/Рейка"]);
+    src.new_part("RAIL-01", false, "Стена/Рейка").unwrap();
+    assert!(d.join("Стена/Рейка/RAIL-01/meta.yaml").is_file());
+    let listing = src.listing().unwrap();
+    assert_eq!(listing.parts[0].folder, "Стена/Рейка");
+
+    // Деталь без версий переносится просто как папка.
+    src.move_part("RAIL-01", "Стена/Рейка/..").unwrap_err();
+    src.move_part("RAIL-01", "").unwrap();
+    assert_eq!(src.parts().unwrap()[0].folder, "");
+    let step = tmp.path().join("RAIL-01.step");
+    std::fs::write(&step, STEP).unwrap();
+    src.add_model(&step, "RAIL-01", "Первая").unwrap();
+    src.move_part("RAIL-01", "Стена").unwrap();
+    assert_eq!(src.parts().unwrap()[0].folder, "Стена");
+    src.move_part("RAIL-01", "").unwrap();
+    assert_eq!(src.parts().unwrap()[0].folder, "");
+    assert_eq!(src.versions("RAIL-01").unwrap().len(), 1, "версия осталась");
+
+    let e = src.new_folder("RAIL-01/внутри").unwrap_err();
+    assert!(format!("{e:#}").contains("внутрь детали"), "{e:#}");
+}
+
+#[test]
+fn project_settings_from_the_window() {
+    for (k, v) in [
+        ("GIT_AUTHOR_NAME", "Тестировщик"),
+        ("GIT_AUTHOR_EMAIL", "test@example.com"),
+        ("GIT_COMMITTER_NAME", "Тестировщик"),
+        ("GIT_COMMITTER_EMAIL", "test@example.com"),
+    ] {
+        std::env::set_var(k, v);
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path().join("Станок");
+    std::fs::create_dir(&d).unwrap();
+    let src = AppSource::create(&d).unwrap();
+    let s = src.settings();
+    assert_eq!((s.name.as_str(), s.tolerance_mm), ("Станок", 0.01));
+
+    let new = ProjectSettings {
+        name: "Станок ЧПУ".into(),
+        tolerance_mm: 0.05,
+    };
+    src.save_settings(&new).unwrap();
+    let bad = ProjectSettings {
+        tolerance_mm: 0.0,
+        ..new.clone()
+    };
+    let e = src.save_settings(&bad).unwrap_err();
+    assert!(format!("{e:#}").contains("допуск"), "{e:#}");
+    // Открытый проект видит старое: окно открывает его заново.
+    drop(src);
+    let src = AppSource::open(&d).unwrap();
+    assert_eq!(src.settings(), new);
+    assert_eq!(src.title(), "Станок ЧПУ");
+    let git = std::process::Command::new("git")
+        .args(["-C", &d.to_string_lossy(), "status", "--porcelain"])
+        .output()
+        .unwrap();
+    assert!(git.stdout.is_empty(), "project.yaml сохранён в истории");
 }

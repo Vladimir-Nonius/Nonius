@@ -1,11 +1,13 @@
 //! Обход папок проекта: где детали и где папки-группы. Деталь — папка с
 //! `meta.yaml`, внутрь неё обход не заходит; остальные папки — группы.
-//! Скрытые папки (`.git`, …) пропускаются. Здесь же — проект старого
+//! Скрытые папки (`.git`, …) пропускаются. Обычные файлы в папках-группах
+//! (заметки, чертежи, ТЗ) тоже видны: проект — это папки на диске. Здесь же — проект старого
 //! устройства (`parts/`, `assemblies/`): он только для просмотра.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use super::agents::AGENTS_FILE;
 use super::{
     Item, Project, ASSEMBLIES_DIR, KEEP_FILE, META_FILE, PARTS_DIR, PROJECT_FILE, TREE_SCHEMA,
 };
@@ -24,6 +26,9 @@ pub struct Layout {
     pub items: Vec<Item>,
     /// Папки-группы: путь от корня через `/`, родитель раньше детей.
     pub folders: Vec<String>,
+    /// Файлы в папках-группах и в корне, путь от корня через `/`. Служебных
+    /// (`project.yaml`, `AGENTS.md`, `.gitkeep`, скрытых) здесь нет.
+    pub files: Vec<String>,
 }
 
 impl Project {
@@ -68,24 +73,27 @@ impl Project {
             Err(e) => return Err(Error::io(dir, e)),
         };
         let mut dirs: Vec<(String, PathBuf)> = Vec::new();
+        let mut files: Vec<String> = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|e| Error::io(dir, e))?;
             let path = entry.path();
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if name.starts_with('.') || !path.is_dir() {
+            if name.starts_with('.') {
                 continue;
             }
-            dirs.push((name, path));
+            if path.is_dir() {
+                dirs.push((name, path));
+            } else if !is_service(rel, &name) {
+                files.push(join(rel, &name));
+            }
         }
         dirs.sort();
+        files.sort();
+        out.files.extend(files);
         for (name, path) in dirs {
-            let child = if rel.is_empty() {
-                name.clone()
-            } else {
-                format!("{rel}/{name}")
-            };
+            let child = join(rel, &name);
             if path.join(META_FILE).is_file() {
                 if let Ok(name) = PartName::new(name) {
                     let kind = kind_of(&path);
@@ -155,6 +163,20 @@ pub fn old_item_path(kind: ItemKind, name: &PartName) -> String {
         ItemKind::Assembly => ASSEMBLIES_DIR,
     };
     format!("{base}/{name}")
+}
+
+/// Путь от корня через `/`: `rel` и имя внутри него.
+fn join(rel: &str, name: &str) -> String {
+    if rel.is_empty() {
+        name.to_string()
+    } else {
+        format!("{rel}/{name}")
+    }
+}
+
+/// Служебный файл Nonius: в списке файлов проекта его не показывают.
+fn is_service(rel: &str, name: &str) -> bool {
+    name == KEEP_FILE || (rel.is_empty() && (name == PROJECT_FILE || name == AGENTS_FILE))
 }
 
 /// Вид детали из её `meta.yaml`; не прочитался — деталь.

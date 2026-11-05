@@ -43,6 +43,13 @@ impl Chooser for SystemChooser {
             .add_filter("PNG", &["png"])
             .save_file()
     }
+
+    fn cursor(&self) -> Option<(f32, f32)> {
+        match mouse_position::mouse_position::Mouse::get_mouse_position() {
+            mouse_position::mouse_position::Mouse::Position { x, y } => Some((x as f32, y as f32)),
+            mouse_position::mouse_position::Mouse::Error => None,
+        }
+    }
 }
 
 #[cfg(not(windows))]

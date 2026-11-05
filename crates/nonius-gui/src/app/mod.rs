@@ -6,9 +6,14 @@
 
 mod actions;
 mod add_model;
+mod batch;
 mod bottom;
+mod choice;
 mod choose;
+mod command;
 mod draft;
+mod drag_hint;
+mod drop_zones;
 mod dropped;
 mod file_menu;
 mod files;
@@ -17,9 +22,12 @@ mod history;
 mod jobs;
 mod legend;
 mod map;
+mod marquee;
 mod material;
 mod model_names;
+mod new_folder;
 mod new_part;
+mod node;
 mod numbers;
 mod open_menu;
 mod panels;
@@ -28,11 +36,16 @@ mod part_dialogs;
 mod project_tab;
 mod results;
 mod save;
+mod selection;
 mod settings;
+mod settings_window;
+mod shown;
 mod start;
 mod strip;
+mod structure;
 mod toolbar;
 mod tree;
+mod tree_folders;
 mod upgrade;
 
 use std::path::{Path, PathBuf};
@@ -94,6 +107,8 @@ pub struct App {
     no_lfs: bool,
     /// Окно было в фокусе в прошлом кадре.
     was_focused: bool,
+    /// Окно поднято поверх всех, пока над ним несут файл из Проводника.
+    raised: bool,
     /// Папка черновиков.
     drafts: Option<PathBuf>,
     mover: Mover,
@@ -104,6 +119,8 @@ pub struct App {
     closing: Option<draft::Closing>,
     /// Пользователь согласился потерять черновики: окно закрывается.
     may_close: bool,
+    /// Стрелки в открытом меню: на сколько пунктов сдвинуть фокус.
+    menu_step: i32,
 }
 
 impl App {
@@ -135,12 +152,14 @@ impl App {
             first_run: first_run::FirstRun::check(options.machine, ready),
             no_lfs: ready.git && !ready.lfs,
             was_focused: true,
+            raised: false,
             drafts: options.drafts,
             mover: options.mover,
             discard: options.discard,
             draft_wanted: false,
             closing: None,
             may_close: false,
+            menu_step: 0,
             settings,
         };
         app.restore_tabs(ctx);
@@ -154,7 +173,20 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.menu_step += choice::take_menu_arrows(ctx, raw_input);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.draw(ctx);
+        // Меню уже нарисованы: их пункты известны.
+        choice::step_in_menu(ctx, std::mem::take(&mut self.menu_step));
+    }
+}
+
+impl App {
+    /// Кадр окна: результаты работ, панели, окошки.
+    fn draw(&mut self, ctx: &egui::Context) {
         self.take_results(ctx);
         self.take_dropped(ctx);
         self.notice_focus(ctx);
@@ -169,7 +201,7 @@ impl eframe::App for App {
             file_menu::show(self, ctx);
         }
         self.move_when_free(ctx);
-        self.upgrade_when_free(ctx);
+        self.reopen_when_free(ctx);
         strip::show(self, ctx);
         draft::bar(self, ctx);
         upgrade::bar(self, ctx);
@@ -183,11 +215,15 @@ impl eframe::App for App {
         panels::error_bar(self, ctx);
         panels::status_bar(self, ctx);
         map::show(self, ctx);
+        // Строки дерева и «Структуры» отметят свои места заново.
+        self.tab.on_screen.clear();
         tree::show(self, ctx);
         panels::changes(self, ctx);
         bottom::show(self, ctx);
         save::show(self, ctx);
         new_part::show(self, ctx);
+        new_folder::show(self, ctx);
+        settings_window::show(self, ctx);
         add_model::show(self, ctx);
         part_dialogs::show(self, ctx);
         // Заливка нужна: зазор между полосой и 3D иначе показывает чёрный фон.
@@ -195,6 +231,11 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(fill))
             .show(ctx, |ui| {
+                structure::switch(self, ui);
+                if self.tab.view == structure::View::Structure {
+                    structure::show(self, ui);
+                    return;
+                }
                 toolbar::show(self, ui);
                 let event = self.viewport.show(
                     ui,
@@ -208,6 +249,10 @@ impl eframe::App for App {
                 }
                 panels::overlay(self, ui);
             });
+        // Клавиши — когда оба вида уже отметили порядок предметов.
+        command::keys(self, ctx);
+        self.show_drop_target(ctx);
+        self.show_drag_ghost(ctx);
         self.remember_look();
     }
 }

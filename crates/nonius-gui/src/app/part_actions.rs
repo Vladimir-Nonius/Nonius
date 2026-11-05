@@ -4,6 +4,7 @@
 
 use eframe::egui;
 
+use super::batch::Op;
 use super::jobs::Done;
 use super::part_dialogs::{Confirm, Dialog, Rename};
 use super::{pick_label, App};
@@ -39,10 +40,20 @@ impl App {
 
     /// Выбрать свои файлы и положить их в `docs/` детали.
     pub(super) fn add_files(&mut self, ctx: &egui::Context, part: String) {
+        let files = self.chooser.files();
+        self.add_files_from(ctx, part, files);
+    }
+
+    /// Положить эти файлы в `docs/` детали: выбранные или перетащенные.
+    pub(super) fn add_files_from(
+        &mut self,
+        ctx: &egui::Context,
+        part: String,
+        files: Vec<std::path::PathBuf>,
+    ) {
         let Some(project) = self.tab.project.clone() else {
             return;
         };
-        let files = self.chooser.files();
         if files.is_empty() {
             return;
         }
@@ -84,6 +95,14 @@ impl App {
         let Some(project) = self.tab.project.clone() else {
             return;
         };
+        // Несколько сразу — очередью: окошко закрывается, ход и
+        // «Остановить» — в строке состояния.
+        if let Some(Dialog::DeleteMany(nodes, _)) = &self.tab.dialog {
+            let ops = nodes.iter().cloned().map(Op::Delete).collect();
+            self.tab.dialog = None;
+            self.run_batch(ctx, ops);
+            return;
+        }
         let Some(dialog) = self.tab.dialog.as_mut() else {
             return;
         };
@@ -104,6 +123,13 @@ impl App {
                 self.tab.jobs.spawn(ctx, move |_| {
                     let done = project.delete_part(&part);
                     Done::PartDeleted(part, done)
+                });
+            }
+            Some(Dialog::RemoveFile(c, path)) if c.part.is_empty() => {
+                let path = path.clone();
+                self.tab.jobs.spawn(ctx, move |_| {
+                    let done = project.remove_folder_file(&path).map(|()| false);
+                    Done::FileRemoved(String::new(), path, done)
                 });
             }
             Some(Dialog::RemoveFile(c, path)) => {
@@ -220,15 +246,22 @@ impl App {
     pub(super) fn part_gone(&mut self, ctx: &egui::Context, name: &str) {
         let t = texts();
         self.tab.dialog = None;
+        self.forget_part(name);
+        let text = format!("«{name}» {}", t.part_deleted);
+        self.tab.notice = Some(text.clone());
+        self.tab.sticky = Some(text);
+        self.reload(ctx);
+    }
+}
+
+impl App {
+    /// Забыть удалённую деталь: раскрытие, версии, открытую в 3D.
+    pub(super) fn forget_part(&mut self, name: &str) {
         self.tab.expanded.remove(name);
         self.tab.listed.remove(name);
         if self.tab.part.as_deref() == Some(name) {
             self.clear_part();
         }
-        let text = format!("«{name}» {}", t.part_deleted);
-        self.tab.notice = Some(text.clone());
-        self.tab.sticky = Some(text);
-        self.reload(ctx);
     }
 }
 

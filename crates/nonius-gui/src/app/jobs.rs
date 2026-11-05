@@ -12,8 +12,10 @@ use eframe::egui;
 
 use nonius_scene::Scene;
 
+use super::batch::Report;
+
 use crate::source::{
-    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, MassEntry, PartEntry, Pick,
+    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, Listing, MassEntry, Pick,
     ProgramEntry, Progress, ProjectSource, VersionEntry,
 };
 
@@ -22,13 +24,13 @@ pub enum Done {
     /// Проект открыт.
     Opened(anyhow::Result<Box<dyn ProjectSource>>),
     /// Список деталей.
-    Parts(anyhow::Result<Vec<PartEntry>>),
+    Parts(anyhow::Result<Listing>),
     /// Версии детали.
     Versions(String, anyhow::Result<Vec<VersionEntry>>),
     /// Список деталей при возврате в окно.
-    Reread(anyhow::Result<Vec<PartEntry>>),
+    Reread(anyhow::Result<Listing>),
     /// Детали и версии одной детали заново (после сохранения).
-    Refreshed(Vec<PartEntry>, String, anyhow::Result<Vec<VersionEntry>>),
+    Refreshed(Listing, String, anyhow::Result<Vec<VersionEntry>>),
     /// Сравнение: деталь, пара версий, результат.
     Compared(String, (Pick, Pick), anyhow::Result<Comparison>),
     /// Материал и масса: деталь, пара версий; «Было», «Стало», сейчас.
@@ -49,6 +51,12 @@ pub enum Done {
     Programs(String, Vec<ProgramEntry>),
     /// Создана деталь.
     PartCreated(String, anyhow::Result<()>),
+    /// Создана папка: путь от корня.
+    FolderCreated(String, anyhow::Result<()>),
+    /// Файлы скопированы в папку-группу: пути от корня или ошибки.
+    FolderFilesAdded(Vec<anyhow::Result<String>>),
+    /// Настройки проекта записаны.
+    SettingsSaved(anyhow::Result<()>),
     /// Файл добавлен в деталь и сохранён версией.
     Added(anyhow::Result<AddedModel>),
     /// Версии раскрытой, но не выбранной детали.
@@ -77,6 +85,8 @@ pub enum Done {
     /// Черновик перенесён: проект в новой папке (или прежний, если перенос
     /// не удался) и ошибка переноса.
     Moved(anyhow::Result<Box<dyn ProjectSource>>, Option<String>),
+    /// Очередь закончилась.
+    Batch(Report),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }
@@ -284,7 +294,7 @@ mod tests {
         let mut jobs = Jobs::default();
         jobs.spawn(&ctx, |p| {
             p.step("читаю");
-            Done::Parts(Ok(Vec::new()))
+            Done::Parts(Ok(Listing::default()))
         });
         jobs.spawn(&ctx, |_| panic!("сбой"));
         assert!(jobs.busy());
@@ -313,7 +323,7 @@ mod tests {
             p.step("сравниваю");
             let _ = wait.recv();
             let _ = seen_tx.send(p.cancelled());
-            Done::Parts(Ok(Vec::new()))
+            Done::Parts(Ok(Listing::default()))
         });
         assert!(jobs.can_cancel());
         assert!(jobs.cancel());

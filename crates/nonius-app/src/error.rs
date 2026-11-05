@@ -122,6 +122,10 @@ pub enum Error {
     #[error("{0}: сравнить можно только с файлом STEP")]
     NotStep(PathBuf),
 
+    /// Настройка проекта не подходит: пустое название, допуск вне пределов.
+    #[error("{0}")]
+    BadSettings(String),
+
     /// Новый проект нельзя создать внутри другого.
     #[error("эта папка уже внутри проекта «{name}» ({root}). Выберите папку вне его")]
     InsideProject {
@@ -182,6 +186,7 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("not_deleted", "среди удалённых нет такой детали"),
     ("not_step", "сравнить можно только с файлом STEP"),
     ("not_text", "файл не текстовый"),
+    ("bad_settings", "неверная настройка проекта"),
     (
         "protected_file",
         "файл модели или служебный файл не убирается",
@@ -212,6 +217,7 @@ impl Error {
             Self::Cancelled => "cancelled",
             Self::InsideProject { .. } => "inside_project",
             Self::NotStep(_) => "not_step",
+            Self::BadSettings(_) => "bad_settings",
         }
     }
 

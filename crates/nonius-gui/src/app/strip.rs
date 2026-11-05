@@ -124,6 +124,8 @@ impl App {
         std::mem::swap(&mut self.tab, &mut self.tabs[self.at]);
         self.at = i;
         std::mem::swap(&mut self.tab, &mut self.tabs[self.at]);
+        // Места строк — с прошлого показа этой вкладки, они устарели.
+        self.tab.on_screen.clear();
         self.shown_again(ctx);
         self.remember_tabs();
     }

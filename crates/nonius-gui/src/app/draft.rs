@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui::{self, RichText};
 
+use super::choice;
 use super::jobs::Done;
 use super::project_tab::ProjectTab;
 use super::App;
@@ -202,15 +203,19 @@ pub fn ask(app: &mut App, ctx: &egui::Context) {
         ui.label(t.draft_unsaved_text);
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if ui.button(t.dont_save).clicked() {
-                answer = Some(Answer::Drop);
+            let drop = ui.button(t.dont_save);
+            let cancel = ui.button(t.cancel);
+            let save = ui.button(t.save_draft);
+            for (b, a) in [
+                (&drop, Answer::Drop),
+                (&cancel, Answer::Cancel),
+                (&save, Answer::Save),
+            ] {
+                if b.clicked() {
+                    answer = Some(a);
+                }
             }
-            if ui.button(t.cancel).clicked() {
-                answer = Some(Answer::Cancel);
-            }
-            if ui.button(t.save_draft).clicked() {
-                answer = Some(Answer::Save);
-            }
+            choice::keep_focus(&[drop, cancel, save], 2);
         });
     });
     let Some(answer) = answer else {

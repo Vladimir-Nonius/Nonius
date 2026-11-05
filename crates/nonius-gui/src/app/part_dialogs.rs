@@ -3,6 +3,9 @@
 
 use eframe::egui::{self, RichText};
 
+use super::choice;
+use super::node::Node;
+use super::tree_folders::last;
 use super::App;
 use crate::source::DeletedEntry;
 use crate::texts::texts;
@@ -19,6 +22,8 @@ pub enum Dialog {
     RemoveFile(Confirm, String),
     /// Список удалённых деталей; `None` — ещё читается.
     Deleted(Option<Vec<DeletedEntry>>, Confirm),
+    /// Удалить выделенное: детали и файлы папок.
+    DeleteMany(Vec<Node>, Confirm),
 }
 
 /// Окошко-вопрос про деталь.
@@ -53,7 +58,8 @@ impl Dialog {
             Dialog::Delete(c)
             | Dialog::Restore(c, _)
             | Dialog::RemoveFile(c, _)
-            | Dialog::Deleted(_, c) => c,
+            | Dialog::Deleted(_, c)
+            | Dialog::DeleteMany(_, c) => c,
         };
         base.busy = false;
         base.error = Some(error);
@@ -65,7 +71,8 @@ impl Dialog {
             Dialog::Delete(c)
             | Dialog::Restore(c, _)
             | Dialog::RemoveFile(c, _)
-            | Dialog::Deleted(_, c) => c,
+            | Dialog::Deleted(_, c)
+            | Dialog::DeleteMany(_, c) => c,
         }
     }
 }
@@ -98,15 +105,23 @@ fn question(
         }
         ui.add_space(6.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mut buttons = Vec::new();
             if let Some(label) = yes {
-                let button = egui::Button::new(label);
-                if ui.add_enabled(!base.busy, button).clicked() {
+                let button = ui.add_enabled(!base.busy, egui::Button::new(label));
+                if button.clicked() {
                     pressed = Some(Pressed::Yes);
                 }
+                buttons.push(button);
             }
             let no = if yes.is_some() { t.cancel } else { t.close };
-            if ui.add_enabled(!base.busy, egui::Button::new(no)).clicked() {
+            let button = ui.add_enabled(!base.busy, egui::Button::new(no));
+            if button.clicked() {
                 pressed = Some(Pressed::No);
+            }
+            buttons.push(button);
+            // Пока печатают имя, фокус у поля: стрелки двигают курсор.
+            if !ui.ctx().wants_keyboard_input() {
+                choice::keep_focus(&buttons, 0);
             }
         });
     });
@@ -136,10 +151,22 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
             })
         }
+        Some(Dialog::DeleteMany(nodes, base)) => {
+            let title = format!("{} ({})?", t.delete_many_title, nodes.len());
+            let unsaved = nodes.iter().any(|n| matches!(n, Node::Part(p) if dirty(p)));
+            question(ctx, &title, base, Some(t.delete), |ui| {
+                many_list(ui, nodes, unsaved);
+            })
+        }
         Some(Dialog::RemoveFile(base, path)) => {
             let title = format!("{} {path}?", t.remove_file_title);
+            let why = if base.part.is_empty() {
+                t.loose_remove_why
+            } else {
+                t.remove_file_why
+            };
             question(ctx, &title, base, Some(t.remove), |ui| {
-                ui.add(egui::Label::new(t.remove_file_why).wrap());
+                ui.add(egui::Label::new(why).wrap());
             })
         }
         Some(Dialog::Restore(base, version)) => {
@@ -210,6 +237,32 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         Some(Pressed::No) => app.tab.dialog = None,
         Some(Pressed::Yes) => app.confirmed(ctx),
         None => {}
+    }
+}
+
+/// Что удалится, по видам: детали можно вернуть, файлы остаются в истории.
+fn many_list(ui: &mut egui::Ui, nodes: &[Node], unsaved: bool) {
+    let t = texts();
+    let names = |part: bool| {
+        let list: Vec<String> = nodes
+            .iter()
+            .filter_map(|n| match n {
+                Node::Part(name) if part => Some(format!("«{name}»")),
+                Node::File(path) if !part => Some(format!("«{}»", last(path))),
+                _ => None,
+            })
+            .collect();
+        (!list.is_empty()).then(|| list.join(", "))
+    };
+    for (part, why) in [(true, t.delete_many_parts), (false, t.delete_many_files)] {
+        if let Some(list) = names(part) {
+            ui.label(RichText::new(list).strong());
+            ui.add(egui::Label::new(RichText::new(why).weak()).wrap());
+            ui.add_space(4.0);
+        }
+    }
+    if unsaved {
+        ui.add(egui::Label::new(t.delete_unsaved).wrap());
     }
 }
 

@@ -7,7 +7,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::jobs::Jobs;
-use super::{add_model, bottom, material, new_part, open_menu, part_dialogs, save};
+use super::{
+    add_model, batch, bottom, material, new_folder, new_part, node, open_menu, part_dialogs, save,
+    selection, settings_window, shown, structure,
+};
 use crate::source::{
     Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
     VersionEntry,
@@ -40,6 +43,35 @@ pub(super) struct ProjectTab {
     pub search: String,
     /// Раскрытые в дереве детали.
     pub expanded: BTreeSet<String>,
+    /// Папки-группы проекта: путь от корня через `/`.
+    pub folders: Vec<String>,
+    /// Обычные файлы в папках-группах: путь от корня через `/`.
+    pub loose: Vec<String>,
+    /// Выделенное в дереве и «Структуре»: его удаляет Delete.
+    pub selection: selection::Selection,
+    /// Последним выбрали файл на вкладке «Файлы»: Delete — про него, а не
+    /// про выделенное в дереве.
+    pub keys_to_files: bool,
+    /// Порядок предметов на экране для Ctrl+A: дерево и «Структура».
+    pub tree_order: Vec<node::Node>,
+    pub structure_order: Vec<node::Node>,
+    /// Последний щелчок был в «Структуре»: Ctrl+A выделяет там.
+    pub in_structure: bool,
+    /// Идёт очередь: перенос или удаление нескольких.
+    pub batch: Option<batch::Batch>,
+    /// Что где на экране: строки дерева и «Структуры» с прошлого кадра.
+    pub on_screen: Vec<shown::Shown>,
+    /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.
+    pub drop_aim: Option<node::Node>,
+    /// Над какой свёрнутой папкой держат курсор и с какого мига.
+    pub hover_since: Option<(String, f64)>,
+    /// Свёрнутые в дереве папки; новые видны раскрытыми.
+    pub folded: BTreeSet<String>,
+    /// Куда класть новую деталь или папку: последняя выбранная папка,
+    /// пустая строка — корень.
+    pub place: String,
+    /// Открытое окошко «Новая папка».
+    pub new_folder: Option<new_folder::NewFolder>,
     /// Версии раскрытых деталей, кроме выбранной.
     pub listed: HashMap<String, Vec<VersionEntry>>,
     /// С чем сравнивается деталь вне истории: имя файла или детали.
@@ -77,4 +109,11 @@ pub(super) struct ProjectTab {
     pub ask_upgrade: bool,
     /// Проект обновляется, как только вкладка освободится.
     pub upgrading: bool,
+    /// Настройки проекта записаны: открыть его заново, как только вкладка
+    /// освободится.
+    pub reopen: bool,
+    /// Что показано в центре: деталь в 3D или структура проекта.
+    pub view: structure::View,
+    /// Открытое окно «Настройки».
+    pub settings: Option<settings_window::SettingsDialog>,
 }

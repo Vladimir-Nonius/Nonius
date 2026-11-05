@@ -13,9 +13,19 @@ pub struct NewPart {
     busy: bool,
     error: Option<String>,
     focused: bool,
+    /// Папка, куда ляжет деталь: путь от корня, пустой — корень.
+    folder: String,
 }
 
 impl NewPart {
+    /// Окошко для новой детали в папке.
+    pub fn in_folder(folder: &str) -> Self {
+        Self {
+            folder: folder.to_string(),
+            ..Self::default()
+        }
+    }
+
     /// Создать не вышло: окошко остаётся, причина видна в нём.
     pub fn failed(&mut self, error: String) {
         self.busy = false;
@@ -46,6 +56,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
         let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.checkbox(&mut dialog.assembly, t.is_assembly);
+        ui.label(RichText::new(super::new_folder::place_words(&dialog.folder)).weak());
         if let Some(e) = &dialog.error {
             ui.label(RichText::new(e).color(ui.visuals().error_fg_color));
         }
@@ -63,6 +74,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         dialog.busy = true;
         dialog.error = None;
         let (name, assembly) = (dialog.name.trim().to_string(), dialog.assembly);
-        app.create_part(ctx, name, assembly);
+        let folder = dialog.folder.clone();
+        app.create_part(ctx, name, assembly, folder);
     }
 }

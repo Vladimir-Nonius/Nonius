@@ -44,10 +44,10 @@ impl App {
                     self.tab.after_open.clear();
                     self.tab.message = Some(format!("{}: {e:#}", t.project_open_failed))
                 }
-                Done::Reread(Ok(parts)) => self.got_parts(ctx, parts),
+                Done::Reread(Ok(listing)) => self.got_parts(ctx, listing),
                 Done::Reread(Err(_)) => {}
-                Done::Parts(Ok(parts)) => {
-                    self.set_parts(ctx, parts);
+                Done::Parts(Ok(listing)) => {
+                    self.set_parts(ctx, listing);
                     let models = std::mem::take(&mut self.tab.after_open);
                     self.start_adding(models, None);
                     let want = self.tab.want.as_ref().map(|w| w.0.clone());
@@ -59,8 +59,8 @@ impl App {
                     }
                 }
                 Done::Versions(name, Ok(v)) if current(&name) => self.got_versions(ctx, &name, v),
-                Done::Refreshed(parts, name, versions) => {
-                    self.set_parts(ctx, parts);
+                Done::Refreshed(listing, name, versions) => {
+                    self.set_parts(ctx, listing);
                     match versions {
                         Ok(v) if self.tab.part.as_deref() == Some(&name) => {
                             // «Сохранена версия …» остаётся видна и после
@@ -176,6 +176,18 @@ impl App {
                     Some(d) => d.failed(format!("{e:#}")),
                     None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
+                Done::FolderCreated(path, Ok(())) => self.folder_created(ctx, path),
+                Done::FolderCreated(_, Err(e)) => match self.tab.new_folder.as_mut() {
+                    Some(d) => d.failed(format!("{e:#}")),
+                    None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
+                },
+                Done::FolderFilesAdded(added) => self.folder_files_added(ctx, added),
+                Done::SettingsSaved(Ok(())) => self.settings_saved(),
+                Done::SettingsSaved(Err(e)) => match self.tab.settings.as_mut() {
+                    Some(d) => d.failed(format!("{e:#}")),
+                    None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
+                },
+                Done::Batch(report) => self.batch_done(ctx, report),
                 Done::Added(Ok(added)) => self.added(ctx, added),
                 Done::Added(Err(e)) => match self.tab.add.as_mut() {
                     Some(d) => d.failed(format!("{e:#}")),
@@ -225,6 +237,11 @@ impl App {
                     }
                     Err(e) => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
+                Done::FileRemoved(name, path, Ok(_)) if name.is_empty() => {
+                    self.tab.dialog = None;
+                    self.tab.notice = Some(format!("{path}: {}", t.loose_removed));
+                    self.reload(ctx);
+                }
                 Done::FileRemoved(name, path, Ok(dirty)) => {
                     self.tab.dialog = None;
                     let mut text = format!("{path} {} «{name}».", t.file_removed);

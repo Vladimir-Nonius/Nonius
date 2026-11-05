@@ -6,11 +6,15 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use nonius_core::PartName;
 
+mod dialog;
+
+pub use dialog::show;
+
 use super::jobs::Done;
-use super::model_names::{default_message, guess, next_version, same_name, step_stays, Place};
+use super::model_names::{default_message, guess, same_name, Place};
 use super::App;
 use crate::source::{AddedModel, PartEntry};
 use crate::texts::texts;
@@ -26,6 +30,9 @@ pub struct AddModel {
     target: Option<String>,
     /// Деталь задана заранее: «Заменить модель…».
     fixed: bool,
+    /// Файлы бросили на эту папку: новая деталь ляжет в неё. `None` —
+    /// в корень, как раньше.
+    folder: Option<String>,
     name: String,
     message: String,
     busy: bool,
@@ -113,110 +120,6 @@ impl AddModel {
     }
 }
 
-/// Нарисовать окошко, если оно открыто.
-pub fn show(app: &mut App, ctx: &egui::Context) {
-    let t = texts();
-    let parts = app.tab.parts.clone();
-    let Some(d) = app.tab.add.as_mut() else {
-        return;
-    };
-    let Some(file) = d.file().cloned() else {
-        return;
-    };
-    let mut add = false;
-    let mut all = false;
-    let mut skip = false;
-    let mut close = false;
-    let modal = egui::Modal::new(egui::Id::new("add-model")).show(ctx, |ui| {
-        ui.set_width(460.0);
-        let done = d.total - d.queue.len() + 1;
-        ui.heading(if d.total > 1 {
-            format!("{} {done} {} {}", t.add_model_title, t.place_of, d.total)
-        } else {
-            t.add_model_title.to_string()
-        });
-        let shown = file.file_name().unwrap_or_default().to_string_lossy();
-        ui.label(RichText::new(shown).weak());
-        ui.add_space(6.0);
-        if !d.fixed {
-            let before = d.target.clone();
-            let selected = d.target.as_deref().unwrap_or(t.part_new);
-            ui.label(t.add_to);
-            egui::ComboBox::from_id_salt("add-target")
-                .selected_text(selected)
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut d.target, None, t.part_new);
-                    for p in &parts {
-                        ui.selectable_value(&mut d.target, Some(p.name.clone()), &p.name);
-                    }
-                });
-            if d.target != before {
-                d.message = default_message(d.target.as_deref(), &parts);
-            }
-        }
-        if d.target.is_none() {
-            ui.label(t.part_name);
-            ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(f32::INFINITY));
-        }
-        let place = d.place(&parts);
-        match &place {
-            Place::Existing(part) => {
-                let next = next_version(part, &parts);
-                ui.label(RichText::new(format!("{} {next} «{part}»", t.will_be_version)).strong());
-            }
-            Place::New(name) => {
-                ui.label(RichText::new(format!("{} «{name}»", t.will_be_part)).strong());
-            }
-            Place::Nothing => {
-                ui.label(RichText::new(t.bad_name).color(ui.visuals().warn_fg_color));
-            }
-        }
-        if step_stays(&file, &place, &parts) {
-            ui.label(RichText::new(t.step_stays).color(ui.visuals().warn_fg_color));
-        }
-        ui.add_space(6.0);
-        ui.label(format!("{} *", t.what_why));
-        let edit = ui.add(
-            egui::TextEdit::singleline(&mut d.message)
-                .desired_width(f32::INFINITY)
-                .hint_text(t.add_model_hint),
-        );
-        if !d.focused {
-            edit.request_focus();
-            d.focused = true;
-        }
-        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if let Some(e) = &d.error {
-            ui.label(RichText::new(e).color(ui.visuals().error_fg_color));
-        }
-        ui.add_space(6.0);
-        let ready = !d.busy && place != Place::Nothing && !d.message.trim().is_empty();
-        ui.horizontal(|ui| {
-            let label = if d.busy { t.importing } else { t.add };
-            let button = ui.add_enabled(ready, egui::Button::new(label));
-            add = ready && (button.clicked() || enter);
-            if d.queue.len() > 1 {
-                let label = format!("{} ({})", t.add_all, d.queue.len());
-                all = ui.add_enabled(ready, egui::Button::new(label)).clicked();
-                skip = ui.add_enabled(!d.busy, egui::Button::new(t.skip)).clicked();
-            }
-            close = ui
-                .add_enabled(!d.busy, egui::Button::new(t.cancel))
-                .clicked();
-        });
-    });
-    if close || (modal.should_close() && !d.busy) {
-        app.finish_adding(ctx);
-    } else if skip {
-        d.queue.pop_front();
-        d.prepare(&parts);
-    } else if add || all {
-        d.all = all;
-        app.add_current(ctx);
-    }
-}
-
 impl App {
     /// Начать добавлять файлы. `part` — положить в эту деталь. Окошко уже
     /// открыто — файлы встают в очередь.
@@ -240,6 +143,15 @@ impl App {
         self.tab.add = Some(dialog);
     }
 
+    /// Модели бросили на папку: новые детали из них лягут в неё.
+    pub(super) fn start_adding_in(&mut self, files: Vec<PathBuf>, folder: String) {
+        let fresh = self.tab.add.is_none();
+        self.start_adding(files, None);
+        if let (true, Some(d)) = (fresh, self.tab.add.as_mut()) {
+            d.folder = Some(folder);
+        }
+    }
+
     /// Добавить файл на экране и сохранить версию.
     fn add_current(&mut self, ctx: &egui::Context) {
         let (Some(project), Some(d)) = (self.tab.project.clone(), self.tab.add.as_mut()) else {
@@ -247,6 +159,11 @@ impl App {
         };
         let (Some(file), part) = (d.file().cloned(), d.place(&self.tab.parts)) else {
             return;
+        };
+        // Новая деталь появляется в корне: потом её переложить в папку.
+        let folder = match &part {
+            Place::New(_) => d.folder.clone().filter(|f| !f.is_empty()),
+            _ => None,
         };
         let (Place::Existing(part) | Place::New(part)) = part else {
             d.failed(texts().bad_name.to_string());
@@ -258,7 +175,15 @@ impl App {
         self.tab.jobs.cancel();
         self.tab.jobs.spawn(ctx, move |progress| {
             progress.step(texts().importing);
-            Done::Added(project.add_model(&file, &part, &message))
+            let mut added = project.add_model(&file, &part, &message);
+            if let (Ok(a), Some(folder)) = (added.as_mut(), folder) {
+                // Модель уже сохранена; не легла в папку — сказать, но не
+                // терять.
+                if let Err(e) = project.move_part(&part, &folder) {
+                    a.warnings.push(format!("«{folder}»: {e:#}"));
+                }
+            }
+            Done::Added(added)
         });
     }
 
@@ -266,6 +191,7 @@ impl App {
     pub(super) fn added(&mut self, ctx: &egui::Context, added: AddedModel) {
         // Деталь уже есть для следующего файла, хотя список ещё не перечитан.
         let version = added.version.map(|v| format!("v{v}"));
+        let folder = self.tab.add.as_ref().and_then(|d| d.folder.clone());
         match self.tab.parts.iter_mut().find(|p| p.name == added.part) {
             Some(p) => p.latest = version.or(p.latest.take()),
             None => self.tab.parts.push(PartEntry {
@@ -275,6 +201,7 @@ impl App {
                 dirty: false,
                 model: None,
                 stamp: String::new(),
+                folder: folder.unwrap_or_default(),
             }),
         }
         let parts = self.tab.parts.clone();
@@ -310,6 +237,7 @@ mod tests {
             dirty: false,
             model: None,
             stamp: String::new(),
+            folder: String::new(),
         }];
         let mut d = AddModel {
             name: "КРОНШТЕЙН".into(),

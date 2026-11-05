@@ -12,7 +12,7 @@ use nonius_core::compare::{Change, ChangeKind, ChangeReport};
 use nonius_gui::source::{
     AddedModel, Chooser, Comparison, DeletedEntry, DiffEntry, DiffKind, FileEntry, FileState,
     Machine, MassEntry, MaterialEntry, OpenWay, Other, PartEntry, Pick, ProgramEntry, Progress,
-    ProjectSource, Readiness, VersionEntry,
+    ProjectSettings, ProjectSource, Readiness, VersionEntry,
 };
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
@@ -44,6 +44,28 @@ struct Fake {
     title: &'static str,
     /// Проект старого формата; обновление его снимает.
     old: Arc<Mutex<bool>>,
+    /// Папки-группы проекта.
+    folders: Arc<Mutex<Vec<String>>>,
+    /// Где лежат детали: деталь и папка, последнее — главное.
+    moved: Arc<Mutex<Vec<(String, String)>>>,
+    /// Что записали в настройки проекта.
+    settings: Arc<Mutex<Vec<ProjectSettings>>>,
+    /// Обычные файлы папок, путь от корня.
+    loose: Arc<Mutex<Vec<String>>>,
+    /// Какие свои файлы положили в детали: деталь и файл.
+    attached: Arc<Mutex<Vec<(String, PathBuf)>>>,
+    /// Какие детали удалили из окна.
+    deleted: Arc<Mutex<Vec<String>>>,
+    /// Держит удаление, пока тест смотрит на очередь.
+    gate: Arc<Mutex<()>>,
+}
+
+impl Fake {
+    fn folder_of(&self, part: &str) -> String {
+        let moved = self.moved.lock().unwrap();
+        let last = moved.iter().rev().find(|m| m.0 == part);
+        last.map(|m| m.1.clone()).unwrap_or_default()
+    }
 }
 
 fn tetra(at: f32) -> Mesh {
@@ -74,6 +96,7 @@ impl ProjectSource for Fake {
                 dirty: false,
                 model: Some("model.step".into()),
                 stamp: self.stamp.lock().unwrap().clone(),
+                folder: self.folder_of("кронштейн"),
             },
             PartEntry {
                 name: "корпус".into(),
@@ -82,6 +105,7 @@ impl ProjectSource for Fake {
                 dirty: true,
                 model: None,
                 stamp: String::new(),
+                folder: self.folder_of("корпус"),
             },
         ];
         let made = self.created.lock().unwrap();
@@ -93,6 +117,7 @@ impl ProjectSource for Fake {
         for name in names {
             if !list.iter().any(|p| p.name == name) {
                 list.push(PartEntry {
+                    folder: self.folder_of(&name),
                     name,
                     assembly: false,
                     latest: None,
@@ -102,7 +127,26 @@ impl ProjectSource for Fake {
                 });
             }
         }
+        let deleted = self.deleted.lock().unwrap();
+        list.retain(|p| !deleted.contains(&p.name));
         Ok(list)
+    }
+    fn settings(&self) -> ProjectSettings {
+        let saved = self.settings.lock().unwrap();
+        saved.last().cloned().unwrap_or(ProjectSettings {
+            name: self.title.into(),
+            tolerance_mm: 0.01,
+        })
+    }
+    fn save_settings(&self, settings: &ProjectSettings) -> anyhow::Result<()> {
+        if settings.name.contains('!') {
+            anyhow::bail!("название «{}» не годится", settings.name);
+        }
+        self.settings.lock().unwrap().push(settings.clone());
+        Ok(())
+    }
+    fn folders(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.folders.lock().unwrap().clone())
     }
     fn versions(&self, part: &str) -> anyhow::Result<Vec<VersionEntry>> {
         let v = |number| VersionEntry {
@@ -245,7 +289,7 @@ impl ProjectSource for Fake {
     fn programs(&self, _path: &str) -> Vec<ProgramEntry> {
         vec![program()]
     }
-    fn new_part(&self, name: &str, assembly: bool) -> anyhow::Result<()> {
+    fn new_part(&self, name: &str, assembly: bool, folder: &str) -> anyhow::Result<()> {
         if name == "кронштейн" {
             anyhow::bail!("такая деталь уже есть");
         }
@@ -253,6 +297,22 @@ impl ProjectSource for Fake {
             .lock()
             .unwrap()
             .push((name.to_string(), assembly));
+        if !folder.is_empty() {
+            self.move_part(name, folder)?;
+        }
+        Ok(())
+    }
+    fn new_folder(&self, folder: &str) -> anyhow::Result<()> {
+        let mut folders = self.folders.lock().unwrap();
+        if folders.iter().any(|f| f == folder) {
+            anyhow::bail!("папка {folder} уже есть");
+        }
+        folders.push(folder.to_string());
+        Ok(())
+    }
+    fn move_part(&self, part: &str, folder: &str) -> anyhow::Result<()> {
+        let moved = (part.to_string(), folder.to_string());
+        self.moved.lock().unwrap().push(moved);
         Ok(())
     }
     fn add_model(&self, file: &Path, part: &str, message: &str) -> anyhow::Result<AddedModel> {
@@ -271,7 +331,9 @@ impl ProjectSource for Fake {
         anyhow::ensure!(new != "корпус", "такая деталь уже есть");
         Ok(())
     }
-    fn delete_part(&self, _part: &str) -> anyhow::Result<()> {
+    fn delete_part(&self, part: &str) -> anyhow::Result<()> {
+        let _wait = self.gate.lock().unwrap();
+        self.deleted.lock().unwrap().push(part.to_string());
         Ok(())
     }
     fn deleted_parts(&self) -> anyhow::Result<Vec<DeletedEntry>> {
@@ -283,8 +345,32 @@ impl ProjectSource for Fake {
     fn restore_version(&self, _part: &str, _version: u32) -> anyhow::Result<u32> {
         Ok(3)
     }
-    fn add_file(&self, _part: &str, file: &Path) -> anyhow::Result<String> {
+    fn add_file(&self, part: &str, file: &Path) -> anyhow::Result<String> {
+        let added = (part.to_string(), file.to_path_buf());
+        self.attached.lock().unwrap().push(added);
         Ok(format!("docs/{}", file.display()))
+    }
+    fn folder_files(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.loose.lock().unwrap().clone())
+    }
+    fn add_folder_file(&self, folder: &str, file: &Path) -> anyhow::Result<String> {
+        let name = file.file_name().unwrap().to_string_lossy();
+        let path = if folder.is_empty() {
+            name.to_string()
+        } else {
+            format!("{folder}/{name}")
+        };
+        self.loose.lock().unwrap().push(path.clone());
+        Ok(path)
+    }
+    fn remove_folder_file(&self, path: &str) -> anyhow::Result<()> {
+        self.loose.lock().unwrap().retain(|f| f != path);
+        Ok(())
+    }
+    fn open_folder_file(&self, path: &str, way: &OpenWay) -> anyhow::Result<PathBuf> {
+        let opened = (path.to_string(), way.clone());
+        self.opened.lock().unwrap().push(opened);
+        Ok(self.root.join(path))
     }
     fn remove_file(&self, part: &str, path: &str) -> anyhow::Result<()> {
         self.removed
@@ -441,6 +527,13 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         hidden: Arc::default(),
         title,
         old: Arc::default(),
+        folders: Arc::default(),
+        moved: Arc::default(),
+        settings: Arc::default(),
+        loose: Arc::default(),
+        attached: Arc::default(),
+        deleted: Arc::default(),
+        gate: Arc::default(),
     }
 }
 
@@ -1075,6 +1168,29 @@ fn right_click_acts_on_its_own_row() {
 }
 
 #[test]
+fn version_model_opens_from_its_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let opened = project.opened.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "версия 1");
+
+    // Правая кнопка по старой версии: открыть её модель копией.
+    h.get_by_label("v1").click_secondary();
+    wait_for(&mut h, "Открыть в…");
+    assert!(h.query_by_label("Показать в папке").is_some());
+    h.get_by_label("Открыть").click();
+    wait_for(&mut h, "(копия, правки в ней не попадут в историю)");
+    assert_eq!(
+        *opened.lock().unwrap(),
+        [("model.step".to_string(), OpenWay::Default)]
+    );
+}
+
+#[test]
 fn own_files_from_the_files_tab() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
@@ -1094,20 +1210,20 @@ fn own_files_from_the_files_tab() {
     // Модель так не убирают: пункта нет.
     h.get_by_label_contains("model.step").click_secondary();
     wait_for(&mut h, "Показать в папке");
-    assert!(h.query_by_label("Убрать файл…").is_none());
+    assert!(h.query_by_label("Удалить файл…").is_none());
     h.get_by_label("Показать в папке").click();
     h.run();
 
     // Свой файл: меню, вопрос, убран.
     h.get_by_label_contains("~ docs/заметка.md")
         .click_secondary();
-    wait_for(&mut h, "Убрать файл…");
+    wait_for(&mut h, "Удалить файл…");
     // Меню встаёт на место со второго кадра.
     h.run();
-    h.get_by_label("Убрать файл…").click();
-    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    h.get_by_label("Удалить файл…").click();
+    wait_for(&mut h, "Удалить файл docs/заметка.md?");
     h.run();
-    h.get_by_label("Убрать").click();
+    h.get_by_label("Удалить").click();
     wait_for(&mut h, "убран из «кронштейн»");
     let gone = ("кронштейн".to_string(), "docs/заметка.md".to_string());
     assert_eq!(*removed.lock().unwrap(), [gone]);
@@ -1122,7 +1238,7 @@ fn own_files_from_the_files_tab() {
     h.get_by_label_contains("~ docs/заметка.md").click();
     h.run();
     h.key_press(egui::Key::Delete);
-    wait_for(&mut h, "Убрать файл docs/заметка.md?");
+    wait_for(&mut h, "Удалить файл docs/заметка.md?");
     h.run();
     h.get_by_label("Отмена").click();
     h.run();
@@ -1279,4 +1395,853 @@ fn old_project_is_upgraded_from_the_window() {
     wait_for(&mut h, "Второй");
     assert!(!*old.lock().unwrap(), "обновлён");
     assert!(h.query_by_label_contains("только просмотр").is_none());
+}
+
+/// Протащить мышью от одной строки к другой и отпустить.
+fn drag(h: &mut Harness<'_, App>, from: egui::Rect, to: egui::Rect) {
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    let start = from.center();
+    let steps = [start, start + egui::vec2(0.0, 12.0), to.center()];
+    h.input_mut().events.push(egui::Event::PointerMoved(start));
+    h.input_mut().events.push(press(start, true));
+    h.run_steps(3);
+    for pos in steps {
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        h.run_steps(3);
+    }
+    h.input_mut().events.push(press(to.center(), false));
+    h.run_steps(3);
+}
+
+#[test]
+fn folders_in_the_tree() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    project.move_part("кронштейн", "Стена").unwrap();
+    let (moved, created) = (project.moved.clone(), project.created.clone());
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    assert!(h.query_by_label_contains("Стена").is_some());
+
+    // Свернуть папку — деталь в ней не видна, раскрыть — снова видна.
+    h.get_by_label_contains("Стена").click();
+    h.run();
+    assert!(h.query_by_label_contains("кронштейн").is_none());
+    h.get_by_label_contains("Стена").click();
+    h.run();
+    assert!(h.query_by_label_contains("кронштейн").is_some());
+
+    // Папка выбрана щелчком: новая папка ляжет внутрь неё.
+    h.get_by_label("+ папка").click();
+    wait_for(&mut h, "В папке «Стена»");
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("Рейка");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Создана папка «Стена/Рейка»");
+
+    // Новая деталь — в только что созданную папку.
+    h.get_by_label("+ деталь").click();
+    wait_for(&mut h, "В папке «Стена/Рейка»");
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("крюк");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Создана деталь «крюк»");
+    assert_eq!(created.lock().unwrap()[0].0, "крюк");
+    assert!(moved
+        .lock()
+        .unwrap()
+        .contains(&("крюк".to_string(), "Стена/Рейка".to_string())));
+}
+
+#[test]
+fn drag_part_into_folder() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let moved = project.moved.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+
+    let part = h.get_by_label_contains("корпус").rect();
+    let folder = h.get_by_label_contains("Стена").rect();
+    drag(&mut h, part, folder);
+    wait_for(&mut h, "«корпус» перенесена в «Стена»");
+    assert_eq!(
+        *moved.lock().unwrap(),
+        [("корпус".to_string(), "Стена".to_string())]
+    );
+    // Щелчок без сдвига мыши — по-прежнему выбор, а не перенос.
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "2026-10-27");
+    assert_eq!(moved.lock().unwrap().len(), 1);
+}
+
+/// Поле ввода с этим текстом.
+fn field<'a>(h: &'a Harness<'_, App>, value: &str) -> egui_kittest::Node<'a> {
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.value().as_deref() == Some(value))
+        .unwrap_or_else(|| panic!("нет поля «{value}»"))
+}
+
+/// Дописать в конец поля.
+fn append(h: &mut Harness<'_, App>, value: &str, text: &str) {
+    field(h, value).click();
+    h.run_steps(3);
+    h.key_press(egui::Key::End);
+    field(h, value).type_text(text);
+    h.run_steps(3);
+}
+
+#[test]
+fn structure_shows_folders_and_blanks() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let moved = project.moved.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    // У корпуса модели нет: это заготовка, модель добавляется прямо здесь.
+    assert!(h.query_by_label("сборка · заготовка").is_some());
+    assert!(h.query_by_label("1 деталь · 1 сборка").is_some());
+    assert!(h.query_by_label("Добавить модель…").is_some());
+    assert!(h.query_all_by_label_contains("Пусто").next().is_some());
+
+    let card = h.get_by_label("корпус").rect();
+    let folder = h.get_all_by_label("🗀 Стена").next().unwrap().rect();
+    drag(&mut h, card, folder);
+    wait_for(&mut h, "«корпус» перенесена в «Стена»");
+    assert_eq!(
+        *moved.lock().unwrap(),
+        [("корпус".to_string(), "Стена".to_string())]
+    );
+
+    // Двойной щелчок по карточке — деталь в 3D.
+    // Оба щелчка в одном кадре: между кадрами проверка ждёт дольше,
+    // чем длится двойной щелчок.
+    let at = h.get_by_label("кронштейн").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    for pressed in [true, false, true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    wait_for(&mut h, "2026-10-27");
+    assert!(
+        h.query_by_label("Корень проекта").is_none(),
+        "показана деталь"
+    );
+}
+
+#[test]
+fn project_settings_from_the_window() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let saved = project.settings.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+
+    h.get_by_label("Файл").click();
+    wait_for(&mut h, "Настройки…");
+    h.get_by_label("Настройки…").click();
+    wait_for(&mut h, "Допуск сравнения, мм");
+    // Окошко ещё выплывает: щелчок по нему раньше времени попал бы мимо.
+    h.run_steps(10);
+
+    h.get_by_label("Программа").click();
+    wait_for(&mut h, "Колесо мыши наоборот");
+    h.get_by_label("Проект").click();
+    wait_for(&mut h, "Допуск сравнения, мм");
+
+    // Не вышло — окно остаётся и говорит почему.
+    append(&mut h, "Стенд", "!");
+    h.get_by_label("Сохранить").click();
+    wait_for(&mut h, "не годится");
+    // Щелчок по «Сохранить» увёл фокус: сначала снова в поле.
+    field(&h, "Стенд!").click();
+    h.run_steps(3);
+    h.key_press(egui::Key::End);
+    h.key_press(egui::Key::Backspace);
+    h.run_steps(3);
+
+    append(&mut h, "0.01", "5");
+    h.get_by_label("Сохранить").click();
+    // Проект открывается заново: его заменит «Второй» из открывателя проверки.
+    wait_for(&mut h, "Второй");
+    let last = saved.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(
+        last,
+        ProjectSettings {
+            name: "Стенд".into(),
+            tolerance_mm: 0.015
+        }
+    );
+}
+
+/// Бросить файлы из Проводника, когда курсор над этим местом.
+fn drop_at(h: &mut Harness<'_, App>, at: egui::Pos2, files: &[PathBuf]) {
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    h.run_steps(2);
+    for f in files {
+        h.input_mut().dropped_files.push(egui::DroppedFile {
+            path: Some(f.clone()),
+            ..Default::default()
+        });
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn files_from_explorer_go_where_dropped() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let (loose, attached, opened) = (
+        project.loose.clone(),
+        project.attached.clone(),
+        project.opened.clone(),
+    );
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let pdf = dir.path().join("ТЗ стены.pdf");
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // На папку — копия прямо в неё, и она видна в дереве.
+    let folder = h.get_by_label_contains("Стена").rect().center();
+    drop_at(&mut h, folder, std::slice::from_ref(&pdf));
+    wait_for(&mut h, "🗋 ТЗ стены.pdf");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/ТЗ стены.pdf"]);
+
+    // Двойной щелчок по файлу открывает его.
+    let at = h
+        .get_all_by_label("🗋 ТЗ стены.pdf")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    for pressed in [true, false, true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    wait_for(&mut h, "Открыт");
+    assert_eq!(opened.lock().unwrap()[0].0, "Стена/ТЗ стены.pdf");
+
+    // На деталь — в её docs/.
+    let part = h.get_by_label_contains("корпус").rect().center();
+    drop_at(&mut h, part, std::slice::from_ref(&pdf));
+    wait_for(&mut h, "«корпус»: добавлено");
+    assert_eq!(*attached.lock().unwrap(), [("корпус".to_string(), pdf)]);
+}
+
+#[test]
+fn dropped_file_goes_where_it_was_carried() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let loose = project.loose.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let pdf = dir.path().join("лист.pdf");
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // Файл несут над папкой: у курсора написано, куда он ляжет.
+    let folder = h.get_by_label_contains("Стена").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(folder));
+    h.input_mut().hovered_files.push(egui::HoveredFile {
+        path: Some(pdf.clone()),
+        ..Default::default()
+    });
+    h.step();
+    h.step();
+    assert!(h.query_by_label("Скопировать в «Стена»").is_some());
+
+    // Кадр броска пришёл, когда мышь уже ушла, — файл всё равно в «Стена».
+    let away = h.get_by_label_contains("корпус").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(away));
+    h.input_mut().dropped_files.push(egui::DroppedFile {
+        path: Some(pdf),
+        ..Default::default()
+    });
+    h.step();
+    wait_for(&mut h, "🗋 лист.pdf");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
+}
+
+#[test]
+fn folder_files_have_the_same_menu_and_delete() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let loose = project.loose.clone();
+    loose.lock().unwrap().push("Стена/лист.dxf".into());
+    loose.lock().unwrap().push("Стена/ТЗ.pdf".into());
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "🗋 лист.dxf");
+
+    // Правый щелчок — то же меню, что у файлов детали.
+    h.get_all_by_label("🗋 лист.dxf")
+        .next()
+        .unwrap()
+        .click_secondary();
+    wait_for(&mut h, "Открыть в…");
+    assert!(h.query_by_label("Показать в папке").is_some());
+    h.get_by_label("Удалить файл…").click();
+    wait_for(&mut h, "Удалить файл Стена/лист.dxf?");
+    // Окошко ещё выплывает: щелчок раньше времени попал бы мимо.
+    h.run_steps(10);
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "файл удалён");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/ТЗ.pdf"]);
+
+    // Delete по выделенному файлу — тот же вопрос.
+    h.get_all_by_label("🗋 ТЗ.pdf").next().unwrap().click();
+    h.run_steps(2);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить файл Стена/ТЗ.pdf?");
+}
+
+#[test]
+fn file_dropped_anywhere_in_a_structure_folder_lands_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let loose = project.loose.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    let pdf = dir.path().join("лист.pdf");
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // Не на заголовок, а на «Пусто…» внутри блока папки.
+    let inside = h
+        .get_all_by_label_contains("Пусто")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    drop_at(&mut h, inside, std::slice::from_ref(&pdf));
+    wait_for(&mut h, "Скопировано");
+    assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
+}
+
+#[test]
+fn model_dropped_on_a_folder_becomes_a_part_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let (moved, loose, imported) = (
+        project.moved.clone(),
+        project.loose.clone(),
+        project.imported.clone(),
+    );
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let shaft = dir.path().join("вал.STEP");
+    let pdf = dir.path().join("лист.pdf");
+    std::fs::write(&shaft, "x").unwrap();
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // Модель — новой деталью прямо в папку, чертёж — обычным файлом рядом.
+    let folder = h.get_by_label_contains("Стена").rect().center();
+    drop_at(&mut h, folder, &[shaft.clone(), pdf]);
+    wait_for(&mut h, "Будет новая деталь «вал» в папке «Стена»");
+    h.run();
+    h.get_by_label("Добавить").click();
+    wait_for(&mut h, "Сохранена модель «вал» v1");
+    assert_eq!(imported.lock().unwrap()[0].1, "вал");
+    assert!(moved
+        .lock()
+        .unwrap()
+        .contains(&("вал".to_string(), "Стена".to_string())));
+    assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
+
+    // Такое имя уже есть в другом месте: окошко говорит где.
+    let bracket = dir.path().join("кронштейн.step");
+    std::fs::write(&bracket, "x").unwrap();
+    let folder = h
+        .get_all_by_label_contains("Стена")
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.contains("🗀")))
+        .unwrap()
+        .rect()
+        .center();
+    drop_at(&mut h, folder, std::slice::from_ref(&bracket));
+    wait_for(&mut h, "Будет версия v3 «кронштейн»");
+    assert!(h
+        .query_by_label_contains("Деталь с таким именем уже лежит в корне проекта")
+        .is_some());
+}
+
+#[test]
+fn part_dropped_anywhere_in_a_folder_moves_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let moved = project.moved.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+
+    // Карточку — за строку версии, не за имя; не на заголовок, а на
+    // «Пусто…» внутри блока папки.
+    let card = h.get_by_label("сборка · заготовка").rect();
+    let inside = h.get_all_by_label_contains("Пусто").next().unwrap().rect();
+    drag(&mut h, card, inside);
+    wait_for(&mut h, "«корпус» перенесена в «Стена»");
+
+    // В дереве — на деталь, что уже лежит в папке: в ту же папку.
+    h.get_by_label("Деталь (3D)").click();
+    h.run_steps(3);
+    let part = h.get_by_label_contains("кронштейн").rect();
+    // Строка дерева, а не надпись «… перенесена» снизу.
+    let there = h
+        .get_all_by_label_contains("корпус")
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("корпус"))
+        })
+        .unwrap()
+        .rect();
+    drag(&mut h, part, there);
+    wait_for(&mut h, "«кронштейн» перенесена в «Стена»");
+    assert_eq!(
+        *moved.lock().unwrap(),
+        [
+            ("корпус".to_string(), "Стена".to_string()),
+            ("кронштейн".to_string(), "Стена".to_string())
+        ]
+    );
+}
+
+#[test]
+fn delete_key_asks_about_the_chosen_part() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "корпус");
+    h.get_by_label_contains("корпус").click();
+    h.run_steps(3);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+}
+
+#[test]
+fn structure_card_has_the_part_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "корпус");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    // Правая кнопка по любому месту карточки, а не только по имени.
+    h.get_by_label("сборка · заготовка").click_secondary();
+    wait_for(&mut h, "Переименовать…");
+    h.run_steps(5);
+    h.get_by_label("Удалить…").click();
+    wait_for(&mut h, "Удалить «корпус»?");
+}
+
+/// Щелчок с Ctrl или Shift. egui берёт их из общего состояния клавиш, а не
+/// из события щелчка: зажать на время щелчка и отпустить.
+fn click_with(h: &mut Harness<'_, App>, at: egui::Rect, modifiers: egui::Modifiers) {
+    let pos = at.center();
+    h.input_mut().modifiers = modifiers;
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        });
+    }
+    h.run_steps(2);
+    h.input_mut().modifiers = egui::Modifiers::default();
+    h.run_steps(2);
+}
+
+/// Строка дерева, что начинается с `name`. Она говорит, выделена ли;
+/// имя на карточке «Структуры» — нет.
+fn row(h: &Harness<'_, App>, name: &str) -> egui::Rect {
+    h.query_all_by_label_contains(name)
+        .find(|n| {
+            let node = n.accesskit_node();
+            node.label().is_some_and(|l| l.starts_with(name)) && node.toggled().is_some()
+        })
+        .unwrap_or_else(|| panic!("нет строки «{name}»"))
+        .rect()
+}
+
+/// Подсвечена ли строка дерева, что начинается с `name`.
+fn chosen(h: &Harness<'_, App>, name: &str) -> bool {
+    h.query_all_by_label_contains(name).any(|n| {
+        let node = n.accesskit_node();
+        let on = node.toggled() == Some(egui::accesskit::Toggled::True);
+        node.label().is_some_and(|l| l.starts_with(name)) && on
+    })
+}
+
+#[test]
+fn ctrl_click_adds_without_opening() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+    let count = compared.lock().unwrap().len();
+
+    let body = row(&h, "корпус");
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    assert!(chosen(&h, "кронштейн") && chosen(&h, "корпус"));
+    // Открытым остался кронштейн: сравнение то же.
+    h.run_steps(10);
+    assert_eq!(compared.lock().unwrap().len(), count);
+    assert!(h.query_by_label_contains("Добавлено 1").is_some());
+
+    // Ctrl ещё раз — снять.
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    assert!(chosen(&h, "кронштейн") && !chosen(&h, "корпус"));
+}
+
+#[test]
+fn shift_in_structure_selects_a_run_seen_in_the_tree() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+
+    h.get_by_label("кронштейн").click();
+    h.run_steps(3);
+    // Имя «щит» и у строки дерева, и у карточки: карточка — та, что без
+    // выделения.
+    let card = |h: &Harness<'_, App>| {
+        h.get_all_by_label("щит")
+            .find(|n| n.accesskit_node().toggled().is_none())
+            .unwrap()
+            .rect()
+    };
+    let last = card(&h);
+    click_with(&mut h, last, egui::Modifiers::SHIFT);
+    for name in ["кронштейн", "корпус", "щит"] {
+        assert!(chosen(&h, name), "в дереве выделен «{name}»");
+    }
+
+    // Пустое место «Структуры» снимает выделение.
+    let below = card(&h).translate(egui::vec2(0.0, 300.0));
+    click_with(&mut h, below, egui::Modifiers::default());
+    assert!(!chosen(&h, "корпус") && !chosen(&h, "кронштейн"));
+}
+
+#[test]
+fn vanished_part_leaves_the_selection() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let created = project.created.clone();
+    created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    h.get_by_label_contains("корпус").click();
+    h.run_steps(3);
+    let shield = row(&h, "щит");
+    click_with(&mut h, shield, egui::Modifiers::COMMAND);
+    assert!(chosen(&h, "корпус") && chosen(&h, "щит"));
+
+    // «Щит» удалили снаружи; окно перечитывает проект по возвращении.
+    created.lock().unwrap().clear();
+    h.input_mut().focused = false;
+    h.step();
+    h.input_mut().focused = true;
+    for _ in 0..200 {
+        h.step();
+        if h.query_all_by_label_contains("щит").next().is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(h.query_all_by_label_contains("щит").next().is_none());
+    // Выделен остался один корпус: Delete — про него.
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+}
+
+#[test]
+fn delete_two_with_one_question() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let loose = project.loose.clone();
+    loose.lock().unwrap().push("ТЗ.pdf".into());
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "ТЗ.pdf");
+    h.get_by_label_contains("корпус").click();
+    h.run_steps(3);
+    let file = row(&h, "🗋 ТЗ.pdf");
+    click_with(&mut h, file, egui::Modifiers::COMMAND);
+    h.key_press(egui::Key::Delete);
+    // Одно окошко на всё: детали и файлы по отдельности.
+    wait_for(&mut h, "Удалить выделенное (2)?");
+    // Окошко встаёт на место со второго кадра.
+    h.run();
+    assert!(h.query_by_label_contains("«корпус»").is_some());
+    assert!(h.query_by_label_contains("«ТЗ.pdf»").is_some());
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удалено 2 из 2");
+    assert_eq!(*deleted.lock().unwrap(), ["корпус"]);
+    assert!(loose.lock().unwrap().is_empty());
+    for _ in 0..100 {
+        h.step();
+        if h.query_all_by_label_contains("корпус").next().is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(h.query_all_by_label_contains("корпус").next().is_none());
+}
+
+#[test]
+fn arrows_choose_a_button_in_the_question() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let body = row(&h, "корпус");
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+    h.run();
+    // В фокусе «Удалить»; стрелка влево — «Отмена», Enter её нажимает.
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Удалить «корпус»?").is_none());
+    assert!(deleted.lock().unwrap().is_empty());
+    // Снова: сразу Enter — удалить.
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+    h.run();
+    h.key_press(egui::Key::Enter);
+    wait_for(&mut h, "«корпус» удалена");
+    assert_eq!(*deleted.lock().unwrap(), ["корпус"]);
+}
+
+/// Клавиша в открытом меню: стрелки окно забирает раньше egui, а
+/// тестовое окно этот крючок само не зовёт.
+fn menu_key(h: &mut Harness<'_, App>, key: egui::Key) {
+    h.input_mut().events.push(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    let ctx = h.ctx.clone();
+    let mut raw = std::mem::take(h.input_mut());
+    eframe::App::raw_input_hook(h.state_mut(), &ctx, &mut raw);
+    *h.input_mut() = raw;
+    h.run_steps(2);
+}
+
+/// В фокусе ли пункт с такой подписью.
+fn focused(h: &Harness<'_, App>, label: &str) -> bool {
+    let id = h
+        .ctx
+        .memory(|m| m.focused())
+        .map(|id| egui::accesskit::NodeId(id.value()));
+    let node = h.get_by_label(label).accesskit_node().id();
+    id == Some(node)
+}
+
+#[test]
+fn arrows_walk_the_right_click_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click_secondary();
+    wait_for(&mut h, "Переименовать…");
+    h.run();
+    // Вниз — первый пункт, вверх с первого — последний, «Удалить…».
+    menu_key(&mut h, egui::Key::ArrowDown);
+    assert!(focused(&h, "Открыть"));
+    menu_key(&mut h, egui::Key::ArrowUp);
+    assert!(focused(&h, "Удалить…"));
+    h.key_press(egui::Key::Enter);
+    wait_for(&mut h, "Удалить «кронштейн»?");
+}
+
+#[test]
+fn queue_stops_after_the_current_one() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let gate = project.gate.clone();
+    project.created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    // Правая кнопка по одному из выделенных — меню про все три.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    for name in ["кронштейн", "корпус", "щит"] {
+        assert!(chosen(&h, name), "выделен «{name}»");
+    }
+    let held = gate.lock().unwrap();
+    h.get_by_label_contains("корпус").click_secondary();
+    wait_for(&mut h, "Удалить выделенное (3)…");
+    h.run();
+    h.get_by_label("Удалить выделенное (3)…").click();
+    wait_for(&mut h, "Удалить выделенное (3)?");
+    h.run();
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удаляю 1 из 3");
+    h.get_by_label("Остановить").click();
+    h.run_steps(2);
+    drop(held);
+    wait_for(&mut h, "Удалено 1 из 3, остановлено");
+    assert_eq!(deleted.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn keys_for_the_chosen() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    // Ctrl+A — всё в дереве, Esc — ничего.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    assert!(chosen(&h, "кронштейн") && chosen(&h, "корпус"));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(!chosen(&h, "кронштейн") && !chosen(&h, "корпус"));
+    // Ctrl выделяет, не открывая; Enter открывает.
+    let body = row(&h, "кронштейн");
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    assert!(compared.lock().unwrap().is_empty());
+    h.key_press(egui::Key::Enter);
+    wait_for(&mut h, "Добавлено 1");
+    // F2 — переименовать.
+    h.key_press(egui::Key::F2);
+    wait_for(&mut h, "Переименовать «кронштейн»");
+}
+
+#[test]
+fn clicking_the_open_part_keeps_its_comparison() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Карта v1");
+    h.get_by_label("Карта v1").click();
+    for _ in 0..100 {
+        h.step();
+        if compared.lock().unwrap().last() == Some(&(Pick::Version(1), Pick::Version(1))) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let count = compared.lock().unwrap().len();
+
+    // Пустое место под деревом снимает выделение, открытая остаётся.
+    let below = row(&h, "корпус").translate(egui::vec2(0.0, 60.0));
+    click_with(&mut h, below, egui::Modifiers::default());
+    assert!(!chosen(&h, "кронштейн"));
+    // Щелчок по ней снова выделяет, но не открывает заново.
+    let body = row(&h, "кронштейн");
+    click_with(&mut h, body, egui::Modifiers::default());
+    assert!(chosen(&h, "кронштейн"));
+    for _ in 0..30 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(compared.lock().unwrap().len(), count);
+    assert_eq!(
+        compared.lock().unwrap().last(),
+        Some(&(Pick::Version(1), Pick::Version(1)))
+    );
+}
+
+#[test]
+fn mouse_frame_selects_without_keys() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+
+    // Дерево: справа от строк пусто — рамка оттуда задевает строки по высоте.
+    let right = |r: egui::Rect| {
+        egui::Rect::from_center_size(egui::pos2(200.0, r.center().y), egui::vec2(2.0, 2.0))
+    };
+    let from = right(row(&h, "кронштейн"));
+    let to = right(row(&h, "корпус"));
+    drag(&mut h, from, to);
+    assert!(chosen(&h, "кронштейн") && chosen(&h, "корпус"));
+    // Рамка только выделяет: в 3D ничего не открылось.
+    assert!(compared.lock().unwrap().is_empty());
+
+    // «Структура»: рамка с пустого места под карточками накрывает одну.
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    let card = h.get_by_label("кронштейн").rect();
+    let below = egui::Rect::from_center_size(
+        egui::pos2(card.left() + 4.0, card.bottom() + 150.0),
+        egui::vec2(2.0, 2.0),
+    );
+    drag(&mut h, below, card);
+    assert!(chosen(&h, "кронштейн") && !chosen(&h, "корпус"));
 }

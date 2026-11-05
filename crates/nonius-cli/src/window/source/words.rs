@@ -24,8 +24,14 @@ pub(super) fn in_words(e: nonius_app::Error) -> anyhow::Error {
             )
         }
         Error::Core(Core::AlreadyExists(_)) => anyhow::anyhow!("такая деталь уже есть"),
-        Error::Core(Core::OldLayout(_)) => {
+        // Хранилище отдаёт ту же ошибку ядра, завёрнутую в свою.
+        Error::Core(Core::OldLayout(_))
+        | Error::Store(nonius_app::StoreError::Core(Core::OldLayout(_))) => {
             anyhow::anyhow!("проект старого формата: менять его можно после обновления (кнопка «Обновить» вверху)")
+        }
+        Error::Core(Core::InsideItem(_))
+        | Error::Store(nonius_app::StoreError::Core(Core::InsideItem(_))) => {
+            anyhow::anyhow!("внутрь детали класть нельзя: выберите папку")
         }
         Error::Store(nonius_app::StoreError::Identity) => {
             anyhow::anyhow!("не задано имя автора версий: перезапустите Nonius, он спросит имя")

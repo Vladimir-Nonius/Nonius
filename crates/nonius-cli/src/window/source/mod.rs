@@ -27,7 +27,7 @@ use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
     AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, MassEntry, MaterialEntry, OpenWay,
-    Other, PartEntry, Pick, ProgramEntry, Progress, ProjectSource, VersionEntry,
+    Other, PartEntry, Pick, ProgramEntry, Progress, ProjectSettings, ProjectSource, VersionEntry,
 };
 
 /// Проект для окна поверх `nonius-app`.
@@ -82,6 +82,16 @@ fn version(p: Pick) -> Result<Option<VersionNumber>> {
     })
 }
 
+/// Папка, в которой лежит деталь: путь от корня через `/`, пустой — корень.
+fn folder_of(root: &Path, dir: &Path) -> String {
+    let parent = dir.parent().unwrap_or(root);
+    let rel = parent.strip_prefix(root).unwrap_or(Path::new(""));
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Пара версий для вкладки «Файлы»: одна и та же версия — без сравнения.
 fn pair(before: Pick, after: Pick) -> Result<(Option<VersionNumber>, Option<VersionNumber>)> {
     let to = version(after)?;
@@ -104,6 +114,7 @@ impl ProjectSource for AppSource {
 
     fn parts(&self) -> Result<Vec<PartEntry>> {
         let _files = self.reading();
+        let root = self.app.project().root();
         Ok(self
             .app
             .items()?
@@ -115,8 +126,32 @@ impl ProjectSource for AppSource {
                 dirty: !s.changes.is_empty(),
                 model: self.app.model_file(s.item.name.as_str()).ok().flatten(),
                 stamp: self.app.stamp(&s.item),
+                folder: folder_of(root, &s.item.dir),
             })
             .collect())
+    }
+
+    fn folders(&self) -> Result<Vec<String>> {
+        let _files = self.reading();
+        Ok(self.app.map()?.folders)
+    }
+
+    fn folder_files(&self) -> Result<Vec<String>> {
+        let _files = self.reading();
+        Ok(self.app.map()?.files)
+    }
+
+    fn add_folder_file(&self, folder: &str, file: &Path) -> Result<String> {
+        self.add_loose(folder, file)
+    }
+
+    fn open_folder_file(&self, path: &str, way: &OpenWay) -> Result<PathBuf> {
+        self.open_loose(path, way)
+    }
+
+    fn remove_folder_file(&self, path: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app.remove_folder_file(path).map_err(in_words)
     }
 
     fn versions(&self, part: &str) -> Result<Vec<VersionEntry>> {
@@ -167,7 +202,12 @@ impl ProjectSource for AppSource {
 
     fn save_version(&self, part: &str, message: &str) -> Result<u32> {
         let _files = self.writing();
-        Ok(self.app.save_version(part, message)?.version.get())
+        Ok(self
+            .app
+            .save_version(part, message)
+            .map_err(in_words)?
+            .version
+            .get())
     }
 
     fn mass(&self, part: &str, pick: Pick) -> Result<MassEntry> {
@@ -196,7 +236,9 @@ impl ProjectSource for AppSource {
             density_kg_m3,
         });
         let _files = self.writing();
-        Ok(mass_entry(self.app.set_material(part, choice)?))
+        Ok(mass_entry(
+            self.app.set_material(part, choice).map_err(in_words)?,
+        ))
     }
 
     fn files(&self, part: &str, before: Pick, after: Pick) -> Result<Vec<FileEntry>> {
@@ -221,14 +263,30 @@ impl ProjectSource for AppSource {
         files::programs(path)
     }
 
-    fn new_part(&self, name: &str, assembly: bool) -> Result<()> {
+    fn new_part(&self, name: &str, assembly: bool, folder: &str) -> Result<()> {
         let kind = if assembly {
             ItemKind::Assembly
         } else {
             ItemKind::Part
         };
         let _files = self.writing();
-        self.app.new_item(name, kind).map_err(in_words)?;
+        self.app
+            .new_item_in(name, kind, Path::new(folder))
+            .map_err(in_words)?;
+        Ok(())
+    }
+
+    fn new_folder(&self, folder: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app.new_folder(Path::new(folder)).map_err(in_words)?;
+        Ok(())
+    }
+
+    fn move_part(&self, part: &str, folder: &str) -> Result<()> {
+        let _files = self.writing();
+        self.app
+            .move_item(part, Path::new(folder))
+            .map_err(in_words)?;
         Ok(())
     }
 
@@ -236,7 +294,7 @@ impl ProjectSource for AppSource {
         // Импорт читает STEP, а OpenCascade работает по одному.
         let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let _files = self.writing();
-        let imported = self.app.import(file, Some(part))?;
+        let imported = self.app.import(file, Some(part)).map_err(in_words)?;
         let name = imported.item.name.to_string();
         let version = match self.app.save_version(&name, message) {
             Ok(v) => Some(v.version.get()),
@@ -291,12 +349,12 @@ impl ProjectSource for AppSource {
 
     fn add_file(&self, part: &str, file: &Path) -> Result<String> {
         let _files = self.writing();
-        Ok(self.app.add_file(part, file)?)
+        self.app.add_file(part, file).map_err(in_words)
     }
 
     fn remove_file(&self, part: &str, path: &str) -> Result<()> {
         let _files = self.writing();
-        Ok(self.app.remove_file(part, path)?)
+        self.app.remove_file(part, path).map_err(in_words)
     }
 
     fn set_hidden(&self, part: &str, version: u32, hidden: bool) -> Result<()> {
@@ -322,6 +380,24 @@ impl ProjectSource for AppSource {
         progress: &dyn Progress,
     ) -> Result<Comparison> {
         self.compare_with(part, pick, other, progress)
+    }
+
+    fn settings(&self) -> ProjectSettings {
+        let s = self.app.project_settings();
+        ProjectSettings {
+            name: s.name,
+            tolerance_mm: s.tolerance_mm,
+        }
+    }
+
+    fn save_settings(&self, settings: &ProjectSettings) -> Result<()> {
+        let new = nonius_app::ProjectSettings {
+            name: settings.name.clone(),
+            tolerance_mm: settings.tolerance_mm,
+        };
+        let _files = self.writing();
+        self.app.set_project_settings(&new).map_err(in_words)?;
+        Ok(())
     }
 
     fn old_layout(&self) -> bool {
