@@ -1,7 +1,8 @@
 //! Папки в дереве, как в Obsidian: папка раскрывается стрелкой, деталь
 //! перетаскивается мышью на папку, на другую деталь (в её папку) или на
-//! пустое место внизу (в корень). Папка в дереве — папка на диске, её
-//! обычные файлы (заметки, чертежи) — строки под деталями.
+//! пустое место внизу (в корень); куда она ляжет, решает `drag_hint.rs` по
+//! отмеченным местам. Папка в дереве — папка на диске, её обычные файлы
+//! (заметки, чертежи) — строки под деталями.
 
 use std::collections::BTreeSet;
 
@@ -96,10 +97,18 @@ pub(super) fn dir(app: &mut App, ui: &mut egui::Ui, tree: &Tree, dir: &str, acts
     subs.sort_by_key(|f| last(f).to_lowercase());
     for sub in subs {
         let open = tree.searching || !app.tab.folded.contains(sub);
-        folder_row(app, ui, sub, open, acts);
+        let row = folder_row(app, ui, sub, open, acts);
+        let mut bottom = row.bottom();
         if open {
-            ui.indent(("folder", sub), |ui| self::dir(app, ui, tree, sub, acts));
+            let inside = ui.indent(("folder", sub), |ui| self::dir(app, ui, tree, sub, acts));
+            bottom = inside.response.rect.bottom();
         }
+        // Папка целиком — строка и всё, что под ней, во всю ширину дерева:
+        // её подсвечивают, когда бросают на файл или деталь внутри.
+        let x = ui.max_rect().x_range();
+        let whole = egui::Rect::from_x_y_ranges(x, row.top()..=bottom);
+        acts.shown
+            .push(Shown::on(ui, whole, Node::Folder(sub.clone())));
     }
     for p in tree.parts.iter().filter(|p| p.folder == dir) {
         part_line(app, ui, p, acts);
@@ -119,7 +128,7 @@ fn file_row(app: &App, ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
         let text = RichText::new(format!("🗋 {}", last(path))).weak();
         let r = ui.selectable_label(chosen, text).on_hover_text(path);
         acts.shown
-            .push(Shown::new(r.rect, Node::File(path.to_string())));
+            .push(Shown::on(ui, r.rect, Node::File(path.to_string())));
         if r.double_clicked() {
             acts.open_file = Some((path.to_string(), false));
         } else if r.clicked() || r.secondary_clicked() {
@@ -146,17 +155,14 @@ pub(super) fn loose_target(path: &str) -> Target {
     }
 }
 
-/// Строка папки: стрелка, имя; на неё бросают детали.
-fn folder_row(app: &App, ui: &mut egui::Ui, path: &str, open: bool, acts: &mut Acts) {
+/// Строка папки: стрелка, имя; на неё бросают детали. Отдаёт место строки.
+fn folder_row(app: &App, ui: &mut egui::Ui, path: &str, open: bool, acts: &mut Acts) -> egui::Rect {
     let t = texts();
     ui.horizontal(|ui| {
         // Стрелка — часть строки: щелчок по любому месту раскрывает папку.
         let arrow = if open { "▾" } else { "▸" };
         let chosen = app.tab.place == path;
         let r = ui.selectable_label(chosen, format!("{arrow} 🗀 {}", last(path)));
-        acts.shown
-            .push(Shown::new(r.rect, Node::Folder(path.to_string())));
-        drop_target(ui, &r, path, acts);
         if r.clicked() {
             acts.toggled = Some(path.to_string());
             acts.place = Some(path.to_string());
@@ -171,19 +177,9 @@ fn folder_row(app: &App, ui: &mut egui::Ui, path: &str, open: bool, acts: &mut A
                 acts.new_folder = Some(path.to_string());
             }
         });
-    });
-}
-
-/// Сюда можно бросить деталь: подсветить и запомнить, куда бросили.
-fn drop_target(ui: &egui::Ui, r: &egui::Response, folder: &str, acts: &mut Acts) {
-    if r.dnd_hover_payload::<Dragged>().is_some() {
-        let stroke = ui.visuals().selection.stroke;
-        ui.painter()
-            .rect_stroke(r.rect, 3.0, stroke, egui::StrokeKind::Inside);
-    }
-    if let Some(d) = r.dnd_release_payload::<Dragged>() {
-        acts.moved = Some((d.0.clone(), folder.to_string()));
-    }
+    })
+    .response
+    .rect
 }
 
 /// Строку детали можно тащить мышью. Щелчок остаётся щелчком: тащить
@@ -206,19 +202,11 @@ pub(super) fn drag_part(row: egui::Response, p: &PartEntry) -> egui::Response {
 pub(super) fn root_drop(ui: &mut egui::Ui, acts: &mut Acts) {
     let size = egui::vec2(ui.available_width(), ui.available_height().max(32.0));
     let r = ui.allocate_response(size, egui::Sense::click());
-    if r.dnd_hover_payload::<Dragged>().is_some() {
-        let stroke = ui.visuals().selection.stroke;
-        ui.painter()
-            .rect_stroke(r.rect, 3.0, stroke, egui::StrokeKind::Inside);
-    }
-    if let Some(d) = r.dnd_release_payload::<Dragged>() {
-        acts.moved = Some((d.0.clone(), String::new()));
-    }
     if r.clicked() {
         acts.place = Some(String::new());
     }
     acts.shown
-        .push(Shown::new(r.rect, Node::Folder(String::new())));
+        .push(Shown::on(ui, r.rect, Node::Folder(String::new())));
 }
 
 /// Исполнить то, что сделали с папками.
@@ -266,9 +254,6 @@ pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
     }
     if let Some(folder) = acts.new_folder.take() {
         app.tab.new_folder = Some(NewFolder::in_folder(&folder));
-    }
-    if let Some((part, folder)) = acts.moved.take() {
-        app.move_part(ctx, part, folder);
     }
 }
 

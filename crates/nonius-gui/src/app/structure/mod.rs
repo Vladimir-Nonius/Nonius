@@ -2,7 +2,7 @@
 //! с заголовком и счётчиком, вложенная папка — внутри родителя. У детали
 //! карточка с цветной полоской: серая — деталь, синяя — сборка, рыжая —
 //! заготовка без модели (ей можно сразу добавить модель). Карточку
-//! перетаскивают на заголовок другой папки так же, как строку в дереве.
+//! перетаскивают в любое место другой папки так же, как строку в дереве.
 
 use eframe::egui::{self, RichText};
 
@@ -26,7 +26,7 @@ pub enum View {
 
 mod cards;
 
-use cards::{cards, drop_here, file_lines, legend};
+use cards::{cards, file_lines, legend};
 
 /// Сдвиг вложенной папки внутри родителя.
 const NESTED: f32 = 16.0;
@@ -46,7 +46,6 @@ struct Acts {
     select: Option<String>,
     open: Option<String>,
     add_model: Option<String>,
-    moved: Option<(String, String)>,
     shown: Vec<Shown>,
     open_file: Option<String>,
     asked: Option<Ask>,
@@ -88,9 +87,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     app.answer_menu(ui.ctx(), acts.asked.take());
     if let Some(path) = acts.open_file {
         app.open_loose(ui.ctx(), path, false);
-    }
-    if let Some((part, folder)) = acts.moved {
-        app.move_part(ui.ctx(), part, folder);
     }
     if let Some(name) = acts.add_model {
         let models = app.chooser.models();
@@ -151,11 +147,11 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
         .response;
     // Бросить можно в любое место папки, не только на заголовок.
     acts.shown
-        .push(Shown::new(whole.rect, Node::Folder(folder.to_string())));
+        .push(Shown::on(ui, whole.rect, Node::Folder(folder.to_string())));
     ui.add_space(10.0);
 }
 
-/// Полоса заголовка: имя папки и счётчик; на неё бросают детали.
+/// Полоса заголовка: имя папки и счётчик.
 fn header(ui: &mut egui::Ui, title: &str, count: &str, folder: &str, acts: &mut Acts) {
     let fill = ui.visuals().faint_bg_color;
     let r = egui::Frame::NONE
@@ -180,8 +176,7 @@ fn header(ui: &mut egui::Ui, title: &str, count: &str, folder: &str, acts: &mut 
     let line = ui.visuals().widgets.noninteractive.bg_stroke;
     ui.painter().hline(r.rect.x_range(), r.rect.bottom(), line);
     acts.shown
-        .push(Shown::new(r.rect, Node::Folder(folder.to_string())));
-    drop_here(ui, &r, folder, acts);
+        .push(Shown::on(ui, r.rect, Node::Folder(folder.to_string())));
 }
 
 /// «3 детали · 1 сборка» или «пусто».

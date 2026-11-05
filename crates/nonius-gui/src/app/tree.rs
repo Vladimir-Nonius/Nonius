@@ -7,7 +7,7 @@ use super::jobs::Done;
 use super::node::Node;
 use super::open_menu::{self, Ask, Target};
 use super::shown::Shown;
-use super::tree_folders::{self, Dragged};
+use super::tree_folders;
 use super::App;
 use crate::source::{Listing, PartEntry, Pick};
 use crate::texts::texts;
@@ -22,8 +22,6 @@ pub(super) struct Acts {
     pub clicked: Option<String>,
     pub unfolded: Option<String>,
     pub asked: Option<Ask>,
-    /// Деталь и папка, куда её бросили.
-    pub moved: Option<(String, String)>,
     /// Папку раскрыли или свернули.
     pub toggled: Option<String>,
     /// Новая папка для новых деталей.
@@ -91,6 +89,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     };
                     tree_folders::dir(app, ui, &tree, "", &mut acts);
                     tree_folders::root_drop(ui, &mut acts);
+                    // Весь проект — корень: брошенное на деталь в корне
+                    // подсвечивает всё дерево.
+                    let all = ui.min_rect();
+                    acts.shown
+                        .push(Shown::on(ui, all, Node::Folder(String::new())));
                 });
         });
     tree_folders::apply(app, ctx, &mut acts);
@@ -112,11 +115,7 @@ pub(super) fn part_line(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, acts: &
         let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
         let r = tree_folders::drag_part(part_row(ui, p, selected), p);
         acts.shown
-            .push(Shown::new(r.rect, Node::Part(p.name.clone())));
-        if let Some(d) = r.dnd_release_payload::<Dragged>() {
-            // Брошена на деталь — в ту же папку, где она лежит.
-            acts.moved = Some((d.0.clone(), p.folder.clone()));
-        }
+            .push(Shown::on(ui, r.rect, Node::Part(p.name.clone())));
         if toggle && open {
             app.tab.expanded.remove(&p.name);
         } else if toggle {

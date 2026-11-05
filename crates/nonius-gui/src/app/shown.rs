@@ -19,6 +19,12 @@ impl Shown {
     pub fn new(rect: egui::Rect, node: Node) -> Self {
         Self { rect, node }
     }
+
+    /// Только видимая часть: что ушло за прокрутку, не ловит курсор и не
+    /// подсвечивается поверх соседних панелей.
+    pub fn on(ui: &egui::Ui, rect: egui::Rect, node: Node) -> Self {
+        Self::new(rect.intersect(ui.clip_rect()), node)
+    }
 }
 
 /// Предмет под точкой. Место целиком — вся папка, внутри неё деталь или
@@ -27,6 +33,15 @@ pub(super) fn under(list: &[Shown], pos: egui::Pos2) -> Option<&Shown> {
     list.iter()
         .filter(|s| s.rect.contains(pos))
         .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+}
+
+/// Всё место предмета под точкой: у папки — блок или строка вместе с
+/// содержимым, а не только заголовок.
+pub(super) fn whole(list: &[Shown], node: &Node, pos: egui::Pos2) -> Option<egui::Rect> {
+    list.iter()
+        .filter(|s| &s.node == node && s.rect.contains(pos))
+        .map(|s| s.rect)
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
 }
 
 #[cfg(test)]
@@ -51,5 +66,16 @@ mod tests {
         let folder = under(&list, egui::pos2(300.0, 200.0)).map(|s| &s.node);
         assert_eq!(folder, Some(&Node::Folder("Стена".into())));
         assert!(under(&list, egui::pos2(500.0, 10.0)).is_none());
+    }
+
+    #[test]
+    fn whole_folder_not_its_header() {
+        let wall = Node::Folder("Стена".into());
+        let list = [
+            at(0.0, 0.0, 400.0, 30.0, wall.clone()),
+            at(0.0, 0.0, 400.0, 300.0, wall.clone()),
+        ];
+        let rect = whole(&list, &wall, egui::pos2(10.0, 10.0)).unwrap();
+        assert_eq!(rect.height(), 300.0);
     }
 }

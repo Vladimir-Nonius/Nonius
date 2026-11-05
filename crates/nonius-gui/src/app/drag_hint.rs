@@ -17,7 +17,7 @@ const UNFOLD_AFTER: f64 = 0.6;
 
 /// Что будет с тем, что несут.
 #[derive(Clone, Copy)]
-enum Carry {
+pub(super) enum Carry {
     /// Деталь проекта переезжает.
     Move,
     /// Файл из Проводника копируется: оригинал остаётся на месте.
@@ -41,7 +41,7 @@ impl App {
         let Some(pos) = self.pointer_in_window(ctx) else {
             return;
         };
-        let found = self.landing_at(pos);
+        let found = self.landing_at(pos, Carry::Copy);
         let text = match &found {
             Some(at) => {
                 highlight(ctx, at.rect);
@@ -55,7 +55,8 @@ impl App {
     }
 
     /// Деталь тащат по дереву или «Структуре»: её имя летит за курсором,
-    /// под ним — куда она переедет.
+    /// под ним — куда она переедет. Отпустили — переезжает туда, что было
+    /// подсвечено: решает одно это место, а не строка под курсором.
     pub(super) fn show_drag_ghost(&mut self, ctx: &egui::Context) {
         let Some(dragged) = egui::DragAndDrop::payload::<Dragged>(ctx) else {
             return;
@@ -63,23 +64,24 @@ impl App {
         let Some(pos) = ctx.pointer_latest_pos() else {
             return;
         };
+        let found = self.landing_at(pos, Carry::Move);
+        if ctx.input(|i| i.pointer.any_released()) {
+            egui::DragAndDrop::clear_payload(ctx);
+            if let Some(Node::Folder(folder)) = found.map(|at| at.node) {
+                self.move_part(ctx, dragged.0.clone(), folder);
+            }
+            return;
+        }
         ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         let t = texts();
-        let found = self.landing_at(pos);
         let line = match &found {
             Some(at) => {
                 highlight(ctx, at.rect);
                 self.unfold_on_hover(ctx, &at.node);
-                // Брошенная на деталь ложится рядом с ней, в её папку.
-                let folder = match &at.node {
-                    Node::Part(p) => self.folder_of(p),
-                    Node::Folder(f) => f.clone(),
-                    Node::File(f) => tree_folders::parent(f).to_string(),
-                };
-                if folder == self.folder_of(&dragged.0) {
+                if at.node == Node::Folder(self.folder_of(&dragged.0)) {
                     t.same_place.to_string()
                 } else {
-                    words(Carry::Move, &Node::Folder(folder))
+                    words(Carry::Move, &at.node)
                 }
             }
             None => t.drop_nowhere.to_string(),

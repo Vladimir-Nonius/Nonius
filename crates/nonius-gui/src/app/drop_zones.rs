@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
+use super::drag_hint::Carry;
 use super::file_menu::is_model;
 use super::jobs::Done;
 use super::node::Node;
@@ -27,16 +28,23 @@ impl App {
         Some(egui::pos2(x / ppp, y / ppp) - inner.min.to_vec2())
     }
 
-    /// Куда ляжет брошенное под курсором.
+    /// Куда ляжет файл из Проводника, брошенный под курсором.
     fn landing_under(&self, ctx: &egui::Context) -> Option<Shown> {
-        self.landing_at(self.pointer_in_window(ctx)?)
+        self.landing_at(self.pointer_in_window(ctx)?, Carry::Copy)
     }
 
-    /// Куда ляжет брошенное в эту точку: папка или деталь и место, которое
-    /// подсветить. Брошенное на файл ложится в его папку.
-    pub(super) fn landing_at(&self, pos: egui::Pos2) -> Option<Shown> {
+    /// Куда ляжет брошенное в эту точку и что подсветить. Брошенное на файл
+    /// ложится в его папку; деталь, брошенная на деталь, — тоже в папку,
+    /// а файл из Проводника — в саму деталь. Подсвечивается всё место, куда
+    /// ляжет: папка целиком, а не строка, над которой курсор.
+    pub(super) fn landing_at(&self, pos: egui::Pos2, carry: Carry) -> Option<Shown> {
         let found = shown::under(&self.tab.on_screen, pos)?;
-        Some(Shown::new(found.rect, found.node.landing()))
+        let node = match (&found.node, carry) {
+            (Node::Part(p), Carry::Move) => Node::Folder(self.folder_of(p)),
+            (node, _) => node.landing(),
+        };
+        let rect = shown::whole(&self.tab.on_screen, &node, pos).unwrap_or(found.rect);
+        Some(Shown::new(rect, node))
     }
 
     /// Папка, где лежит деталь.

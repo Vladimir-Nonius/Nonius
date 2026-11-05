@@ -1725,6 +1725,49 @@ fn file_dropped_anywhere_in_a_structure_folder_lands_there() {
 }
 
 #[test]
+fn part_dropped_anywhere_in_a_folder_moves_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let moved = project.moved.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+
+    // Карточку — не на заголовок, а на «Пусто…» внутри блока папки.
+    let card = h.get_by_label("корпус").rect();
+    let inside = h.get_all_by_label_contains("Пусто").next().unwrap().rect();
+    drag(&mut h, card, inside);
+    wait_for(&mut h, "«корпус» перенесена в «Стена»");
+
+    // В дереве — на деталь, что уже лежит в папке: в ту же папку.
+    h.get_by_label("Деталь (3D)").click();
+    h.run_steps(3);
+    let part = h.get_by_label_contains("кронштейн").rect();
+    // Строка дерева, а не надпись «… перенесена» снизу.
+    let there = h
+        .get_all_by_label_contains("корпус")
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("корпус"))
+        })
+        .unwrap()
+        .rect();
+    drag(&mut h, part, there);
+    wait_for(&mut h, "«кронштейн» перенесена в «Стена»");
+    assert_eq!(
+        *moved.lock().unwrap(),
+        [
+            ("корпус".to_string(), "Стена".to_string()),
+            ("кронштейн".to_string(), "Стена".to_string())
+        ]
+    );
+}
+
+#[test]
 fn delete_key_asks_about_the_chosen_part() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();

@@ -1,12 +1,12 @@
 //! Карточки «Структуры»: полоска вида, имя, версия или «заготовка»; обычные
-//! файлы папки строками; подпись цветов. Карточка и заголовок папки — места,
-//! куда бросают деталь из дерева или файл из Проводника.
+//! файлы папки строками; подпись цветов. Карточка отмечает своё место:
+//! на неё бросают файл из Проводника, а деталь — в её папку.
 
 use eframe::egui::{self, Color32, RichText};
 
 use super::super::node::Node;
 use super::super::shown::Shown;
-use super::super::tree_folders::{self, Dragged};
+use super::super::tree_folders;
 use super::super::App;
 use super::super::{open_menu, tree};
 use super::{Acts, View};
@@ -145,21 +145,7 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
         });
     let rect = inner.response.rect;
     acts.shown
-        .push(Shown::new(rect, Node::Part(p.name.clone())));
+        .push(Shown::on(ui, rect, Node::Part(p.name.clone())));
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
     ui.painter().rect_filled(stripe, 0.0, kind.color(ui));
-    // Брошена на карточку — в ту же папку, где лежит эта деталь.
-    drop_here(ui, &inner.response, &p.folder, acts);
-}
-
-/// Сюда можно бросить деталь: в эту папку.
-pub(super) fn drop_here(ui: &egui::Ui, r: &egui::Response, folder: &str, acts: &mut Acts) {
-    if r.dnd_hover_payload::<Dragged>().is_some() {
-        let stroke = ui.visuals().selection.stroke;
-        ui.painter()
-            .rect_stroke(r.rect, 3.0, stroke, egui::StrokeKind::Inside);
-    }
-    if let Some(d) = r.dnd_release_payload::<Dragged>() {
-        acts.moved = Some((d.0.clone(), folder.to_string()));
-    }
 }
