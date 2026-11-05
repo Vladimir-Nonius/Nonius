@@ -53,8 +53,8 @@ impl App {
         p.map(|p| p.folder.clone()).unwrap_or_default()
     }
 
-    /// Файлы бросили: на папку — копия в неё, на деталь — модель новой
-    /// версией, остальное в `docs/`. Мимо дерева — `None`, решает обычный
+    /// Файлы бросили: на папку — модели новыми деталями в неё, остальное
+    /// копией туда же; на деталь — модель новой версией, остальное в `docs/`. Мимо дерева — `None`, решает обычный
     /// путь (модели добавить, папку проекта открыть).
     pub(super) fn drop_on_zone(&mut self, ctx: &egui::Context, paths: &[PathBuf]) -> bool {
         if self.tab.project.is_none() || paths.iter().any(|p| p.is_dir()) {
@@ -65,11 +65,17 @@ impl App {
         let Some(node) = aim.or_else(|| self.landing_under(ctx).map(|s| s.node)) else {
             return false;
         };
+        let (models, other): (Vec<PathBuf>, Vec<PathBuf>) =
+            paths.iter().cloned().partition(|p| is_model(p));
         match node {
-            Node::Folder(folder) => self.copy_into_folder(ctx, folder, paths.to_vec()),
+            // Модель на папке — деталь в ней, остальное — обычный файл.
+            Node::Folder(folder) => {
+                self.start_adding_in(models, folder.clone());
+                if !other.is_empty() {
+                    self.copy_into_folder(ctx, folder, other);
+                }
+            }
             Node::Part(part) => {
-                let (models, other): (Vec<PathBuf>, Vec<PathBuf>) =
-                    paths.iter().cloned().partition(|p| is_model(p));
                 self.start_adding(models, Some(part.clone()));
                 self.add_files_from(ctx, part, other);
             }

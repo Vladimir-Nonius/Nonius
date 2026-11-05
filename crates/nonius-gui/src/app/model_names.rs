@@ -72,6 +72,35 @@ pub fn next_version(part: &str, parts: &[PartEntry]) -> String {
     format!("v{}", latest.unwrap_or(0) + 1)
 }
 
+/// «в папке «Стена»» или «в корне проекта».
+pub fn where_words(folder: &str) -> String {
+    let t = texts();
+    if folder.is_empty() {
+        t.in_root.to_string()
+    } else {
+        format!("{} «{folder}»", t.in_the_folder)
+    }
+}
+
+/// Модель бросили на папку `folder`, а ляжет она новой версией детали из
+/// другой папки: сказать где, чтобы не перепутать.
+pub fn elsewhere(target: &Place, folder: Option<&str>, parts: &[PartEntry]) -> Option<String> {
+    let (Place::Existing(name), Some(folder)) = (target, folder) else {
+        return None;
+    };
+    let part = parts.iter().find(|p| p.name == *name)?;
+    if part.folder == folder {
+        return None;
+    }
+    let t = texts();
+    Some(format!(
+        "{} {}: {}",
+        t.same_name_elsewhere,
+        where_words(&part.folder),
+        t.becomes_its_version
+    ))
+}
+
 /// Файл SolidWorks в деталь, где уже есть STEP: 3D останется прежним.
 pub fn step_stays(file: &Path, target: &Place, parts: &[PartEntry]) -> bool {
     let solidworks = file
@@ -128,6 +157,20 @@ mod tests {
         assert_eq!(found("Test"), Some("Test V1"));
         assert_eq!(next_version("Test V1", &parts), "v2");
         assert_eq!(next_version("втулка 20", &parts), "v1");
+    }
+
+    #[test]
+    fn part_in_another_folder_is_named() {
+        let mut wall = part("RAIL-01", Some("v2"));
+        wall.folder = "Стена".into();
+        let parts = [wall];
+        let place = Place::Existing("RAIL-01".into());
+        let said = elsewhere(&place, Some("notes"), &parts).unwrap();
+        assert!(said.contains("в папке «Стена»"), "{said}");
+        assert_eq!(elsewhere(&place, Some("Стена"), &parts), None);
+        assert_eq!(elsewhere(&place, None, &parts), None);
+        let new = Place::New("RAIL-02".into());
+        assert_eq!(elsewhere(&new, Some("notes"), &parts), None);
     }
 
     #[test]

@@ -1748,6 +1748,54 @@ fn file_dropped_anywhere_in_a_structure_folder_lands_there() {
 }
 
 #[test]
+fn model_dropped_on_a_folder_becomes_a_part_there() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.folders.lock().unwrap().push("Стена".into());
+    let (moved, loose, imported) = (
+        project.moved.clone(),
+        project.loose.clone(),
+        project.imported.clone(),
+    );
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let shaft = dir.path().join("вал.STEP");
+    let pdf = dir.path().join("лист.pdf");
+    std::fs::write(&shaft, "x").unwrap();
+    std::fs::write(&pdf, "чертёж").unwrap();
+
+    // Модель — новой деталью прямо в папку, чертёж — обычным файлом рядом.
+    let folder = h.get_by_label_contains("Стена").rect().center();
+    drop_at(&mut h, folder, &[shaft.clone(), pdf]);
+    wait_for(&mut h, "Будет новая деталь «вал» в папке «Стена»");
+    h.run();
+    h.get_by_label("Добавить").click();
+    wait_for(&mut h, "Сохранена модель «вал» v1");
+    assert_eq!(imported.lock().unwrap()[0].1, "вал");
+    assert!(moved
+        .lock()
+        .unwrap()
+        .contains(&("вал".to_string(), "Стена".to_string())));
+    assert_eq!(*loose.lock().unwrap(), ["Стена/лист.pdf"]);
+
+    // Такое имя уже есть в другом месте: окошко говорит где.
+    let bracket = dir.path().join("кронштейн.step");
+    std::fs::write(&bracket, "x").unwrap();
+    let folder = h
+        .get_all_by_label_contains("Стена")
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.contains("🗀")))
+        .unwrap()
+        .rect()
+        .center();
+    drop_at(&mut h, folder, std::slice::from_ref(&bracket));
+    wait_for(&mut h, "Будет версия v3 «кронштейн»");
+    assert!(h
+        .query_by_label_contains("Деталь с таким именем уже лежит в корне проекта")
+        .is_some());
+}
+
+#[test]
 fn part_dropped_anywhere_in_a_folder_moves_there() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
