@@ -4,7 +4,7 @@
 
 use eframe::egui::{self, RichText};
 
-use super::{looks_like_dir, App};
+use super::{choice, looks_like_dir, App};
 use crate::texts::texts;
 
 /// Нарисовать начальный экран.
@@ -72,15 +72,19 @@ fn new_here(app: &mut App, ctx: &egui::Context) {
         ui.label(RichText::new(dir.display().to_string()).weak());
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button(t.create).clicked() {
+            let create = ui.button(t.create);
+            let other = ui.button(t.other_folder);
+            let cancel = ui.button(t.cancel);
+            if create.clicked() {
                 answer = Some(Some(dir.clone()));
             }
-            if ui.button(t.other_folder).clicked() {
+            if other.clicked() {
                 answer = app.chooser.folder(&app.path_input).map(Some);
             }
-            if ui.button(t.cancel).clicked() {
+            if cancel.clicked() {
                 answer = Some(None);
             }
+            choice::keep_focus(&[create, other, cancel], 0);
         });
     });
     match answer {

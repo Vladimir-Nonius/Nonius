@@ -6,6 +6,7 @@
 
 use eframe::egui::{self, RichText};
 
+use super::choice;
 use super::jobs::Done;
 use super::project_tab::ProjectTab;
 use super::App;
@@ -95,12 +96,15 @@ pub fn ask(app: &mut App, ctx: &egui::Context) {
         ui.label(t.old_layout_text);
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if ui.button(t.not_now).clicked() {
+            let later = ui.button(t.not_now);
+            let upgrade = ui.button(t.upgrade);
+            if later.clicked() {
                 answer = Some(false);
             }
-            if ui.button(t.upgrade).clicked() {
+            if upgrade.clicked() {
                 answer = Some(true);
             }
+            choice::keep_focus(&[later, upgrade], 1);
         });
     });
     if let Some(yes) = answer {

@@ -8,6 +8,7 @@ mod actions;
 mod add_model;
 mod batch;
 mod bottom;
+mod choice;
 mod choose;
 mod command;
 mod draft;
@@ -118,6 +119,8 @@ pub struct App {
     closing: Option<draft::Closing>,
     /// Пользователь согласился потерять черновики: окно закрывается.
     may_close: bool,
+    /// Стрелки в открытом меню: на сколько пунктов сдвинуть фокус.
+    menu_step: i32,
 }
 
 impl App {
@@ -156,6 +159,7 @@ impl App {
             draft_wanted: false,
             closing: None,
             may_close: false,
+            menu_step: 0,
             settings,
         };
         app.restore_tabs(ctx);
@@ -169,7 +173,20 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.menu_step += choice::take_menu_arrows(ctx, raw_input);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.draw(ctx);
+        // Меню уже нарисованы: их пункты известны.
+        choice::step_in_menu(ctx, std::mem::take(&mut self.menu_step));
+    }
+}
+
+impl App {
+    /// Кадр окна: результаты работ, панели, окошки.
+    fn draw(&mut self, ctx: &egui::Context) {
         self.take_results(ctx);
         self.take_dropped(ctx);
         self.notice_focus(ctx);

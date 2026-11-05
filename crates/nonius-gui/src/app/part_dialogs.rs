@@ -3,6 +3,7 @@
 
 use eframe::egui::{self, RichText};
 
+use super::choice;
 use super::node::Node;
 use super::tree_folders::last;
 use super::App;
@@ -104,15 +105,23 @@ fn question(
         }
         ui.add_space(6.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mut buttons = Vec::new();
             if let Some(label) = yes {
-                let button = egui::Button::new(label);
-                if ui.add_enabled(!base.busy, button).clicked() {
+                let button = ui.add_enabled(!base.busy, egui::Button::new(label));
+                if button.clicked() {
                     pressed = Some(Pressed::Yes);
                 }
+                buttons.push(button);
             }
             let no = if yes.is_some() { t.cancel } else { t.close };
-            if ui.add_enabled(!base.busy, egui::Button::new(no)).clicked() {
+            let button = ui.add_enabled(!base.busy, egui::Button::new(no));
+            if button.clicked() {
                 pressed = Some(Pressed::No);
+            }
+            buttons.push(button);
+            // Пока печатают имя, фокус у поля: стрелки двигают курсор.
+            if !ui.ctx().wants_keyboard_input() {
+                choice::keep_focus(&buttons, 0);
             }
         });
     });

@@ -2044,6 +2044,80 @@ fn delete_two_with_one_question() {
 }
 
 #[test]
+fn arrows_choose_a_button_in_the_question() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+    let body = row(&h, "корпус");
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+    h.run();
+    // В фокусе «Удалить»; стрелка влево — «Отмена», Enter её нажимает.
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Удалить «корпус»?").is_none());
+    assert!(deleted.lock().unwrap().is_empty());
+    // Снова: сразу Enter — удалить.
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+    h.run();
+    h.key_press(egui::Key::Enter);
+    wait_for(&mut h, "«корпус» удалена");
+    assert_eq!(*deleted.lock().unwrap(), ["корпус"]);
+}
+
+/// Клавиша в открытом меню: стрелки окно забирает раньше egui, а
+/// тестовое окно этот крючок само не зовёт.
+fn menu_key(h: &mut Harness<'_, App>, key: egui::Key) {
+    h.input_mut().events.push(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    let ctx = h.ctx.clone();
+    let mut raw = std::mem::take(h.input_mut());
+    eframe::App::raw_input_hook(h.state_mut(), &ctx, &mut raw);
+    *h.input_mut() = raw;
+    h.run_steps(2);
+}
+
+/// В фокусе ли пункт с такой подписью.
+fn focused(h: &Harness<'_, App>, label: &str) -> bool {
+    let id = h
+        .ctx
+        .memory(|m| m.focused())
+        .map(|id| egui::accesskit::NodeId(id.value()));
+    let node = h.get_by_label(label).accesskit_node().id();
+    id == Some(node)
+}
+
+#[test]
+fn arrows_walk_the_right_click_menu() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click_secondary();
+    wait_for(&mut h, "Переименовать…");
+    h.run();
+    // Вниз — первый пункт, вверх с первого — последний, «Удалить…».
+    menu_key(&mut h, egui::Key::ArrowDown);
+    assert!(focused(&h, "Открыть"));
+    menu_key(&mut h, egui::Key::ArrowUp);
+    assert!(focused(&h, "Удалить…"));
+    h.key_press(egui::Key::Enter);
+    wait_for(&mut h, "Удалить «кронштейн»?");
+}
+
+#[test]
 fn queue_stops_after_the_current_one() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
