@@ -6,9 +6,10 @@
 
 use eframe::egui::{self, RichText};
 
+use super::marquee;
 use super::node::Node;
 use super::open_menu::Ask;
-use super::shown::Shown;
+use super::shown::{self, Shown};
 use super::tree_folders;
 use super::App;
 use crate::source::PartEntry;
@@ -43,7 +44,12 @@ pub fn switch(app: &mut App, ui: &mut egui::Ui) {
 /// Что сделали со структурой за кадр.
 #[derive(Default)]
 struct Acts {
-    select: Option<String>,
+    /// Щёлкнули по предмету (`true` — правой кнопкой).
+    picked: Option<(Node, bool)>,
+    /// Щёлкнули по пустому месту или корню: снять выделение.
+    cleared: bool,
+    /// Рамка мышью по пустому месту.
+    sweep: marquee::Sweep,
     open: Option<String>,
     add_model: Option<String>,
     shown: Vec<Shown>,
@@ -70,7 +76,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical()
         .id_salt("structure")
         .auto_shrink(false)
+        // Тянуть по пустому месту — рамка, а не прокрутка.
+        .scroll_source(egui::scroll_area::ScrollSource {
+            drag: false,
+            ..Default::default()
+        })
         .show(ui, |ui| {
+            // Пустое место — раньше блоков: блоки и карточки лягут поверх
+            // и заберут мышь себе.
+            let bg = marquee::background(ui, "structure-bg");
             // Справа место под полосу прокрутки: иначе рамки уходят под неё.
             ui.set_max_width(ui.available_width() - 14.0);
             legend(ui);
@@ -82,8 +96,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             for top in map.folders.iter().filter(|f| !f.contains('/')) {
                 block(app, ui, &map, top, &mut acts);
             }
+            acts.sweep = marquee::track(ui, &bg);
         });
+    let order = shown::order(&acts.shown);
+    app.sweep(ui.ctx(), &acts.sweep, &acts.shown, false);
+    acts.cleared |= acts.sweep.clicked;
     app.tab.on_screen.append(&mut acts.shown);
+    if acts.cleared {
+        app.tab.selection.clear();
+        app.tab.keys_to_files = false;
+    }
+    if let Some((node, secondary)) = acts.picked.take() {
+        app.pick(ui.ctx(), node, secondary, &order, false);
+    }
     app.answer_menu(ui.ctx(), acts.asked.take());
     if let Some(path) = acts.open_file {
         app.open_loose(ui.ctx(), path, false);
@@ -92,7 +117,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         let models = app.chooser.models();
         app.start_adding(models, Some(name));
     }
-    if let Some(name) = acts.open.or(acts.select) {
+    if let Some(name) = acts.open {
         if app.tab.part.as_ref() != Some(&name) {
             app.select_part(ui.ctx(), &name);
         }
@@ -127,7 +152,11 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
                 format!("🗀 {}", tree_folders::last(folder))
             };
             let count = count(&inside, !subs.is_empty() || !files.is_empty());
-            header(ui, &title, &count, folder, acts);
+            let chosen = app
+                .tab
+                .selection
+                .contains(&Node::Folder(folder.to_string()));
+            header(ui, &title, &count, folder, chosen, acts);
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(10, 8))
                 .show(ui, |ui| {
@@ -151,9 +180,21 @@ fn block(app: &mut App, ui: &mut egui::Ui, map: &Map, folder: &str, acts: &mut A
     ui.add_space(10.0);
 }
 
-/// Полоса заголовка: имя папки и счётчик.
-fn header(ui: &mut egui::Ui, title: &str, count: &str, folder: &str, acts: &mut Acts) {
-    let fill = ui.visuals().faint_bg_color;
+/// Полоса заголовка: имя папки и счётчик. Щелчок выделяет папку, у корня —
+/// снимает выделение.
+fn header(
+    ui: &mut egui::Ui,
+    title: &str,
+    count: &str,
+    folder: &str,
+    chosen: bool,
+    acts: &mut Acts,
+) {
+    let fill = if chosen {
+        ui.visuals().selection.bg_fill
+    } else {
+        ui.visuals().faint_bg_color
+    };
     let r = egui::Frame::NONE
         .fill(fill)
         .corner_radius(egui::CornerRadius {
@@ -172,7 +213,13 @@ fn header(ui: &mut egui::Ui, title: &str, count: &str, folder: &str, acts: &mut 
                 });
             });
         })
-        .response;
+        .response
+        .interact(egui::Sense::click());
+    if r.clicked() && folder.is_empty() {
+        acts.cleared = true;
+    } else if r.clicked() {
+        acts.picked = Some((Node::Folder(folder.to_string()), false));
+    }
     let line = ui.visuals().widgets.noninteractive.bg_stroke;
     ui.painter().hline(r.rect.x_range(), r.rect.bottom(), line);
     acts.shown

@@ -1866,3 +1866,220 @@ fn structure_card_has_the_part_menu() {
     h.get_by_label("Удалить…").click();
     wait_for(&mut h, "Удалить «корпус»?");
 }
+
+/// Щелчок с Ctrl или Shift. egui берёт их из общего состояния клавиш, а не
+/// из события щелчка: зажать на время щелчка и отпустить.
+fn click_with(h: &mut Harness<'_, App>, at: egui::Rect, modifiers: egui::Modifiers) {
+    let pos = at.center();
+    h.input_mut().modifiers = modifiers;
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        });
+    }
+    h.run_steps(2);
+    h.input_mut().modifiers = egui::Modifiers::default();
+    h.run_steps(2);
+}
+
+/// Строка дерева, что начинается с `name`. Она говорит, выделена ли;
+/// имя на карточке «Структуры» — нет.
+fn row(h: &Harness<'_, App>, name: &str) -> egui::Rect {
+    h.query_all_by_label_contains(name)
+        .find(|n| {
+            let node = n.accesskit_node();
+            node.label().is_some_and(|l| l.starts_with(name)) && node.toggled().is_some()
+        })
+        .unwrap_or_else(|| panic!("нет строки «{name}»"))
+        .rect()
+}
+
+/// Подсвечена ли строка дерева, что начинается с `name`.
+fn chosen(h: &Harness<'_, App>, name: &str) -> bool {
+    h.query_all_by_label_contains(name).any(|n| {
+        let node = n.accesskit_node();
+        let on = node.toggled() == Some(egui::accesskit::Toggled::True);
+        node.label().is_some_and(|l| l.starts_with(name)) && on
+    })
+}
+
+#[test]
+fn ctrl_click_adds_without_opening() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Добавлено 1");
+    let count = compared.lock().unwrap().len();
+
+    let body = row(&h, "корпус");
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    assert!(chosen(&h, "кронштейн") && chosen(&h, "корпус"));
+    // Открытым остался кронштейн: сравнение то же.
+    h.run_steps(10);
+    assert_eq!(compared.lock().unwrap().len(), count);
+    assert!(h.query_by_label_contains("Добавлено 1").is_some());
+
+    // Ctrl ещё раз — снять.
+    click_with(&mut h, body, egui::Modifiers::COMMAND);
+    assert!(chosen(&h, "кронштейн") && !chosen(&h, "корпус"));
+}
+
+#[test]
+fn shift_in_structure_selects_a_run_seen_in_the_tree() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    project.created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+
+    h.get_by_label("кронштейн").click();
+    h.run_steps(3);
+    // Имя «щит» и у строки дерева, и у карточки: карточка — та, что без
+    // выделения.
+    let card = |h: &Harness<'_, App>| {
+        h.get_all_by_label("щит")
+            .find(|n| n.accesskit_node().toggled().is_none())
+            .unwrap()
+            .rect()
+    };
+    let last = card(&h);
+    click_with(&mut h, last, egui::Modifiers::SHIFT);
+    for name in ["кронштейн", "корпус", "щит"] {
+        assert!(chosen(&h, name), "в дереве выделен «{name}»");
+    }
+
+    // Пустое место «Структуры» снимает выделение.
+    let below = card(&h).translate(egui::vec2(0.0, 300.0));
+    click_with(&mut h, below, egui::Modifiers::default());
+    assert!(!chosen(&h, "корпус") && !chosen(&h, "кронштейн"));
+}
+
+#[test]
+fn vanished_part_leaves_the_selection() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let created = project.created.clone();
+    created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    h.get_by_label_contains("корпус").click();
+    h.run_steps(3);
+    let shield = row(&h, "щит");
+    click_with(&mut h, shield, egui::Modifiers::COMMAND);
+    assert!(chosen(&h, "корпус") && chosen(&h, "щит"));
+
+    // «Щит» удалили снаружи; окно перечитывает проект по возвращении.
+    created.lock().unwrap().clear();
+    h.input_mut().focused = false;
+    h.step();
+    h.input_mut().focused = true;
+    for _ in 0..200 {
+        h.step();
+        if h.query_all_by_label_contains("щит").next().is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(h.query_all_by_label_contains("щит").next().is_none());
+    // Выделен остался один корпус: Delete — про него.
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить «корпус»?");
+}
+
+#[test]
+fn delete_with_two_chosen_only_says_so() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window_on(dir.path(), fake(dir.path(), "Стенд"));
+    wait_for(&mut h, "корпус");
+    h.get_by_label_contains("корпус").click();
+    h.run_steps(3);
+    let other = row(&h, "кронштейн");
+    click_with(&mut h, other, egui::Modifiers::COMMAND);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить несколько сразу пока нельзя");
+    assert!(h.query_all_by_label_contains("Удалить «").next().is_none());
+}
+
+#[test]
+fn clicking_the_open_part_keeps_its_comparison() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "кронштейн");
+    h.get_by_label_contains("кронштейн").click();
+    wait_for(&mut h, "Карта v1");
+    h.get_by_label("Карта v1").click();
+    for _ in 0..100 {
+        h.step();
+        if compared.lock().unwrap().last() == Some(&(Pick::Version(1), Pick::Version(1))) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let count = compared.lock().unwrap().len();
+
+    // Пустое место под деревом снимает выделение, открытая остаётся.
+    let below = row(&h, "корпус").translate(egui::vec2(0.0, 60.0));
+    click_with(&mut h, below, egui::Modifiers::default());
+    assert!(!chosen(&h, "кронштейн"));
+    // Щелчок по ней снова выделяет, но не открывает заново.
+    let body = row(&h, "кронштейн");
+    click_with(&mut h, body, egui::Modifiers::default());
+    assert!(chosen(&h, "кронштейн"));
+    for _ in 0..30 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(compared.lock().unwrap().len(), count);
+    assert_eq!(
+        compared.lock().unwrap().last(),
+        Some(&(Pick::Version(1), Pick::Version(1)))
+    );
+}
+
+#[test]
+fn mouse_frame_selects_without_keys() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let compared = project.compared.clone();
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "корпус");
+
+    // Дерево: справа от строк пусто — рамка оттуда задевает строки по высоте.
+    let right = |r: egui::Rect| {
+        egui::Rect::from_center_size(egui::pos2(200.0, r.center().y), egui::vec2(2.0, 2.0))
+    };
+    let from = right(row(&h, "кронштейн"));
+    let to = right(row(&h, "корпус"));
+    drag(&mut h, from, to);
+    assert!(chosen(&h, "кронштейн") && chosen(&h, "корпус"));
+    // Рамка только выделяет: в 3D ничего не открылось.
+    assert!(compared.lock().unwrap().is_empty());
+
+    // «Структура»: рамка с пустого места под карточками накрывает одну.
+    h.get_by_label("Структура").click();
+    wait_for(&mut h, "Корень проекта");
+    let card = h.get_by_label("кронштейн").rect();
+    let below = egui::Rect::from_center_size(
+        egui::pos2(card.left() + 4.0, card.bottom() + 150.0),
+        egui::vec2(2.0, 2.0),
+    );
+    drag(&mut h, below, card);
+    assert!(chosen(&h, "кронштейн") && !chosen(&h, "корпус"));
+}

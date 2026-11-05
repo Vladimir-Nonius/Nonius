@@ -4,8 +4,10 @@
 use eframe::egui::{self, Color32, RichText};
 
 use super::jobs::Done;
+use super::marquee;
 use super::node::Node;
 use super::open_menu::{self, Ask, Target};
+use super::selection;
 use super::shown::Shown;
 use super::tree_folders;
 use super::App;
@@ -19,13 +21,12 @@ const META_FILE: &str = nonius_core::project::META_FILE;
 /// пока дерево рисуется, окно занято им.
 #[derive(Default)]
 pub(super) struct Acts {
-    pub clicked: Option<String>,
+    /// Щёлкнули по предмету (`true` — правой кнопкой).
+    pub picked: Option<(Node, bool)>,
     pub unfolded: Option<String>,
     pub asked: Option<Ask>,
-    /// Папку раскрыли или свернули.
-    pub toggled: Option<String>,
-    /// Новая папка для новых деталей.
-    pub place: Option<String>,
+    /// «Свернуть всё».
+    pub fold_all: bool,
     /// «Новая деталь здесь…» в этой папке.
     pub new_part: Option<String>,
     /// «Новая папка…» внутри этой.
@@ -34,8 +35,8 @@ pub(super) struct Acts {
     pub shown: Vec<Shown>,
     /// Открыть обычный файл папки (`true` — показать в папке).
     pub open_file: Option<(String, bool)>,
-    /// Выделили обычный файл папки.
-    pub chosen_file: Option<String>,
+    /// Рамка мышью по пустому месту.
+    pub sweep: marquee::Sweep,
 }
 
 /// Нарисовать дерево.
@@ -80,7 +81,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             egui::ScrollArea::vertical()
                 .id_salt("tree")
                 .auto_shrink(false)
+                // Тянуть по пустому месту — рамка, а не прокрутка.
+                .scroll_source(egui::scroll_area::ScrollSource {
+                    drag: false,
+                    ..Default::default()
+                })
                 .show(ui, |ui| {
+                    // Пустое место — раньше строк: строки лягут поверх.
+                    let bg = marquee::background(ui, "tree-bg");
                     let tree = tree_folders::Tree {
                         folders: &folders,
                         parts: &found,
@@ -94,12 +102,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     let all = ui.min_rect();
                     acts.shown
                         .push(Shown::on(ui, all, Node::Folder(String::new())));
+                    acts.sweep = marquee::track(ui, &bg);
                 });
         });
     tree_folders::apply(app, ctx, &mut acts);
-    if let Some(name) = acts.clicked {
-        app.select_part(ctx, &name);
-    }
     if let Some(name) = acts.unfolded {
         app.list_versions(ctx, &name);
     }
@@ -108,27 +114,30 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
 /// Строка детали со стрелкой, а под раскрытой — её история.
 pub(super) fn part_line(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, acts: &mut Acts) {
-    let selected = app.tab.part.as_ref() == Some(&p.name);
+    let node = Node::Part(p.name.clone());
+    // Открытая в 3D и выделенная — не одно и то же: Ctrl выделяет, не
+    // открывая.
+    let opened = app.tab.part.as_ref() == Some(&p.name);
+    let chosen = app.tab.selection.contains(&node);
     let open = app.tab.expanded.contains(&p.name);
     ui.horizontal(|ui| {
         let arrow = if open { "▾" } else { "▸" };
         let toggle = ui.add(egui::Button::new(arrow).frame(false)).clicked();
-        let r = tree_folders::drag_part(part_row(ui, p, selected), p);
-        acts.shown
-            .push(Shown::on(ui, r.rect, Node::Part(p.name.clone())));
+        let r = tree_folders::drag_part(part_row(ui, p, chosen), p);
+        if opened && !chosen {
+            selection::opened_frame(ui, r.rect);
+        }
+        acts.shown.push(Shown::on(ui, r.rect, node.clone()));
         if toggle && open {
             app.tab.expanded.remove(&p.name);
         } else if toggle {
             app.tab.expanded.insert(p.name.clone());
-            if !selected {
+            if !opened {
                 acts.unfolded = Some(p.name.clone());
             }
-        } else if r.clicked() && selected {
-            app.tab.expanded.insert(p.name.clone());
-        } else if r.clicked() || (r.secondary_clicked() && !selected) {
+        } else if r.clicked() || r.secondary_clicked() {
             // Правый щелчок тоже выделяет: видно, к чему меню.
-            acts.clicked = Some(p.name.clone());
-            acts.place = Some(p.folder.clone());
+            acts.picked = Some((node, r.secondary_clicked()));
         }
         open_menu::attach(&r, &app.tab.programs, || target(p), &mut acts.asked);
     });
@@ -159,6 +168,14 @@ impl App {
         let names: std::collections::BTreeSet<String> = names.collect();
         self.tab.expanded.retain(|n| names.contains(n));
         self.tab.listed.retain(|n, _| names.contains(n));
+        // Что исчезло с диска, то и не выделено.
+        let folders = tree_folders::visible(&self.tab.folders, &self.tab.parts, false);
+        let loose = &self.tab.loose;
+        self.tab.selection.retain(|n| match n {
+            Node::Part(name) => names.contains(name),
+            Node::Folder(path) => folders.contains(path),
+            Node::File(path) => loose.contains(path),
+        });
         let stale: Vec<String> = self
             .tab
             .expanded
@@ -191,11 +208,12 @@ fn part_row(ui: &mut egui::Ui, p: &PartEntry, selected: bool) -> egui::Response 
     if p.assembly {
         text = format!("{text}  ({})", t.assembly);
     }
-    let mut rich = RichText::new(text);
+    let mut rich = RichText::new(&text);
     if p.dirty {
         rich = rich.color(Color32::from_rgb(200, 120, 0));
     }
     let r = ui.selectable_label(selected, rich);
+    selection::tell(&r, selected, &text);
     if p.dirty {
         r.on_hover_text(t.unsaved_changes)
     } else {

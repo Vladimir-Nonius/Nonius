@@ -169,6 +169,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     // Delete по выбранному файлу — как «Убрать файл…» в меню.
     let ctx = ui.ctx().clone();
     let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !ctx.wants_keyboard_input();
+    // Последним щёлкнули в дереве — Delete про выделенное там.
+    let delete = delete && app.tab.keys_to_files;
     if let (true, None, None, Some(path)) = (delete, &asked, &app.tab.dialog, app.tab.file.clone())
     {
         let exists = files.iter().any(|f| f.path == path && f.after.is_some());
@@ -177,7 +179,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         }
     }
     match ask {
-        Some(Ask::Select(path)) => app.select_file(&ctx, path),
+        Some(Ask::Select(path)) => {
+            app.select_file(&ctx, path);
+            app.tab.keys_to_files = true;
+        }
         Some(Ask::Refresh) => app.reread(&ctx),
         Some(Ask::Add) => app.add_files(&ctx, part.to_string()),
         None => {}

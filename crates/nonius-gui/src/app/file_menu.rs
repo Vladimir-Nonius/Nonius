@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use eframe::egui;
+use eframe::egui::{self, RichText};
 use nonius_core::project::PROJECT_FILE;
 
 use super::new_part::NewPart;
@@ -89,6 +89,10 @@ fn part_menu(app: &mut App, ui: &mut egui::Ui) {
         let Some(part) = app.tab.part.clone() else {
             return;
         };
+        // Меню — про открытую в 3D, а выделено может быть другое.
+        let opened = format!("{} «{part}»", t.opened_part);
+        ui.label(RichText::new(opened).weak());
+        ui.separator();
         if ui
             .add_enabled(app.part_dirty(), egui::Button::new(t.save_version))
             .clicked()

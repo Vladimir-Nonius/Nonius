@@ -8,11 +8,13 @@ use std::collections::BTreeSet;
 
 use eframe::egui::{self, RichText};
 
+use super::model_names::where_words;
 use super::new_folder::NewFolder;
 use super::new_part::NewPart;
 use super::node::Node;
 use super::open_menu::{self, Target};
-use super::shown::Shown;
+use super::selection;
+use super::shown::{self, Shown};
 use super::tree::{part_line, Acts};
 use super::App;
 use crate::source::{PartEntry, Pick};
@@ -37,11 +39,8 @@ pub(super) fn buttons(app: &App, ui: &mut egui::Ui, acts: &mut Acts) {
     ui.horizontal(|ui| {
         let place = &app.tab.place;
         // Короткие надписи: панель узкая, полное название — в подсказке.
-        if ui
-            .small_button(t.plus_part)
-            .on_hover_text(t.new_part)
-            .clicked()
-        {
+        let tip = format!("{} {}", t.new_part_tip, where_words(place));
+        if ui.small_button(t.plus_part).on_hover_text(tip).clicked() {
             acts.new_part = Some(place.clone());
         }
         if ui
@@ -52,13 +51,10 @@ pub(super) fn buttons(app: &App, ui: &mut egui::Ui, acts: &mut Acts) {
             acts.new_folder = Some(place.clone());
         }
         if ui.small_button("⏶").on_hover_text(t.fold_all).clicked() {
-            acts.toggled = Some(FOLD_ALL.to_string());
+            acts.fold_all = true;
         }
     });
 }
-
-/// Знак «свернуть всё» в `Acts::toggled`: у папки такого пути не бывает.
-const FOLD_ALL: &str = "/";
 
 /// Папки, которые видны: все, а при поиске — только те, где что-то нашлось.
 /// Папки деталей добавляются, даже если их нет в списке (старый проект).
@@ -97,7 +93,15 @@ pub(super) fn dir(app: &mut App, ui: &mut egui::Ui, tree: &Tree, dir: &str, acts
     subs.sort_by_key(|f| last(f).to_lowercase());
     for sub in subs {
         let open = tree.searching || !app.tab.folded.contains(sub);
+        // Папка в списке раньше содержимого: Shift считает по этому
+        // порядку. Место узнаем, когда содержимое нарисуется.
+        let at = acts.shown.len();
+        let node = Node::Folder(sub.clone());
+        acts.shown
+            .push(Shown::new(egui::Rect::NOTHING, node.clone()));
         let row = folder_row(app, ui, sub, open, acts);
+        // Сама строка — для рамки мышью: задета строка, а не вся папка.
+        acts.shown.push(Shown::on(ui, row, node.clone()));
         let mut bottom = row.bottom();
         if open {
             let inside = ui.indent(("folder", sub), |ui| self::dir(app, ui, tree, sub, acts));
@@ -107,8 +111,7 @@ pub(super) fn dir(app: &mut App, ui: &mut egui::Ui, tree: &Tree, dir: &str, acts
         // её подсвечивают, когда бросают на файл или деталь внутри.
         let x = ui.max_rect().x_range();
         let whole = egui::Rect::from_x_y_ranges(x, row.top()..=bottom);
-        acts.shown
-            .push(Shown::on(ui, whole, Node::Folder(sub.clone())));
+        acts.shown[at] = Shown::on(ui, whole, node);
     }
     for p in tree.parts.iter().filter(|p| p.folder == dir) {
         part_line(app, ui, p, acts);
@@ -124,15 +127,17 @@ fn file_row(app: &App, ui: &mut egui::Ui, path: &str, acts: &mut Acts) {
     ui.horizontal(|ui| {
         // Под стрелкой папки или детали: файл раскрывать некуда.
         ui.add_space(14.0);
-        let chosen = app.tab.loose_chosen.as_deref() == Some(path);
-        let text = RichText::new(format!("🗋 {}", last(path))).weak();
-        let r = ui.selectable_label(chosen, text).on_hover_text(path);
-        acts.shown
-            .push(Shown::on(ui, r.rect, Node::File(path.to_string())));
+        let node = Node::File(path.to_string());
+        let chosen = app.tab.selection.contains(&node);
+        let text = format!("🗋 {}", last(path));
+        let r = ui.selectable_label(chosen, RichText::new(&text).weak());
+        selection::tell(&r, chosen, &text);
+        let r = r.on_hover_text(path);
+        acts.shown.push(Shown::on(ui, r.rect, node.clone()));
         if r.double_clicked() {
             acts.open_file = Some((path.to_string(), false));
         } else if r.clicked() || r.secondary_clicked() {
-            acts.chosen_file = Some(path.to_string());
+            acts.picked = Some((node, r.secondary_clicked()));
         }
         open_menu::attach(
             &r,
@@ -161,11 +166,13 @@ fn folder_row(app: &App, ui: &mut egui::Ui, path: &str, open: bool, acts: &mut A
     ui.horizontal(|ui| {
         // Стрелка — часть строки: щелчок по любому месту раскрывает папку.
         let arrow = if open { "▾" } else { "▸" };
-        let chosen = app.tab.place == path;
-        let r = ui.selectable_label(chosen, format!("{arrow} 🗀 {}", last(path)));
-        if r.clicked() {
-            acts.toggled = Some(path.to_string());
-            acts.place = Some(path.to_string());
+        let node = Node::Folder(path.to_string());
+        let chosen = app.tab.selection.contains(&node);
+        let text = format!("{arrow} 🗀 {}", last(path));
+        let r = ui.selectable_label(chosen, &text);
+        selection::tell(&r, chosen, &text);
+        if r.clicked() || r.secondary_clicked() {
+            acts.picked = Some((node, r.secondary_clicked()));
         }
         r.context_menu(|ui| {
             if ui.button(t.new_part_here).clicked() {
@@ -197,13 +204,13 @@ pub(super) fn drag_part(row: egui::Response, p: &PartEntry) -> egui::Response {
     row
 }
 
-/// Пустое место под деревом: бросить сюда — в корень, щёлкнуть — новые
-/// детали снова ложатся в корень.
+/// Пустое место под деревом: бросить сюда — в корень, щёлкнуть — снять
+/// выделение, и новые детали снова ложатся в корень.
 pub(super) fn root_drop(ui: &mut egui::Ui, acts: &mut Acts) {
     let size = egui::vec2(ui.available_width(), ui.available_height().max(32.0));
     let r = ui.allocate_response(size, egui::Sense::click());
     if r.clicked() {
-        acts.place = Some(String::new());
+        acts.picked = Some((Node::Folder(String::new()), false));
     }
     acts.shown
         .push(Shown::on(ui, r.rect, Node::Folder(String::new())));
@@ -211,43 +218,31 @@ pub(super) fn root_drop(ui: &mut egui::Ui, acts: &mut Acts) {
 
 /// Исполнить то, что сделали с папками.
 pub(super) fn apply(app: &mut App, ctx: &egui::Context, acts: &mut Acts) {
+    let order = shown::order(&acts.shown);
+    app.sweep(ctx, &acts.sweep, &acts.shown, true);
+    if acts.sweep.clicked {
+        // Щелчок справа от строк — как по пустому месту внизу.
+        acts.picked = Some((Node::Folder(String::new()), false));
+    }
     app.tab.on_screen.append(&mut acts.shown);
     if let Some((path, folder)) = acts.open_file.take() {
         app.open_loose(ctx, path, folder);
     }
-    if let Some(path) = acts.chosen_file.take() {
-        app.tab.loose_chosen = Some(path);
+    if let Some((node, secondary)) = acts.picked.take() {
+        app.pick(ctx, node, secondary, &order, true);
     }
-    if acts.clicked.is_some() {
-        app.tab.loose_chosen = None;
+    // Delete по выделенному — как в Проводнике, с вопросом. Последним
+    // выбрали файл на вкладке «Файлы» — Delete про него, это решает она.
+    let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete))
+        && !ctx.wants_keyboard_input()
+        && app.tab.dialog.is_none()
+        && !app.tab.keys_to_files;
+    if delete {
+        app.delete_selected();
     }
-    // Delete по выделенному — как в Проводнике, с вопросом: файл папки,
-    // а если его нет — выбранная деталь.
-    let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete)) && !ctx.wants_keyboard_input();
-    let file = app
-        .tab
-        .loose_chosen
-        .clone()
-        .filter(|f| app.tab.loose.contains(f));
-    match (delete, file, app.tab.part.clone()) {
-        (false, _, _) => {}
-        (true, Some(path), _) => app.ask_remove_file("", path),
-        // Выбран файл на вкладке «Файлы» — Delete про него, это решает она.
-        (true, None, Some(part)) if app.tab.dialog.is_none() && app.tab.file.is_none() => {
-            app.ask_delete(&part)
-        }
-        _ => {}
-    }
-    if let Some(path) = acts.toggled.take() {
-        if path == FOLD_ALL {
-            app.tab.folded = app.tab.folders.iter().cloned().collect();
-            app.tab.expanded.clear();
-        } else if !app.tab.folded.remove(&path) {
-            app.tab.folded.insert(path);
-        }
-    }
-    if let Some(place) = acts.place.take() {
-        app.tab.place = place;
+    if std::mem::take(&mut acts.fold_all) {
+        app.tab.folded = app.tab.folders.iter().cloned().collect();
+        app.tab.expanded.clear();
     }
     if let Some(folder) = acts.new_part.take() {
         app.tab.new_part = Some(NewPart::in_folder(&folder));

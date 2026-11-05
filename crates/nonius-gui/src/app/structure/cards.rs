@@ -5,6 +5,7 @@
 use eframe::egui::{self, Color32, RichText};
 
 use super::super::node::Node;
+use super::super::selection::{self, CORNER};
 use super::super::shown::Shown;
 use super::super::tree_folders;
 use super::super::App;
@@ -62,13 +63,18 @@ pub(super) fn legend(ui: &mut egui::Ui) {
     ui.add_space(4.0);
 }
 
-/// Обычные файлы папки строками: двойной щелчок открывает.
+/// Обычные файлы папки строками: щелчок выделяет, двойной открывает.
 pub(super) fn file_lines(app: &App, ui: &mut egui::Ui, files: &[&String], acts: &mut Acts) {
     for f in files {
+        let node = Node::File(f.to_string());
+        let chosen = app.tab.selection.contains(&node);
         let text = RichText::new(format!("🗋 {}", tree_folders::last(f))).weak();
-        let r = ui.selectable_label(false, text).on_hover_text(f.as_str());
+        let r = ui.selectable_label(chosen, text).on_hover_text(f.as_str());
+        acts.shown.push(Shown::on(ui, r.rect, node.clone()));
         if r.double_clicked() {
             acts.open_file = Some(f.to_string());
+        } else if r.clicked() || r.secondary_clicked() {
+            acts.picked = Some((node, r.secondary_clicked()));
         }
         let target = || tree_folders::loose_target(f);
         open_menu::attach(&r, &app.tab.programs, target, &mut acts.asked);
@@ -100,9 +106,11 @@ pub(super) fn cards(app: &mut App, ui: &mut egui::Ui, inside: &[&PartEntry], act
 fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut Acts) {
     let t = texts();
     let kind = Kind::of(p);
-    let selected = app.tab.part.as_ref() == Some(&p.name);
+    let node = Node::Part(p.name.clone());
+    let chosen = app.tab.selection.contains(&node);
+    let opened = app.tab.part.as_ref() == Some(&p.name);
     let visuals = ui.visuals().clone();
-    let fill = if selected {
+    let fill = if chosen {
         visuals.selection.bg_fill
     } else {
         egui::Color32::TRANSPARENT
@@ -110,6 +118,7 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
     let mut slot = None;
     let inner = egui::Frame::NONE
         .fill(fill)
+        .corner_radius(CORNER)
         .stroke(visuals.widgets.noninteractive.bg_stroke)
         .inner_margin(egui::Margin {
             left: 10,
@@ -154,8 +163,8 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
     if r.double_clicked() {
         acts.open = Some(p.name.clone());
         app.tab.view = View::Part;
-    } else if r.clicked() {
-        acts.select = Some(p.name.clone());
+    } else if r.clicked() || r.secondary_clicked() {
+        acts.picked = Some((node.clone(), r.secondary_clicked()));
     }
     if let Some(slot) = slot {
         let button = egui::Button::new(RichText::new(t.add_model).small());
@@ -164,15 +173,24 @@ fn card(app: &mut App, ui: &mut egui::Ui, p: &PartEntry, width: f32, acts: &mut 
         }
     }
     let rect = r.rect;
-    if r.hovered() && !selected {
+    // Открыта, но выделено другое — тонкая рамка; под мышью — рамка ярче.
+    if opened && !chosen {
+        selection::opened_frame(ui, rect);
+    } else if r.hovered() && !chosen {
         let stroke = visuals.widgets.hovered.bg_stroke;
         ui.painter()
-            .rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+            .rect_stroke(rect, CORNER, stroke, egui::StrokeKind::Inside);
     }
-    acts.shown
-        .push(Shown::on(ui, rect, Node::Part(p.name.clone())));
+    acts.shown.push(Shown::on(ui, rect, node));
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
-    ui.painter().rect_filled(stripe, 0.0, kind.color(ui));
+    // Полоска слева повторяет скругление карточки.
+    let round = egui::CornerRadius {
+        nw: CORNER as u8,
+        sw: CORNER as u8,
+        ne: 0,
+        se: 0,
+    };
+    ui.painter().rect_filled(stripe, round, kind.color(ui));
 }
 
 /// Размер кнопки «Добавить модель…» мелким шрифтом.

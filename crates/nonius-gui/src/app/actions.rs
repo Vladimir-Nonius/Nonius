@@ -7,6 +7,7 @@ use std::sync::Arc;
 use eframe::egui;
 
 use super::jobs::Done;
+use super::node::Node;
 use super::App;
 use crate::source::{MassEntry, Pick, ProjectSource};
 use crate::texts::texts;
@@ -52,6 +53,7 @@ impl App {
         self.tab.loose.clear();
         self.tab.folded.clear();
         self.tab.place.clear();
+        self.tab.selection.clear();
         self.tab.new_folder = None;
         self.tab.listed.clear();
         self.tab.dialog = None;
@@ -105,6 +107,11 @@ impl App {
 
     fn select(&mut self, part: Option<String>) {
         self.tab.jobs.cancel();
+        // Открытая деталь выделена одна: Delete и меню — про неё.
+        if let Some(name) = &part {
+            self.tab.selection.only(Node::Part(name.clone()));
+        }
+        self.tab.keys_to_files = false;
         // Прежняя деталь может остаться раскрытой: её версии не пропадают.
         let old = std::mem::replace(&mut self.tab.part, part);
         let versions = std::mem::take(&mut self.tab.versions);

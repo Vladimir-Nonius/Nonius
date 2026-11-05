@@ -9,7 +9,7 @@ use std::sync::Arc;
 use super::jobs::Jobs;
 use super::{
     add_model, bottom, material, new_folder, new_part, node, open_menu, part_dialogs, save,
-    settings_window, shown, structure,
+    selection, settings_window, shown, structure,
 };
 use crate::source::{
     Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
@@ -47,8 +47,11 @@ pub(super) struct ProjectTab {
     pub folders: Vec<String>,
     /// Обычные файлы в папках-группах: путь от корня через `/`.
     pub loose: Vec<String>,
-    /// Выделенный в дереве обычный файл: его удаляет Delete.
-    pub loose_chosen: Option<String>,
+    /// Выделенное в дереве и «Структуре»: его удаляет Delete.
+    pub selection: selection::Selection,
+    /// Последним выбрали файл на вкладке «Файлы»: Delete — про него, а не
+    /// про выделенное в дереве.
+    pub keys_to_files: bool,
     /// Что где на экране: строки дерева и «Структуры» с прошлого кадра.
     pub on_screen: Vec<shown::Shown>,
     /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.
