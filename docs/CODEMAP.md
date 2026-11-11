@@ -13,6 +13,7 @@
 | Изменить вывод команды | `nonius-cli/src/commands/<группа>.rs`, общие мелочи — `format.rs`; ответ `--json` — `commands/json/` |
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
+| Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
 | Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
@@ -76,7 +77,7 @@
 | `project/templates.rs` | `.gitattributes` нового проекта |
 | `project/agents.rs` | `AGENTS.md` проекта: правила для ИИ, обновление блока между метками |
 | `extension/manifest.rs` | манифест модуля, точки расширения, права, версия API |
-| `extension/traits.rs` | трейты точек (`GeometrySource`, `Comparator`, …), `Snapshot`, `Event` |
+| `extension/traits.rs` | трейты точек (`GeometrySource`, `Comparator`, `Converter`, …), `Snapshot`, `Event` |
 | `extension/registry.rs` | реестр модулей и проверка при подключении |
 | `contract.rs` | контрактные проверки для каждой точки |
 | `compare/mod.rs` | формат отчёта: `Change`, `ChangeKind`, `ChangeReport` |
@@ -109,6 +110,16 @@
 |---|---|
 | `lib.rs` | модуль `step-header` (`StepHeaderSource`) и его тесты |
 | `header.rs` | разбор `FILE_NAME`, `FILE_SCHEMA`, кириллицы `\X2\` |
+
+### `nonius-solidworks` — STEP из файлов SolidWorks
+
+Только Windows и только если SolidWorks установлен; иначе модуль не подключается, и импорт работает без него.
+
+| Файл | Что внутри |
+|---|---|
+| `lib.rs` | модуль `solidworks-step` (`SolidWorksConverter`, точка `Converter`), `register` — подключить, если SolidWorks есть |
+| `run.rs` | `available` (есть ли SolidWorks), `export_step`: запуск скрипта без окна, ожидание до 5 минут, разбор ответа `OK` / `ERROR: причина` |
+| `export_step.ps1` | сам разговор с SolidWorks (PowerShell + COM): открыть деталь, «сохранить как STEP», закрыть за собой; в начале — правила вежливости к работающему человеку и почему вызовы идут через `InvokeMember` |
 
 ### `nonius-occt` — геометрия на OpenCascade
 
@@ -229,7 +240,7 @@
 | `history.rs` | версии, `save_version`, `restore`, `export` |
 | `files.rs` | файлы версии, разница, копия и открытие файла |
 | `system/` | программы для типа файла, запуск, «Открыть с помощью», показ в папке; Windows только в `windows.rs` |
-| `import.rs` | `import`: файл модели в деталь, паспорт, превью |
+| `import.rs` | `import`: файл модели в деталь, паспорт, превью; для файла SolidWorks — свежий STEP через модуль перевода (`convert`) |
 | `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
 | `materials.rs` | справочник материалов с плотностью |
 | `compare.rs` | `compare`, `Comparison`, `CompareOptions`, `Progress` (ход и отмена) |
@@ -280,6 +291,8 @@
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, местная разница против разницы целиком, кэш STEP |
 | `nonius-occt/tests/features.rs` | изменения словами на настоящих телах |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
+| `nonius-app/tests/convert.rs` | импорт файла SolidWorks с поддельным модулем перевода: STEP рядом, отказ перевода, без модуля |
+| `nonius-solidworks/tests/contract.rs` | контракт модуля; с настоящим SolidWorks — только если задать `NONIUS_TEST_SOLIDWORKS=путь к .sldprt` |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 | `nonius-cli/tests/folders.rs` | `folder new`, `part move`, `map --json`, `upgrade` |
 

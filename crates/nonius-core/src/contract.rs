@@ -21,7 +21,7 @@ use std::path::Path;
 
 use crate::compare::CompareContext;
 use crate::extension::{
-    Comparator, Exporter, ExtensionPoint, GeometrySource, Module, Snapshot, TreeSource,
+    Comparator, Converter, Exporter, ExtensionPoint, GeometrySource, Module, Snapshot, TreeSource,
 };
 use crate::schema::Versioned;
 use crate::{meta::PartMeta, tree::FeatureTree};
@@ -193,6 +193,43 @@ pub fn exporter<E: Exporter>(
             Ok(_) => {}
             Err(e) => v.push(format!("{f}: {e}")),
         }
+    }
+    finish(v)
+}
+
+/// Перевод в STEP: берёт образец, не берёт чужие файлы и готовый STEP,
+/// создаёт непустой STEP в `out_dir` и не трогает сам образец.
+pub fn converter<C: Converter>(conv: &C, sample: &Path, out_dir: &Path) -> Result<(), Violations> {
+    let mut v = manifest(conv, ExtensionPoint::Converter)
+        .err()
+        .unwrap_or_default();
+    if !conv.can_convert(sample) {
+        v.push(format!(
+            "не берётся переводить образец {}",
+            sample.display()
+        ));
+        return finish(v);
+    }
+    for foreign in [
+        "contract-check.nonius-unknown-format",
+        "contract-check.step",
+    ] {
+        if conv.can_convert(Path::new(foreign)) {
+            v.push(format!("берётся переводить {foreign}"));
+        }
+    }
+    let before = std::fs::read(sample).ok();
+    let target = out_dir.join("contract-check.step");
+    match conv.to_step(sample, &target) {
+        Ok(()) => match std::fs::read(&target) {
+            Ok(bytes) if bytes.starts_with(b"ISO-10303-21") => {}
+            Ok(_) => v.push("записанный файл — не STEP".into()),
+            Err(_) => v.push(format!("файл {} не создан", target.display())),
+        },
+        Err(e) => v.push(format!("ошибка перевода образца: {e}")),
+    }
+    if std::fs::read(sample).ok() != before {
+        v.push("образец изменился после перевода".into());
     }
     finish(v)
 }

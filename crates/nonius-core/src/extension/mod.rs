@@ -10,6 +10,9 @@
 //! - API модулей версионирован ([`API_VERSION`]);
 //! - для каждой точки есть контрактные тесты в [`crate::contract`].
 //!
+//! Точки: источник геометрии, источник дерева, сравнение, отрисовка,
+//! экспорт, перевод файла CAD в STEP ([`Converter`]), события.
+//!
 //! Файлы: `manifest.rs` — манифест и права, `traits.rs` — трейты точек и
 //! [`Snapshot`], `registry.rs` — реестр подключённых модулей.
 
@@ -22,5 +25,6 @@ pub use manifest::{
 };
 pub use registry::Registry;
 pub use traits::{
-    Comparator, Event, EventHandler, Exporter, GeometrySource, Renderer, Snapshot, TreeSource,
+    Comparator, Converter, Event, EventHandler, Exporter, GeometrySource, Renderer, Snapshot,
+    TreeSource,
 };

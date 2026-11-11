@@ -71,6 +71,17 @@ pub trait Exporter: Module {
     fn export(&self, snapshot: &Snapshot, format: &str, out_dir: &Path) -> Result<PathBuf>;
 }
 
+/// Перевод файла CAD в STEP: родной файл (например `.sldprt`) Nonius хранит
+/// как есть, а форму, массу и сравнение считает по STEP. Модуль этой точки
+/// получает STEP сам — обычно просит об этом установленную CAD-систему, —
+/// чтобы человеку не выгружать его руками при каждом импорте.
+pub trait Converter: Module {
+    /// Умеет ли модуль перевести этот файл (обычно по расширению).
+    fn can_convert(&self, path: &Path) -> bool;
+    /// Записать STEP файла `source` в `target`. Сам `source` не меняется.
+    fn to_step(&self, source: &Path, target: &Path) -> Result<()>;
+}
+
 /// Событие проекта.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]

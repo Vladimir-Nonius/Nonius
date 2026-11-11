@@ -15,12 +15,10 @@ serde.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 opener.workspace = true
+tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [lints]
 workspace = true

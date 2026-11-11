@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::{
-    Comparator, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource, Module,
+    Comparator, Converter, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource, Module,
     ModuleManifest, Renderer, Snapshot, TreeSource,
 };
 use crate::compare::{ChangeReport, CompareContext};
@@ -17,6 +17,7 @@ pub struct Registry {
     comparators: Vec<Box<dyn Comparator>>,
     renderers: Vec<Box<dyn Renderer>>,
     exporters: Vec<Box<dyn Exporter>>,
+    converters: Vec<Box<dyn Converter>>,
     events: Vec<Box<dyn EventHandler>>,
 }
 
@@ -74,6 +75,17 @@ impl Registry {
     pub fn add_exporter(&mut self, m: Box<dyn Exporter>) -> Result<()> {
         check(m.manifest(), ExtensionPoint::Exporter, ids(&self.exporters))?;
         self.exporters.push(m);
+        Ok(())
+    }
+
+    /// Подключить перевод файлов CAD в STEP.
+    pub fn add_converter(&mut self, m: Box<dyn Converter>) -> Result<()> {
+        check(
+            m.manifest(),
+            ExtensionPoint::Converter,
+            ids(&self.converters),
+        )?;
+        self.converters.push(m);
         Ok(())
     }
 
@@ -143,6 +155,14 @@ impl Registry {
             .map(|m| m.as_ref())
     }
 
+    /// Первый модуль, который умеет перевести файл в STEP.
+    pub fn converter_for(&self, path: &Path) -> Option<&dyn Converter> {
+        self.converters
+            .iter()
+            .find(|m| m.can_convert(path))
+            .map(|m| m.as_ref())
+    }
+
     /// Все подключённые отрисовщики.
     pub fn renderers(&self) -> impl Iterator<Item = &dyn Renderer> + '_ {
         self.renderers.iter().map(|m| m.as_ref())
@@ -151,12 +171,13 @@ impl Registry {
     /// Манифесты всех подключённых модулей (модуль с несколькими точками — один раз).
     pub fn manifests(&self) -> Vec<&ModuleManifest> {
         let mut all: Vec<&ModuleManifest> = Vec::new();
-        let lists: [Vec<&ModuleManifest>; 6] = [
+        let lists: [Vec<&ModuleManifest>; 7] = [
             self.geometry.iter().map(|m| m.manifest()).collect(),
             self.trees.iter().map(|m| m.manifest()).collect(),
             self.comparators.iter().map(|m| m.manifest()).collect(),
             self.renderers.iter().map(|m| m.manifest()).collect(),
             self.exporters.iter().map(|m| m.manifest()).collect(),
+            self.converters.iter().map(|m| m.manifest()).collect(),
             self.events.iter().map(|m| m.manifest()).collect(),
         ];
         for m in lists.into_iter().flatten() {
