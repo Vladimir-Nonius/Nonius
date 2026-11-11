@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-use super::grouping::Proto;
+use super::grouping::{label, Proto};
 use super::shape::ShapeVerdict;
 use super::units::Unit;
 
@@ -106,13 +106,15 @@ pub(super) fn ask(
         ids.sort();
         let names: Vec<String> = members
             .iter()
-            .map(|&m| format!("«{}»", units[m].stem))
+            .map(|&m| format!("«{}»", label(units, &members, m)))
             .collect();
-        facts.extend(
-            members
-                .iter()
-                .map(|&m| format!("«{}» изменён {}", units[m].stem, date(units[m].newest()))),
-        );
+        facts.extend(members.iter().map(|&m| {
+            format!(
+                "«{}» изменён {}",
+                label(units, &members, m),
+                date(units[m].newest())
+            )
+        }));
         let id = ids.join("|");
         if !out.iter().any(|q| q.id == id) {
             out.push(Question {

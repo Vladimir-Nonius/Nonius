@@ -251,6 +251,42 @@ fn answers_reshape_the_plan() {
 }
 
 #[test]
+fn copies_of_the_project_fold_into_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("станок");
+    let put = |dir: &str, name: &str, text: &str| {
+        std::fs::create_dir_all(source.join(dir)).unwrap();
+        std::fs::write(source.join(dir).join(name), text).unwrap();
+    };
+    // Вал в копии не трогали; втулку доработали.
+    put("рабочая версия", "вал.step", "10000 20 20 100");
+    put("готовая версия", "вал.step", "10000 20 20 100");
+    put("рабочая версия", "втулка.step", "300 5 10 10");
+    put("готовая версия", "втулка.step", "310 5 10 10");
+    let app = app(&tmp.path().join("проект"));
+
+    let plan = app.intake_plan(&source).unwrap();
+    let names: Vec<&str> = plan.items.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, ["вал", "втулка"], "{:?}", plan.items);
+    let (shaft, bush) = (&plan.items[0], &plan.items[1]);
+    assert_eq!(shaft.versions.len(), 1);
+    assert!(shaft.why[0].contains("та же деталь лежит ещё тут"));
+    assert_eq!(bush.versions.len(), 2);
+    assert_eq!(bush.shape, Some(ShapeVerdict::Confirmed));
+
+    // Без проверки формой одинаковые файлы всё равно склеиваются.
+    let quick = app
+        .intake_plan_with(&source, ShapeCheck::Off, &NoProgress)
+        .unwrap();
+    assert_eq!(quick.items.len(), 3, "вал один, втулок две");
+
+    let done = app.intake_apply(&plan, &NoProgress).unwrap();
+    assert_eq!(done.failed, []);
+    assert_eq!(app.versions("вал").unwrap().len(), 1);
+    assert_eq!(app.versions("втулка").unwrap().len(), 2);
+}
+
+#[test]
 fn project_folder_itself_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("станок");

@@ -11,6 +11,7 @@ use nonius_core::PartName;
 
 use super::questions::Decisions;
 use super::shape::Shape;
+use super::units::MODELS;
 use super::{key, plan, Found, IntakePlan, ShapeCheck};
 use crate::{App, Error, Progress, Result};
 
@@ -34,6 +35,7 @@ impl IntakeStudy {
             &self.taken,
             &self.shapes,
             &Decisions::new(answers),
+            false,
         )
     }
 }
@@ -60,6 +62,7 @@ impl App {
         let mut files = Vec::new();
         walk(&source, "", &mut files)?;
         files.sort_by(|a, b| a.path.cmp(&b.path));
+        digests(&mut files);
 
         let mut study = IntakeStudy {
             links: self.links_of(&files),
@@ -68,8 +71,18 @@ impl App {
             source,
             files,
         };
-        // Сначала план по именам и связям: из него видно, чью форму смотреть.
-        study.shapes = self.shapes_of(&study.plan(&[]), check, progress);
+        // Сначала черновик по именам и связям: из него видно, чью форму
+        // смотреть. В нём одно имя в разных папках считается одной деталью.
+        let draft = plan::build(
+            study.source.clone(),
+            study.files.clone(),
+            &study.links,
+            &study.taken,
+            &study.shapes,
+            &Decisions::new(&[]),
+            true,
+        );
+        study.shapes = self.shapes_of(&draft, check, progress);
         Ok(study)
     }
 
@@ -94,6 +107,39 @@ impl App {
             }
         }
         links
+    }
+}
+
+/// Снять отпечатки содержимого у моделей, которые могут быть побайтными
+/// копиями: то же расширение и тот же размер. Остальные файлы не читаем.
+fn digests(files: &mut [Found]) {
+    use sha2::{Digest, Sha256};
+
+    let mut sizes: HashMap<(String, u64), Vec<usize>> = HashMap::new();
+    for (i, f) in files.iter().enumerate() {
+        if !MODELS.contains(&f.ext.as_str()) {
+            continue;
+        }
+        if let Ok(meta) = fs::metadata(&f.path) {
+            sizes
+                .entry((f.ext.clone(), meta.len()))
+                .or_default()
+                .push(i);
+        }
+    }
+    for i in sizes.into_values().filter(|v| v.len() > 1).flatten() {
+        let Ok(mut file) = fs::File::open(&files[i].path) else {
+            continue;
+        };
+        let mut hasher = Sha256::new();
+        if std::io::copy(&mut file, &mut hasher).is_ok() {
+            let hex: String = hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            files[i].digest = Some(hex);
+        }
     }
 }
 
@@ -135,6 +181,7 @@ fn walk(dir: &Path, rel: &str, out: &mut Vec<Found>) -> Result<()> {
                     .unwrap_or_default(),
                 dir: rel.to_string(),
                 modified,
+                digest: None,
                 path,
             });
         }

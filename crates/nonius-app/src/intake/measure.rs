@@ -6,6 +6,9 @@
 //! перевода (сам SolidWorks, секунды на деталь). Поэтому смотрим не всё
 //! подряд, а только то, что просили ([`ShapeCheck`]).
 //!
+//! Снятая форма запоминается (`memory.rs`): второй разбор той же папки
+//! SolidWorks не ждёт.
+//!
 //! Ничего не вышло (нет модуля, SolidWorks не ответил) — не беда: у детали
 //! просто не будет отпечатка, и догадка останется непроверенной.
 
@@ -15,6 +18,7 @@ use std::time::SystemTime;
 
 use nonius_core::meta::ItemKind;
 
+use super::memory::Memory;
 use super::shape::Shape;
 use super::{key, IntakePlan, ShapeCheck};
 use crate::{App, Progress};
@@ -41,6 +45,7 @@ impl App {
         progress: &dyn Progress,
     ) -> HashMap<String, Shape> {
         let mut shapes = HashMap::new();
+        let mut memory = Memory::load(&crate::work_dir(self.project.root()));
         // Сборки не смотрим: перевод большой сборки в STEP — это минуты.
         let wanted: Vec<(&str, &[PathBuf])> = draft
             .items
@@ -58,12 +63,20 @@ impl App {
             if progress.cancelled() {
                 break;
             }
-            progress.step(&format!(
-                "Смотрю форму {} из {}: {label}",
-                n + 1,
-                wanted.len()
-            ));
-            if let Some(shape) = self.shape_of(models) {
+            let known = memory.get(models);
+            if known.is_none() {
+                progress.step(&format!(
+                    "Смотрю форму {} из {}: {label}",
+                    n + 1,
+                    wanted.len()
+                ));
+            }
+            let seen = known.or_else(|| {
+                let shape = self.shape_of(models)?;
+                memory.put(models, shape);
+                Some(shape)
+            });
+            if let Some(shape) = seen {
                 if std::env::var_os("NONIUS_TRACE").is_some() {
                     eprintln!("форма «{label}»: {shape:?}");
                 }
@@ -72,6 +85,7 @@ impl App {
                 }
             }
         }
+        memory.save();
         shapes
     }
 

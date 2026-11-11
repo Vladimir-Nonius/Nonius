@@ -39,6 +39,12 @@ impl Unit {
             format!("{}/{}", self.dir, self.stem).to_lowercase()
         }
     }
+    /// Отпечаток содержимого главного файла модели (файл SolidWorks, а нет
+    /// его — STEP), если его сняли: у побайтных копий он одинаковый.
+    pub fn content(&self) -> Option<&str> {
+        let main = self.models.iter().find(|m| m.ext.starts_with("sld"));
+        main.or(self.models.first())?.digest.as_deref()
+    }
     pub fn newest(&self) -> std::time::SystemTime {
         self.models
             .iter()

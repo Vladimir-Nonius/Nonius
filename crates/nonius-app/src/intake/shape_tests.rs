@@ -1,5 +1,6 @@
 //! Тесты сравнения формы: числа — как у настоящих деталей.
 
+use super::super::split::{split, Evidence};
 use super::*;
 
 fn shape(volume: f64, dims: [f64; 3]) -> Shape {
@@ -24,6 +25,22 @@ fn manifold() -> (Shape, Shape) {
         ..v1
     };
     (v1, v2)
+}
+
+/// Свидетельства для `split`: форма и ответы человека; все модели — из
+/// одной папки, вместе в сборках не стоят.
+fn ev<'a>(
+    shape: &'a dyn Fn(usize) -> Option<Shape>,
+    decided: &'a dyn Fn(usize, usize) -> Option<bool>,
+) -> Evidence<'a> {
+    Evidence {
+        shape,
+        label: &labels,
+        decided,
+        apart: &|_, _| false,
+        trust: &|_, _| true,
+        twin: &|_, _| false,
+    }
 }
 
 fn labels(i: usize) -> String {
@@ -106,7 +123,7 @@ fn other_part_is_different() {
 fn group_without_shapes_stays_unchecked() {
     let (v1, _) = manifold();
     let known = |i: usize| (i == 0).then_some(v1);
-    let parts = split(&[0, 1], &known, &labels, &|_, _| None);
+    let parts = split(&[0, 1], &ev(&known, &|_, _| None));
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].members, [0, 1]);
     assert_eq!(parts[0].verdict, None);
@@ -117,7 +134,7 @@ fn group_without_shapes_stays_unchecked() {
 fn similar_versions_are_confirmed() {
     let (v1, v2) = manifold();
     let shapes = [v1, v2];
-    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels, &|_, _| None);
+    let parts = split(&[0, 1], &ev(&|i| Some(shapes[i]), &|_, _| None));
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].verdict, Some(ShapeVerdict::Confirmed));
     assert_eq!(
@@ -130,7 +147,7 @@ fn similar_versions_are_confirmed() {
 fn stranger_leaves_the_group() {
     let (v1, v2) = manifold();
     let shapes = [v1, shape(300.0, [5.0, 10.0, 10.0]), v2];
-    let parts = split(&[0, 1, 2], &|i| Some(shapes[i]), &labels, &|_, _| None);
+    let parts = split(&[0, 1, 2], &ev(&|i| Some(shapes[i]), &|_, _| None));
     assert_eq!(parts.len(), 2);
     assert_eq!(parts[0].members, [0, 2]);
     assert_eq!(parts[0].verdict, Some(ShapeVerdict::Confirmed));
@@ -144,7 +161,7 @@ fn stranger_leaves_the_group() {
 fn copies_are_reported() {
     let (v1, v2) = manifold();
     let shapes = [v1, v1, v2];
-    let parts = split(&[0, 1, 2], &|i| Some(shapes[i]), &labels, &|_, _| None);
+    let parts = split(&[0, 1, 2], &ev(&|i| Some(shapes[i]), &|_, _| None));
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].verdict, Some(ShapeVerdict::Copy));
     assert_eq!(
@@ -160,13 +177,13 @@ fn human_word_beats_shape_and_names() {
     let plug = shape(300.0, [5.0, 10.0, 10.0]);
     // Форма похожа, а человек сказал «нет»: две детали, и вопросов больше нет.
     let shapes = [v1, v2];
-    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels, &|_, _| Some(false));
+    let parts = split(&[0, 1], &ev(&|i| Some(shapes[i]), &|_, _| Some(false)));
     assert_eq!(parts.len(), 2);
     assert_eq!(parts[1].notes, ["вы ответили: это не версия «вал»"]);
     assert_eq!((parts[1].verdict, parts[1].rival), (None, None));
     // Форма разная, а человек сказал «да»: одна деталь, но не «подтверждено».
     let shapes = [v1, plug];
-    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels, &|_, _| Some(true));
+    let parts = split(&[0, 1], &ev(&|i| Some(shapes[i]), &|_, _| Some(true)));
     assert_eq!(parts.len(), 1);
     assert!(parts[0].settled);
     assert_eq!(parts[0].verdict, None);
@@ -175,6 +192,54 @@ fn human_word_beats_shape_and_names() {
         "вы ответили: это версии одной детали"
     );
     // Формы нет вовсе — ответ всё равно действует.
-    let parts = split(&[0, 1], &|_| None, &labels, &|_, _| Some(false));
+    let parts = split(&[0, 1], &ev(&|_| None, &|_, _| Some(false)));
     assert_eq!(parts.len(), 2);
+}
+
+#[test]
+fn copies_from_other_folders_are_not_versions() {
+    let (v1, v2) = manifold();
+    // Три папки: в двух деталь та же, в третьей её доработали.
+    let shapes = [v1, v1, v2];
+    let all = |i: usize| Some(shapes[i]);
+    let none = |_: usize, _: usize| None;
+    let across = Evidence {
+        trust: &|_, _| false,
+        twin: &|_, _| true,
+        ..ev(&all, &none)
+    };
+    let parts = split(&[0, 1, 2], &across);
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0].members, [1, 2], "из копий остаётся более новая");
+    assert_eq!(parts[0].dupes, [0]);
+    assert_eq!(parts[0].verdict, Some(ShapeVerdict::Confirmed));
+
+    // Формы нет: одному имени в разных папках не верим.
+    let unknown = |_: usize| None;
+    let blind = Evidence {
+        trust: &|_, _| false,
+        ..ev(&unknown, &none)
+    };
+    let parts = split(&[0, 1], &blind);
+    assert_eq!(parts.len(), 2);
+    assert!(parts
+        .iter()
+        .all(|p| p.notes.is_empty() && p.rival.is_none()));
+}
+
+#[test]
+fn parts_of_one_assembly_never_merge() {
+    let (v1, v2) = manifold();
+    // 0 и 1 стоят в одной сборке; 2 похожа на обе, но мостом не станет.
+    let shapes = [v1, v2, v1];
+    let all = |i: usize| Some(shapes[i]);
+    let none = |_: usize, _: usize| None;
+    let together = Evidence {
+        apart: &|a, b| (a, b) == (0, 1) || (a, b) == (1, 0),
+        ..ev(&all, &none)
+    };
+    let parts = split(&[0, 1, 2], &together);
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].members, [0, 2]);
+    assert_eq!(parts[1].members, [1]);
 }

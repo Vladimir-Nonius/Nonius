@@ -26,6 +26,7 @@ fn file(rel: &str, at: u64) -> Found {
             .unwrap_or_default(),
         dir,
         modified: UNIX_EPOCH + Duration::from_secs(at * 60),
+        digest: None,
         path,
     }
 }
@@ -43,6 +44,7 @@ fn plan(files: &[Found], links: &HashMap<String, Vec<String>>) -> IntakePlan {
         &[],
         &HashMap::new(),
         &Decisions::default(),
+        false,
     )
 }
 
@@ -259,6 +261,7 @@ fn names_taken_in_the_project_stay_out() {
         &taken,
         &none_shapes(),
         &Decisions::default(),
+        false,
     );
     assert_eq!(names(&p), ["втулка"]);
     assert!(p.left[0].why.contains("уже есть"), "{:?}", p.left);
@@ -292,6 +295,7 @@ fn shape_confirms_or_splits_versions() {
             &[],
             &shapes,
             &Decisions::new(&answers),
+            false,
         )
     };
     let p = answered(&[]);
@@ -359,7 +363,107 @@ fn unchecked_guess_becomes_a_question() {
         &[],
         &none_shapes(),
         &no,
+        false,
     );
     assert_eq!(names(&p), ["вал", "вал_v2"]);
     assert!(p.questions.is_empty());
+}
+
+#[test]
+fn project_copied_by_folders_is_one_project() {
+    // Проект скопировали папкой: «рабочая» → «готовая», и в копии работали.
+    let copy = |rel: &str, at: u64| Found {
+        digest: Some("тот же файл".into()),
+        ..file(rel, at)
+    };
+    let files = [
+        copy("рабочая/FK12.SLDPRT", 1),
+        copy("готовая/FK12.SLDPRT", 1),
+        file("рабочая/вал.SLDPRT", 1),
+        file("готовая/вал.SLDPRT", 5),
+        file("рабочая/кронштейн.SLDPRT", 1),
+        file("готовая/кронштейн.SLDPRT", 5),
+        file("рабочая/плита.SLDPRT", 1),
+        file("готовая/плита.SLDPRT", 5),
+    ];
+    let mut shapes = none_shapes();
+    shaped(
+        &mut shapes,
+        "рабочая/вал.SLDPRT",
+        10_000.0,
+        [20.0, 20.0, 100.0],
+    );
+    shaped(
+        &mut shapes,
+        "готовая/вал.SLDPRT",
+        10_400.0,
+        [20.0, 20.0, 100.0],
+    );
+    shaped(
+        &mut shapes,
+        "рабочая/кронштейн.SLDPRT",
+        5_000.0,
+        [2.0, 80.0, 120.0],
+    );
+    shaped(
+        &mut shapes,
+        "готовая/кронштейн.SLDPRT",
+        900.0,
+        [10.0, 10.0, 30.0],
+    );
+    let built = |shapes: &HashMap<String, Shape>, across: bool| {
+        build(
+            PathBuf::from(ROOT),
+            files.to_vec(),
+            &HashMap::new(),
+            &[],
+            shapes,
+            &Decisions::default(),
+            across,
+        )
+    };
+    let p = built(&shapes, false);
+    assert_eq!(
+        names(&p),
+        [
+            "готовая/FK12",
+            "готовая/вал",
+            "готовая/кронштейн",
+            "готовая/плита",
+            "рабочая/кронштейн (рабочая)",
+            "рабочая/плита (рабочая)",
+        ]
+    );
+    let item = |name: &str| p.items.iter().find(|i| i.name == name).unwrap();
+
+    // Одинаковый файл — одна деталь, одна версия, в «живой» папке.
+    assert_eq!(item("FK12").versions.len(), 1);
+    assert_eq!(
+        item("FK12").why,
+        ["та же деталь лежит ещё тут: папка «рабочая»"]
+    );
+    assert!(!item("FK12").guessed);
+
+    // Форма похожа — версии; подписи различают папки.
+    assert_eq!(
+        labels(&p, "вал"),
+        ["вал (папка «рабочая»)", "вал (папка «готовая»)"]
+    );
+    assert_eq!(item("вал").shape, Some(ShapeVerdict::Confirmed));
+
+    // Форма разная — разные детали; про тёзок из разных папок не спрашиваем.
+    assert_eq!(item("кронштейн").shape, Some(ShapeVerdict::Different));
+    // Формы нет — одному имени в разных папках не верим.
+    assert_eq!(item("плита").versions.len(), 1);
+    assert!(p.questions.is_empty(), "{:?}", p.questions);
+
+    // Черновик верит именам: по нему видно, чью форму смотреть.
+    let draft = built(&none_shapes(), true);
+    let guessed: Vec<&str> = draft
+        .items
+        .iter()
+        .filter(|i| i.guessed)
+        .map(|i| i.name.as_str())
+        .collect();
+    assert_eq!(guessed, ["вал", "кронштейн", "плита"]);
 }

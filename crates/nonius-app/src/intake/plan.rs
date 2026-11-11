@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 
-use super::grouping::{group, merge, name};
+use super::grouping::{group, label, merge, name};
 use super::hints::hints;
 use super::questions::{ask, Decisions};
 use super::shape::Shape;
@@ -19,7 +19,8 @@ use super::{key, Found, IntakePlan, PlannedItem, PlannedVersion};
 /// Составить план. `links` — связи файлов (ключи и значения — пути строчными
 /// буквами, см. [`key`]); `taken` — имена, уже занятые в проекте; `shapes` —
 /// отпечатки формы моделей по ключу файла (каких нет — те не проверяются);
-/// `said` — ответы человека на вопросы прошлого плана.
+/// `said` — ответы человека на вопросы прошлого плана; `across` — черновик:
+/// верить одному имени в разных папках, пока форму не смотрели.
 pub(super) fn build(
     source: PathBuf,
     files: Vec<Found>,
@@ -27,6 +28,7 @@ pub(super) fn build(
     taken: &[PartName],
     shapes: &HashMap<String, Shape>,
     said: &Decisions,
+    across: bool,
 ) -> IntakePlan {
     let mut left = Vec::new();
     let (mut units, by_name, by_path) = units_of(&files);
@@ -54,7 +56,7 @@ pub(super) fn build(
             .copied()
     };
     let decided = |a: usize, b: usize| said.get(&units[a].id(), &units[b].id());
-    let mut protos = group(&units, &used_by, &shape, &decided);
+    let mut protos = group(&units, &used_by, &shape, &decided, across);
     merge(&mut protos, &units, &decided);
     name(&mut protos, &units, taken, &mut left);
 
@@ -75,8 +77,8 @@ pub(super) fn build(
         })
         .collect();
     let users = |p: usize| -> BTreeSet<usize> {
-        let members = protos[p].members.iter();
-        members.flat_map(|&m| used_by[m].iter().copied()).collect()
+        let members = protos[p].all();
+        members.flat_map(|m| used_by[m].iter().copied()).collect()
     };
     let refused = |a: usize, b: usize| {
         let (x, y) = (&protos[a].members, &protos[b].members);
@@ -92,14 +94,14 @@ pub(super) fn build(
     // у каждой своя папка со своими деталями.
     let mut assemblies_in: HashMap<&str, usize> = HashMap::new();
     for p in protos.iter().filter(|p| p.name.is_some()) {
-        if units[p.members[0]].is_assembly() {
-            *assemblies_in.entry(&units[p.members[0]].dir).or_default() += 1;
+        if units[p.home()].is_assembly() {
+            *assemblies_in.entry(&units[p.home()].dir).or_default() += 1;
         }
     }
     let owner: HashMap<usize, usize> = protos
         .iter()
         .enumerate()
-        .flat_map(|(i, p)| p.members.iter().map(move |&m| (m, i)))
+        .flat_map(|(i, p)| p.all().map(move |m| (m, i)))
         .collect();
 
     let mut items = Vec::new();
@@ -107,7 +109,7 @@ pub(super) fn build(
         let Some(item_name) = &proto.name else {
             continue;
         };
-        let first = &units[proto.members[0]];
+        let first = &units[proto.home()];
         let assembly = first.is_assembly();
         let mut why: Vec<String> = Vec::new();
         let mut folder = first.dir.clone();
@@ -119,9 +121,8 @@ pub(super) fn build(
         };
         if assemblies_in.get(first.dir.as_str()).copied().unwrap_or(0) >= 2 {
             let users: BTreeSet<usize> = proto
-                .members
-                .iter()
-                .flat_map(|&m| used_by[m].iter().copied())
+                .all()
+                .flat_map(|m| used_by[m].iter().copied())
                 .filter(|&a| units[a].dir == first.dir)
                 .filter_map(|a| owner.get(&a).copied())
                 .collect();
@@ -138,10 +139,10 @@ pub(super) fn build(
             }
         }
         if proto.members.len() > 1 {
-            let labels: Vec<&str> = proto
+            let labels: Vec<String> = proto
                 .members
                 .iter()
-                .map(|&m| units[m].stem.as_str())
+                .map(|&m| label(&units, &proto.members, m))
                 .collect();
             why.push(format!(
                 "{} версии по именам файлов: {}",
@@ -152,7 +153,7 @@ pub(super) fn build(
         why.extend(proto.notes.iter().cloned());
         why.extend(similar.notes[n].iter().cloned());
         let mut docs: Vec<PathBuf> = Vec::new();
-        for &m in &proto.members {
+        for m in proto.all() {
             why.extend(units[m].why.iter().cloned());
             for doc in &units[m].docs {
                 // В `docs/` детали имена не повторяются: берём первый.
@@ -173,7 +174,7 @@ pub(super) fn build(
                 .members
                 .iter()
                 .map(|&m| PlannedVersion {
-                    label: units[m].stem.clone(),
+                    label: label(&units, &proto.members, m),
                     models: ordered(&units[m].models),
                 })
                 .collect(),
