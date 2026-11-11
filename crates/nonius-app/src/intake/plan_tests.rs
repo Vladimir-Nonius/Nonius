@@ -7,6 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 
+use super::super::questions::Decisions;
 use super::super::shape::Shape;
 use super::super::{key, Found, IntakePlan, ShapeVerdict};
 use super::build;
@@ -41,6 +42,7 @@ fn plan(files: &[Found], links: &HashMap<String, Vec<String>>) -> IntakePlan {
         links,
         &[],
         &HashMap::new(),
+        &Decisions::default(),
     )
 }
 
@@ -256,6 +258,7 @@ fn names_taken_in_the_project_stay_out() {
         &none,
         &taken,
         &none_shapes(),
+        &Decisions::default(),
     );
     assert_eq!(names(&p), ["втулка"]);
     assert!(p.left[0].why.contains("уже есть"), "{:?}", p.left);
@@ -277,13 +280,21 @@ fn shape_confirms_or_splits_versions() {
     shaped(&mut shapes, "кожух_v2.SLDPRT", 900.0, [10.0, 10.0, 30.0]);
     // «Люк» назван иначе, а формой — почти «кожух».
     shaped(&mut shapes, "люк.SLDPRT", 5_100.0, [2.0, 80.0, 121.0]);
-    let p = build(
-        PathBuf::from(ROOT),
-        files.to_vec(),
-        &HashMap::new(),
-        &[],
-        &shapes,
-    );
+    let answered = |answers: &[(&str, bool)]| {
+        let answers: Vec<(String, bool)> = answers
+            .iter()
+            .map(|(id, yes)| (id.to_string(), *yes))
+            .collect();
+        build(
+            PathBuf::from(ROOT),
+            files.to_vec(),
+            &HashMap::new(),
+            &[],
+            &shapes,
+            &Decisions::new(&answers),
+        )
+    };
+    let p = answered(&[]);
     assert_eq!(names(&p), ["вал", "кожух", "кожух_v2", "люк"]);
     let item = |name: &str| p.items.iter().find(|i| i.name == name).unwrap();
 
@@ -303,4 +314,52 @@ fn shape_confirms_or_splits_versions() {
     assert!(cover.why.iter().any(|w| w.contains("похожа на «люк»")));
     assert!(item("люк").why[0].contains("похожа на «кожух»"));
     assert_eq!(item("люк").shape, None);
+
+    // Вопросы: про разведённый кожух (программа думает «нет») и про люк.
+    let ids: Vec<&str> = p.questions.iter().map(|q| q.id.as_str()).collect();
+    assert_eq!(ids, ["кожух|кожух_v2", "кожух|люк"]);
+    assert_eq!(p.questions[0].suggested, Some(false));
+    assert_eq!(
+        p.questions[0].text,
+        "Это версии одной детали: «кожух» → «кожух_v2»?"
+    );
+    assert!(p.questions[1].facts[0].contains("форма похожа"));
+
+    // Ответы: кожух_v2 — всё-таки версия; люк — версия кожуха.
+    let p = answered(&[("кожух|кожух_v2", true), ("кожух|люк", true)]);
+    assert_eq!(names(&p), ["вал", "кожух"]);
+    assert_eq!(labels(&p, "кожух"), ["кожух", "люк", "кожух_v2"]);
+    assert!(p.questions.is_empty(), "{:?}", p.questions);
+    assert!(!p.items[1].guessed);
+
+    // «Нет» на оба: всё остаётся врозь, и больше не спрашивают.
+    let p = answered(&[("кожух|кожух_v2", false), ("кожух|люк", false)]);
+    assert_eq!(names(&p), ["вал", "кожух", "кожух_v2", "люк"]);
+    assert!(p.questions.is_empty(), "{:?}", p.questions);
+    assert!(
+        p.items[3].why.is_empty(),
+        "подсказка снята: {:?}",
+        p.items[3].why
+    );
+}
+
+#[test]
+fn unchecked_guess_becomes_a_question() {
+    let files = [file("вал.SLDPRT", 1), file("вал_v2.SLDPRT", 2)];
+    let p = plan(&files, &HashMap::new());
+    assert_eq!(p.questions.len(), 1);
+    assert_eq!(p.questions[0].id, "вал|вал_v2");
+    assert_eq!(p.questions[0].suggested, None);
+    assert!(p.questions[0].facts[0].contains("только по именам"));
+    let no = Decisions::new(&[("вал|вал_v2".into(), false)]);
+    let p = build(
+        PathBuf::from(ROOT),
+        files.to_vec(),
+        &HashMap::new(),
+        &[],
+        &none_shapes(),
+        &no,
+    );
+    assert_eq!(names(&p), ["вал", "вал_v2"]);
+    assert!(p.questions.is_empty());
 }

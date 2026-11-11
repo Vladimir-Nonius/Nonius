@@ -1,11 +1,15 @@
 //! Разбор папки: человек показывает папку, где модели, чертежи и бумаги
 //! лежат вперемешку, а Nonius предлагает, как разложить её в проект.
 //!
-//! Два шага, и между ними — решение человека:
-//! 1. [`App::intake_plan`] ничего не меняет. Он смотрит папку и возвращает
-//!    [`IntakePlan`]: какие будут детали и сборки, какие файлы — версии
-//!    одной детали, какой чертёж к какой детали, что осталось непонятым.
-//!    У каждого решения записано «почему».
+//! Три шага, и между ними — решение человека (в коде шаг 1 и 2 можно
+//! сделать разом: [`App::intake_plan`]):
+//! 0. [`App::intake_study`] изучает папку — это долгая часть. Из
+//!    [`IntakeStudy`] план получается мгновенно: `study.plan(ответы)`.
+//! 1. План ([`IntakePlan`]) ничего не меняет: какие будут детали и сборки,
+//!    какие файлы — версии одной детали, какой чертёж к какой детали, что
+//!    осталось непонятым. У каждого решения записано «почему», а там, где
+//!    программа не уверена, — вопрос человеку (`questions.rs`). Ответил —
+//!    план пересчитан.
 //! 2. [`App::intake_apply`] выполняет план: копирует файлы в проект и
 //!    сохраняет версии. Исходная папка не меняется.
 //!
@@ -24,31 +28,36 @@
 //!   непохожие — разные детали, одинаковые — возможно, копии;
 //! - детали, которые нужны только одной сборке, кладутся в её папку.
 //!
-//! Файлы: здесь — данные плана и обход папки, `names.rs` — пометки версий в
-//! именах, `grouping.rs` — какие модели одна деталь и как её назвать,
-//! `shape.rs` — сравнение формы, `measure.rs` — откуда берётся форма
-//! (паспорт STEP, для файла SolidWorks — через модуль перевода),
-//! `plan.rs` — остальные правила и сам план, `apply.rs` — выполнение.
+//! Файлы: здесь — данные плана, `study.rs` — изучение папки (обход, связи),
+//! `units.rs` — модель и её бумаги, `names.rs` — пометки версий в именах,
+//! `grouping.rs` — какие модели одна деталь и как её назвать, `shape.rs` —
+//! сравнение формы, `measure.rs` — откуда берётся форма (паспорт STEP, для
+//! файла SolidWorks — через модуль перевода), `hints.rs` — похожие детали
+//! с разными именами, `questions.rs` — вопросы и ответы, `plan.rs` — сам
+//! план, `apply.rs` — выполнение.
 
 mod apply;
 mod grouping;
+mod hints;
 mod measure;
 mod names;
 mod plan;
+mod questions;
 mod shape;
+mod study;
+mod units;
 
-use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use nonius_core::meta::ItemKind;
-use nonius_core::PartName;
 use serde::Serialize;
 
-use crate::{App, Error, NoProgress, Progress, Result};
+use crate::{App, NoProgress, Progress, Result};
 
 pub use apply::{IntakeDone, IntakeFailure};
+pub use questions::Question;
 pub use shape::ShapeVerdict;
+pub use study::IntakeStudy;
 
 /// Насколько глубоко проверять догадки формой деталей. Проверка читает
 /// модели (файлы SolidWorks — через сам SolidWorks, секунды на деталь).
@@ -72,6 +81,9 @@ pub struct IntakePlan {
     pub items: Vec<PlannedItem>,
     /// Файлы, которым место не нашлось: останутся, где лежат.
     pub left: Vec<LeftFile>,
+    /// Вопросы человеку: где программа не уверена. Ответы принимает
+    /// [`IntakeStudy::plan`]; без ответов план выполняется как есть.
+    pub questions: Vec<Question>,
 }
 
 /// Будущая деталь или сборка.
@@ -151,100 +163,6 @@ impl App {
         check: ShapeCheck,
         progress: &dyn Progress,
     ) -> Result<IntakePlan> {
-        let source = std::path::absolute(folder).map_err(|e| Error::io(folder, e))?;
-        if !source.is_dir() {
-            return Err(Error::FileNotFound(source));
-        }
-        let root = self.project.root();
-        if source.starts_with(root) || root.starts_with(&source) {
-            return Err(Error::IntakeInsideProject(source));
-        }
-        let mut files = Vec::new();
-        walk(&source, "", &mut files)?;
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-
-        let links = self.links_of(&files);
-        let taken: Vec<PartName> = self.project.items()?.into_iter().map(|i| i.name).collect();
-        // Сначала план по именам и связям: из него видно, чью форму смотреть.
-        let draft = plan::build(
-            source.clone(),
-            files.clone(),
-            &links,
-            &taken,
-            &HashMap::new(),
-        );
-        let shapes = self.shapes_of(&draft, check, progress);
-        if shapes.is_empty() {
-            return Ok(draft);
-        }
-        Ok(plan::build(source, files, &links, &taken, &shapes))
+        Ok(self.intake_study(folder, check, progress)?.plan(&[]))
     }
-
-    /// Связи файлов от подключённых модулей. Нет модуля или он не ответил —
-    /// разбор идёт по одним именам.
-    fn links_of(&self, files: &[Found]) -> HashMap<String, Vec<String>> {
-        let mut links = HashMap::new();
-        for source in self.registry.link_sources() {
-            let ask: Vec<PathBuf> = files
-                .iter()
-                .filter(|f| source.knows(&f.path))
-                .map(|f| f.path.clone())
-                .collect();
-            let Ok(answers) = source.links(&ask) else {
-                continue;
-            };
-            for (file, targets) in ask.iter().zip(answers) {
-                links
-                    .entry(key(file))
-                    .or_insert_with(Vec::new)
-                    .extend(targets.iter().map(|t| key(t)));
-            }
-        }
-        links
-    }
-}
-
-/// Обойти папку. Скрытые папки, временные файлы SolidWorks (`~$вал.sldprt`)
-/// и чужие проекты Nonius не трогаем.
-fn walk(dir: &Path, rel: &str, out: &mut Vec<Found>) -> Result<()> {
-    let entries = fs::read_dir(dir).map_err(|e| Error::io(dir, e))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| Error::io(dir, e))?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("~$") {
-            continue;
-        }
-        let kind = entry.file_type().map_err(|e| Error::io(&path, e))?;
-        if kind.is_dir() {
-            if path.join(nonius_core::project::PROJECT_FILE).is_file() {
-                continue;
-            }
-            let inner = if rel.is_empty() {
-                name
-            } else {
-                format!("{rel}/{name}")
-            };
-            walk(&path, &inner, out)?;
-        } else if kind.is_file() {
-            let modified = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            out.push(Found {
-                stem: path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                ext: path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default(),
-                dir: rel.to_string(),
-                modified,
-                path,
-            });
-        }
-    }
-    Ok(())
 }

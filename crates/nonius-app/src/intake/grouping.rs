@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use nonius_core::PartName;
 
 use super::names::{parse, Mark};
-use super::plan::Unit;
 use super::shape::{split, Shape, ShapeVerdict};
+use super::units::Unit;
 use super::LeftFile;
 
 /// Будущая деталь: одна модель или несколько версий одной.
@@ -21,8 +21,10 @@ pub(super) struct Proto {
     pub name: Option<PartName>,
     /// Что сказала о версиях форма; `None` — не проверялось.
     pub shape: Option<ShapeVerdict>,
-    /// Строки «почему» от проверки формой.
+    /// Строки «почему» от проверки формой и от ответов человека.
     pub notes: Vec<String>,
+    /// Модель, от которой эту отделила форма: о паре стоит спросить.
+    pub rival: Option<usize>,
 }
 
 /// Собрать версии одной детали по именам: `вал`, `вал_v2`, `вал (3)`.
@@ -33,6 +35,7 @@ pub(super) fn group(
     units: &[Unit],
     used_by: &[BTreeSet<usize>],
     shape: &dyn Fn(usize) -> Option<Shape>,
+    decided: &dyn Fn(usize, usize) -> Option<bool>,
 ) -> Vec<Proto> {
     let mut by_base: BTreeMap<(String, bool, String), Vec<usize>> = BTreeMap::new();
     for (i, u) in units.iter().enumerate() {
@@ -49,6 +52,7 @@ pub(super) fn group(
         name: None,
         shape: None,
         notes: Vec::new(),
+        rival: None,
     };
     let mut protos = Vec::new();
     for mut members in by_base.into_values() {
@@ -78,7 +82,7 @@ pub(super) fn group(
             (number, units[i].newest())
         };
         members.sort_by_key(|&i| order(i));
-        for part in split(&members, shape, &|i| units[i].stem.clone()) {
+        for part in split(&members, shape, &|i| units[i].stem.clone(), decided) {
             // Отделилась от группы — зовётся своим именем файла.
             let alone = part.members.len() == 1;
             let first = &units[part.members[0]].stem;
@@ -89,14 +93,49 @@ pub(super) fn group(
                     parse(first).base
                 },
                 members: part.members,
-                guessed: !alone,
+                guessed: !alone && !part.settled,
                 name: None,
                 shape: part.verdict,
                 notes: part.notes,
+                rival: part.rival,
             });
         }
     }
     protos
+}
+
+/// Соединить детали с разными именами, про которые человек сказал «это
+/// версии одной детали». Версии идут по времени файла; имя — от новой.
+pub(super) fn merge(
+    protos: &mut Vec<Proto>,
+    units: &[Unit],
+    decided: &dyn Fn(usize, usize) -> Option<bool>,
+) {
+    loop {
+        let same = |a: &Proto, b: &Proto| {
+            units[a.members[0]].is_assembly() == units[b.members[0]].is_assembly()
+                && a.members
+                    .iter()
+                    .any(|&m| b.members.iter().any(|&n| decided(m, n) == Some(true)))
+        };
+        let found = (0..protos.len())
+            .flat_map(|a| (a + 1..protos.len()).map(move |b| (a, b)))
+            .find(|&(a, b)| same(&protos[a], &protos[b]));
+        let Some((a, b)) = found else {
+            break;
+        };
+        let gone = protos.remove(b);
+        let kept = &mut protos[a];
+        kept.members.extend(gone.members);
+        kept.members.sort_by_key(|&m| units[m].newest());
+        if let Some(&newest) = kept.members.last() {
+            kept.base = parse(&units[newest].stem).base;
+        }
+        kept.guessed = false;
+        kept.shape = None;
+        kept.rival = None;
+        kept.notes = vec!["вы ответили: это версии одной детали".into()];
+    }
 }
 
 /// Дать имена. Занятое в проекте — не трогаем (файлы остаются); одинаковые

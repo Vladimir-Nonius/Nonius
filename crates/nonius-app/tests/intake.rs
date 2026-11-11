@@ -218,6 +218,39 @@ fn shape_of_the_parts_checks_the_names() {
 }
 
 #[test]
+fn answers_reshape_the_plan() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("свалка");
+    std::fs::create_dir_all(&source).unwrap();
+    let put = |name: &str, text: &str| std::fs::write(source.join(name), text).unwrap();
+    put("кожух.step", "5000 2 80 120");
+    put("кожух_v2.step", "900 10 10 30");
+    put("люк.step", "5100 2 80 121");
+    let app = app(&tmp.path().join("станок"));
+
+    // Папка изучается один раз; план по ответам пересчитывается мгновенно.
+    let study = app
+        .intake_study(&source, ShapeCheck::All, &NoProgress)
+        .unwrap();
+    let plan = study.plan(&[]);
+    let ids: Vec<&str> = plan.questions.iter().map(|q| q.id.as_str()).collect();
+    assert_eq!(ids, ["кожух|кожух_v2", "кожух|люк"]);
+    assert_eq!(plan.items.len(), 3);
+
+    let plan = study.plan(&[("кожух|люк".into(), true), ("кожух|кожух_v2".into(), false)]);
+    assert!(plan.questions.is_empty(), "{:?}", plan.questions);
+    // Кожух и люк стали одной деталью (имя — от более нового файла).
+    assert_eq!(plan.items.len(), 2);
+    let merged = plan.items.iter().find(|i| i.versions.len() == 2).unwrap();
+    assert!(merged.why.iter().any(|w| w.contains("вы ответили")));
+    assert!(!merged.guessed);
+
+    let done = app.intake_apply(&plan, &NoProgress).unwrap();
+    assert_eq!(done.failed, []);
+    assert_eq!(app.versions(&merged.name).unwrap().len(), 2);
+}
+
+#[test]
 fn project_folder_itself_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("станок");

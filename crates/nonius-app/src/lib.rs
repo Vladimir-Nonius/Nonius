@@ -47,8 +47,8 @@ pub use compare::{CompareOptions, Comparison, NoProgress, Progress};
 pub use error::{Error, Result, ERROR_CODES};
 pub use import::{Imported, PREVIEW_FORMAT};
 pub use intake::{
-    IntakeDone, IntakeFailure, IntakePlan, LeftFile, PlannedItem, PlannedVersion, ShapeCheck,
-    ShapeVerdict, NOT_OURS,
+    IntakeDone, IntakeFailure, IntakePlan, IntakeStudy, LeftFile, PlannedItem, PlannedVersion,
+    Question, ShapeCheck, ShapeVerdict, NOT_OURS,
 };
 pub use items::{ItemState, ItemStatus};
 pub use layout::{MapItem, ProjectMap};

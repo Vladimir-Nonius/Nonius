@@ -194,10 +194,14 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
             apply,
             quick,
             deep,
+            yes,
+            no,
+            ..
         } => {
             let app = app()?;
             let check = super::intake::check(*quick, *deep);
-            let plan = app.intake_plan_with(folder, check, &NoProgress)?;
+            let study = app.intake_study(folder, check, &NoProgress)?;
+            let plan = study.plan(&super::intake::answers(yes, no));
             let done = if *apply {
                 Some(app.intake_apply(&plan, &NoProgress)?)
             } else {

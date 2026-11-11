@@ -106,7 +106,7 @@ fn other_part_is_different() {
 fn group_without_shapes_stays_unchecked() {
     let (v1, _) = manifold();
     let known = |i: usize| (i == 0).then_some(v1);
-    let parts = split(&[0, 1], &known, &labels);
+    let parts = split(&[0, 1], &known, &labels, &|_, _| None);
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].members, [0, 1]);
     assert_eq!(parts[0].verdict, None);
@@ -117,7 +117,7 @@ fn group_without_shapes_stays_unchecked() {
 fn similar_versions_are_confirmed() {
     let (v1, v2) = manifold();
     let shapes = [v1, v2];
-    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels);
+    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels, &|_, _| None);
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].verdict, Some(ShapeVerdict::Confirmed));
     assert_eq!(
@@ -130,12 +130,13 @@ fn similar_versions_are_confirmed() {
 fn stranger_leaves_the_group() {
     let (v1, v2) = manifold();
     let shapes = [v1, shape(300.0, [5.0, 10.0, 10.0]), v2];
-    let parts = split(&[0, 1, 2], &|i| Some(shapes[i]), &labels);
+    let parts = split(&[0, 1, 2], &|i| Some(shapes[i]), &labels, &|_, _| None);
     assert_eq!(parts.len(), 2);
     assert_eq!(parts[0].members, [0, 2]);
     assert_eq!(parts[0].verdict, Some(ShapeVerdict::Confirmed));
     assert_eq!(parts[1].members, [1]);
     assert_eq!(parts[1].verdict, Some(ShapeVerdict::Different));
+    assert_eq!(parts[1].rival, Some(0), "о паре стоит спросить");
     assert!(parts[1].notes[0].starts_with("имя похоже на «вал», но форма другая: габариты"));
 }
 
@@ -143,7 +144,7 @@ fn stranger_leaves_the_group() {
 fn copies_are_reported() {
     let (v1, v2) = manifold();
     let shapes = [v1, v1, v2];
-    let parts = split(&[0, 1, 2], &|i| Some(shapes[i]), &labels);
+    let parts = split(&[0, 1, 2], &|i| Some(shapes[i]), &labels, &|_, _| None);
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].verdict, Some(ShapeVerdict::Copy));
     assert_eq!(
@@ -154,32 +155,26 @@ fn copies_are_reported() {
 }
 
 #[test]
-fn hints_name_look_alikes() {
+fn human_word_beats_shape_and_names() {
     let (v1, v2) = manifold();
     let plug = shape(300.0, [5.0, 10.0, 10.0]);
-    let mut parts = vec![
-        ("крышка".to_string(), Some(v1)),
-        ("крышка доработанная".to_string(), Some(v2)),
-        ("кронштейн".to_string(), None),
-    ];
-    for n in 1..=5 {
-        parts.push((format!("заглушка{n}"), Some(plug)));
-    }
-    let notes = hints(&parts, &|_, _| false);
+    // Форма похожа, а человек сказал «нет»: две детали, и вопросов больше нет.
+    let shapes = [v1, v2];
+    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels, &|_, _| Some(false));
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[1].notes, ["вы ответили: это не версия «вал»"]);
+    assert_eq!((parts[1].verdict, parts[1].rival), (None, None));
+    // Форма разная, а человек сказал «да»: одна деталь, но не «подтверждено».
+    let shapes = [v1, plug];
+    let parts = split(&[0, 1], &|i| Some(shapes[i]), &labels, &|_, _| Some(true));
+    assert_eq!(parts.len(), 1);
+    assert!(parts[0].settled);
+    assert_eq!(parts[0].verdict, None);
     assert_eq!(
-        notes[0],
-        ["по форме похожа на «крышка доработанная»: возможно, это версии одной детали"]
+        parts[0].notes.last().unwrap(),
+        "вы ответили: это версии одной детали"
     );
-    assert_eq!(notes[1].len(), 1);
-    assert!(notes[2].is_empty(), "без формы подсказок нет");
-    assert_eq!(
-        notes[3],
-        [
-            "форма такая же, как у «заглушка2», «заглушка3», «заглушка4» и ещё 1: \
-          возможно, это копии одной детали"
-        ]
-    );
-    // Стоят вместе в сборке — точно разные детали, подсказка не нужна.
-    let notes = hints(&parts, &|_, _| true);
-    assert!(notes.iter().all(Vec::is_empty));
+    // Формы нет вовсе — ответ всё равно действует.
+    let parts = split(&[0, 1], &|_| None, &labels, &|_, _| Some(false));
+    assert_eq!(parts.len(), 2);
 }

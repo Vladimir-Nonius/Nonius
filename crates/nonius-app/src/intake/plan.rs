@@ -9,57 +9,24 @@ use std::path::PathBuf;
 use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 
-use super::grouping::{group, name};
-use super::shape::{hints, Shape};
-use super::{key, Found, IntakePlan, LeftFile, PlannedItem, PlannedVersion};
-
-/// Файлы моделей: из них получаются детали и сборки.
-const MODELS: &[&str] = &["sldprt", "sldasm", "step", "stp"];
-
-/// Чертежи и бумаги конструктора: если такой файл ни к чему не подошёл,
-/// человеку стоит о нём знать. Прочее (расчёты, логи, картинки программ) —
-/// просто не наше.
-const PAPERS: &[&str] = &[
-    "slddrw", "dxf", "dwg", "pdf", "doc", "docx", "xls", "xlsx", "odt", "ods",
-];
-
-/// Модель одного имени в одной папке со всем, что к ней приложено.
-pub(super) struct Unit {
-    pub dir: String,
-    pub stem: String,
-    pub models: Vec<Found>,
-    docs: Vec<PathBuf>,
-    why: Vec<String>,
-}
-
-impl Unit {
-    pub fn is_assembly(&self) -> bool {
-        self.models.iter().any(|m| m.ext == "sldasm")
-    }
-    pub fn newest(&self) -> std::time::SystemTime {
-        self.models
-            .iter()
-            .map(|m| m.modified)
-            .max()
-            .unwrap_or(std::time::UNIX_EPOCH)
-    }
-}
-
-fn file_name(path: &std::path::Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
+use super::grouping::{group, merge, name};
+use super::hints::hints;
+use super::questions::{ask, Decisions};
+use super::shape::Shape;
+use super::units::{attach, file_name, ordered, units_of};
+use super::{key, Found, IntakePlan, PlannedItem, PlannedVersion};
 
 /// Составить план. `links` — связи файлов (ключи и значения — пути строчными
 /// буквами, см. [`key`]); `taken` — имена, уже занятые в проекте; `shapes` —
-/// отпечатки формы моделей по ключу файла (каких нет — те не проверяются).
+/// отпечатки формы моделей по ключу файла (каких нет — те не проверяются);
+/// `said` — ответы человека на вопросы прошлого плана.
 pub(super) fn build(
     source: PathBuf,
     files: Vec<Found>,
     links: &HashMap<String, Vec<String>>,
     taken: &[PartName],
     shapes: &HashMap<String, Shape>,
+    said: &Decisions,
 ) -> IntakePlan {
     let mut left = Vec::new();
     let (mut units, by_name, by_path) = units_of(&files);
@@ -86,7 +53,9 @@ pub(super) fn build(
             .next()
             .copied()
     };
-    let mut protos = group(&units, &used_by, &shape);
+    let decided = |a: usize, b: usize| said.get(&units[a].id(), &units[b].id());
+    let mut protos = group(&units, &used_by, &shape, &decided);
+    merge(&mut protos, &units, &decided);
     name(&mut protos, &units, taken, &mut left);
 
     // Похожие формой детали с непохожими именами: только подсказка.
@@ -109,8 +78,15 @@ pub(super) fn build(
         let members = protos[p].members.iter();
         members.flat_map(|&m| used_by[m].iter().copied()).collect()
     };
-    let apart = |a: usize, b: usize| users(a).intersection(&users(b)).next().is_some();
+    let refused = |a: usize, b: usize| {
+        let (x, y) = (&protos[a].members, &protos[b].members);
+        x.iter()
+            .any(|&m| y.iter().any(|&n| decided(m, n) == Some(false)))
+    };
+    let apart =
+        |a: usize, b: usize| refused(a, b) || users(a).intersection(&users(b)).next().is_some();
     let similar = hints(&parts, &apart);
+    let questions = ask(&protos, &units, &similar.alike);
 
     // Сколько сборок в каждой папке: одна — папка и так её, несколько —
     // у каждой своя папка со своими деталями.
@@ -174,7 +150,7 @@ pub(super) fn build(
             ));
         }
         why.extend(proto.notes.iter().cloned());
-        why.extend(similar[n].iter().cloned());
+        why.extend(similar.notes[n].iter().cloned());
         let mut docs: Vec<PathBuf> = Vec::new();
         for &m in &proto.members {
             why.extend(units[m].why.iter().cloned());
@@ -213,83 +189,8 @@ pub(super) fn build(
         source,
         items,
         left,
+        questions,
     }
-}
-
-type Index = HashMap<(String, String), usize>;
-
-/// Модели по папке и имени: `вал.sldprt` и `вал.step` — одна модель.
-fn units_of(files: &[Found]) -> (Vec<Unit>, Index, HashMap<String, usize>) {
-    let mut units: Vec<Unit> = Vec::new();
-    let mut by_name = Index::new();
-    let mut by_path = HashMap::new();
-    for f in files.iter().filter(|f| MODELS.contains(&f.ext.as_str())) {
-        let id = (f.dir.clone(), f.stem.to_lowercase());
-        let i = *by_name.entry(id).or_insert_with(|| {
-            units.push(Unit {
-                dir: f.dir.clone(),
-                stem: f.stem.clone(),
-                models: Vec::new(),
-                docs: Vec::new(),
-                why: Vec::new(),
-            });
-            units.len() - 1
-        });
-        units[i].models.push(f.clone());
-        by_path.insert(key(&f.path), i);
-    }
-    (units, by_name, by_path)
-}
-
-/// Приложить чертежи и бумаги к моделям: по ссылке, потом по имени.
-fn attach(
-    files: &[Found],
-    links: &HashMap<String, Vec<String>>,
-    by_name: &Index,
-    by_path: &HashMap<String, usize>,
-    units: &mut [Unit],
-    left: &mut Vec<LeftFile>,
-) {
-    for f in files.iter().filter(|f| !MODELS.contains(&f.ext.as_str())) {
-        let linked = links
-            .get(&key(&f.path))
-            .into_iter()
-            .flatten()
-            .find_map(|target| by_path.get(target).copied());
-        let named = by_name
-            .get(&(f.dir.clone(), f.stem.to_lowercase()))
-            .copied();
-        match (linked, named) {
-            (Some(u), _) => {
-                if named != Some(u) {
-                    units[u].why.push(format!(
-                        "чертёж «{}» ссылается на эту модель",
-                        file_name(&f.path)
-                    ));
-                }
-                units[u].docs.push(f.path.clone());
-            }
-            (None, Some(u)) => units[u].docs.push(f.path.clone()),
-            (None, None) => left.push(LeftFile {
-                path: f.path.clone(),
-                why: if f.ext == "slddrw" {
-                    "чертёж: не нашёл его модель в этой папке".into()
-                } else if PAPERS.contains(&f.ext.as_str()) {
-                    "не понял, к какой детали относится".into()
-                } else {
-                    super::NOT_OURS.into()
-                },
-            }),
-        }
-    }
-}
-
-/// Файлы модели в порядке импорта: сначала STEP, потом файл SolidWorks —
-/// свежий STEP из SolidWorks, если его удастся получить, главнее старого.
-fn ordered(models: &[Found]) -> Vec<PathBuf> {
-    let mut sorted: Vec<&Found> = models.iter().collect();
-    sorted.sort_by_key(|m| (m.ext.starts_with("sld"), m.path.clone()));
-    sorted.into_iter().map(|m| m.path.clone()).collect()
 }
 
 #[cfg(test)]

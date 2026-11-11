@@ -13,8 +13,8 @@
 //! - разная — разные детали, хоть имена и похожи.
 //!
 //! Из ответов получаются решения: [`split`] делит группу, собранную по
-//! именам, на настоящие детали, [`hints`] подсказывает про похожие детали с
-//! непохожими именами (ничего не объединяя — решает человек).
+//! именам, на настоящие детали (слово человека при этом сильнее формы), а
+//! `hints.rs` подсказывает про похожие детали с непохожими именами.
 
 use std::collections::BTreeSet;
 
@@ -30,8 +30,6 @@ const TOUCHED: f64 = 0.10;
 const MAX_CHANGE: f64 = 0.25;
 /// Копия: все числа совпали с точностью записи в файл.
 const COPY: f64 = 1e-4;
-/// Сколько имён перечислять в подсказке.
-const NAMED: usize = 3;
 
 /// Что форма говорит о версиях детали.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -149,33 +147,40 @@ pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
 pub(super) struct Cluster {
     /// Номера моделей — в том же порядке, что пришли.
     pub members: Vec<usize>,
-    /// Что сказала форма; `None` — не проверялось.
+    /// Что сказала форма; `None` — не проверялось или решил человек.
     pub verdict: Option<ShapeVerdict>,
     /// Строки для «почему».
     pub notes: Vec<String>,
+    /// Модель, от которой эту отделила форма: о паре стоит спросить.
+    pub rival: Option<usize>,
+    /// Все версии подтвердил человек: спрашивать больше не о чем.
+    pub settled: bool,
 }
 
-/// Проверить формой группу `members`, собранную по именам (от старой версии
-/// к новой). `shape` и `label` отвечают по номеру модели. Если хоть у одной
-/// модели формы нет — группа остаётся, как была, с пометкой «не проверено».
+/// Проверить группу `members`, собранную по именам (от старой версии к
+/// новой). `shape` и `label` отвечают по номеру модели, `decided` — что
+/// человек сказал про пару моделей: его слово сильнее формы. Форма судит,
+/// только если она есть у всех моделей группы; иначе верим именам.
 pub(super) fn split(
     members: &[usize],
     shape: &dyn Fn(usize) -> Option<Shape>,
     label: &dyn Fn(usize) -> String,
+    decided: &dyn Fn(usize, usize) -> Option<bool>,
 ) -> Vec<Cluster> {
-    let shapes: Vec<Shape> = members.iter().filter_map(|&m| shape(m)).collect();
-    if shapes.len() != members.len() {
-        return vec![Cluster {
-            members: members.to_vec(),
-            verdict: None,
-            notes: Vec::new(),
-        }];
-    }
+    let shapes: Vec<Option<Shape>> = members.iter().map(|&m| shape(m)).collect();
+    let checked = shapes.iter().all(Option::is_some);
+    let likeness = |a: usize, b: usize| match (&shapes[a], &shapes[b]) {
+        (Some(x), Some(y)) if checked => Some(compare(x, y)),
+        _ => None,
+    };
+    let said = |a: usize, b: usize| decided(members[a], members[b]);
     // Похожие — в одну кучку; похожесть тянется по цепочке версий.
     let mut heap: Vec<usize> = (0..members.len()).collect();
     for a in 0..members.len() {
         for b in a + 1..members.len() {
-            if !matches!(compare(&shapes[a], &shapes[b]), Likeness::Different(_)) {
+            let together = said(a, b)
+                .unwrap_or_else(|| !matches!(likeness(a, b), Some(Likeness::Different(_))));
+            if together {
                 let (from, to) = (heap[b], heap[a]);
                 heap.iter_mut()
                     .filter(|h| **h == from)
@@ -188,106 +193,67 @@ pub(super) fn split(
         .into_iter()
         .map(|head| {
             let at: Vec<usize> = (0..members.len()).filter(|&i| heap[i] == head).collect();
-            let mut notes = Vec::new();
-            let verdict = if let [only] = at[..] {
-                // Отделилась: сказать, от кого и чем отличается.
-                let other = if only == 0 { 1 } else { 0 };
-                if let Likeness::Different(how) = compare(&shapes[other], &shapes[only]) {
-                    notes.push(format!(
+            let mut part = Cluster {
+                members: at.iter().map(|&i| members[i]).collect(),
+                verdict: None,
+                notes: Vec::new(),
+                rival: None,
+                settled: false,
+            };
+            if let [only] = at[..] {
+                let refused = (0..members.len()).find(|&o| said(only, o) == Some(false));
+                if let Some(other) = refused {
+                    part.notes.push(format!(
+                        "вы ответили: это не версия «{}»",
+                        label(members[other])
+                    ));
+                    return part;
+                }
+                // Отделила форма: сказать, от кого и чем отличается.
+                let other = usize::from(only == 0);
+                if let Some(Likeness::Different(how)) = likeness(other, only) {
+                    part.notes.push(format!(
                         "имя похоже на «{}», но форма другая: {how}",
                         label(members[other])
                     ));
                 }
-                ShapeVerdict::Different
-            } else {
-                let mut copies = 0;
-                for pair in at.windows(2) {
-                    let (old, new) = (label(members[pair[0]]), label(members[pair[1]]));
-                    match compare(&shapes[pair[0]], &shapes[pair[1]]) {
-                        Likeness::Same => {
-                            copies += 1;
-                            notes.push(format!(
-                                "форма у «{new}» такая же, как у «{old}»: возможно, это копия"
-                            ));
-                        }
-                        Likeness::Similar(how) => {
-                            notes.push(format!("подтверждено формой, «{old}» → «{new}»: {how}"));
-                        }
-                        Likeness::Different(how) => {
-                            notes.push(format!("«{old}» → «{new}» изменилась сильно: {how}"));
-                        }
+                part.verdict = Some(ShapeVerdict::Different);
+                part.rival = Some(members[other]);
+                return part;
+            }
+            let (mut copies, mut odd) = (0, false);
+            part.settled = true;
+            for pair in at.windows(2) {
+                let (old, new) = (label(members[pair[0]]), label(members[pair[1]]));
+                part.settled &= said(pair[0], pair[1]) == Some(true);
+                match likeness(pair[0], pair[1]) {
+                    Some(Likeness::Same) => {
+                        copies += 1;
+                        part.notes.push(format!(
+                            "форма у «{new}» такая же, как у «{old}»: возможно, это копия"
+                        ));
                     }
+                    Some(Likeness::Similar(how)) => part
+                        .notes
+                        .push(format!("подтверждено формой, «{old}» → «{new}»: {how}")),
+                    Some(Likeness::Different(how)) => {
+                        odd = true;
+                        part.notes
+                            .push(format!("«{old}» → «{new}» изменилась сильно: {how}"));
+                    }
+                    None => {}
                 }
-                if copies > 0 {
-                    ShapeVerdict::Copy
-                } else {
-                    ShapeVerdict::Confirmed
-                }
+            }
+            if part.settled {
+                part.notes
+                    .push("вы ответили: это версии одной детали".into());
+            }
+            part.verdict = match (checked && !odd, copies) {
+                (false, _) => None,
+                (true, 0) => Some(ShapeVerdict::Confirmed),
+                (true, _) => Some(ShapeVerdict::Copy),
             };
-            Cluster {
-                members: at.iter().map(|&i| members[i]).collect(),
-                verdict: Some(verdict),
-                notes,
-            }
-        })
-        .collect()
-}
-
-/// Подсказки про детали, которые по именам не связаны, а формой похожи.
-/// `parts` — по одной записи на будущую деталь: имя и форма её последней
-/// версии; `apart(a, b)` — эти две точно разные (стоят в одной сборке).
-/// Ответ — строки для «почему» каждой детали. Ничего не объединяется.
-pub(super) fn hints(
-    parts: &[(String, Option<Shape>)],
-    apart: &dyn Fn(usize, usize) -> bool,
-) -> Vec<Vec<String>> {
-    let mut same: Vec<Vec<&str>> = vec![Vec::new(); parts.len()];
-    let mut alike: Vec<Vec<&str>> = vec![Vec::new(); parts.len()];
-    for a in 0..parts.len() {
-        for b in a + 1..parts.len() {
-            let (Some(x), Some(y)) = (&parts[a].1, &parts[b].1) else {
-                continue;
-            };
-            if apart(a, b) {
-                continue;
-            }
-            let lists = match compare(x, y) {
-                Likeness::Same => &mut same,
-                Likeness::Similar(_) => &mut alike,
-                Likeness::Different(_) => continue,
-            };
-            lists[a].push(&parts[b].0);
-            lists[b].push(&parts[a].0);
-        }
-    }
-    let listed = |names: &[&str]| {
-        let mut text = names
-            .iter()
-            .take(NAMED)
-            .map(|n| format!("«{n}»"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        if names.len() > NAMED {
-            text.push_str(&format!(" и ещё {}", names.len() - NAMED));
-        }
-        text
-    };
-    (0..parts.len())
-        .map(|i| {
-            let mut notes = Vec::new();
-            if !same[i].is_empty() {
-                notes.push(format!(
-                    "форма такая же, как у {}: возможно, это копии одной детали",
-                    listed(&same[i])
-                ));
-            }
-            if !alike[i].is_empty() {
-                notes.push(format!(
-                    "по форме похожа на {}: возможно, это версии одной детали",
-                    listed(&alike[i])
-                ));
-            }
-            notes
+            part
         })
         .collect()
 }

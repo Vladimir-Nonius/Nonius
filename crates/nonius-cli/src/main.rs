@@ -133,7 +133,19 @@ fn run(cli: Cli) -> Result<()> {
             apply,
             quick,
             deep,
-        } => intake::intake(&app()?, folder, *apply, intake::check(*quick, *deep))?,
+            ask,
+            yes,
+            no,
+        } => {
+            let options = intake::Options {
+                apply: *apply,
+                check: intake::check(*quick, *deep),
+                ask: *ask,
+                yes,
+                no,
+            };
+            intake::intake(&app()?, folder, &options)?;
+        }
         Command::Status { part } => history::status(&app()?, part.as_deref())?,
         Command::Commit { part, message } => history::commit(&app()?, part, message)?,
         Command::Log { part } => history::log(&app()?, part)?,
