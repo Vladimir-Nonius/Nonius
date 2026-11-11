@@ -2,6 +2,7 @@
 
 #include "nonius_occt.h"
 #include "internal.h"
+#include "local.h"
 #include "share.h"
 
 #include <cstdlib>
@@ -191,8 +192,8 @@ NoniusShape* nonius_boolean(const NoniusShape* a, const NoniusShape* b, int32_t 
     return nullptr;
 }
 
-int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusShape** added,
-                    NoniusShape** removed, char* err, size_t err_len) {
+int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, int32_t local,
+                    NoniusShape** added, NoniusShape** removed, char* err, size_t err_len) {
     *added = nullptr;
     *removed = nullptr;
     try {
@@ -201,8 +202,23 @@ int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusS
         // разность из общего пересечения бывает неверной (проверено на OCCT 7.9).
         // Одинаковые грани версий делаются общими (share.h) — пересекается
         // только изменённое.
+        nonius::Trace trace;
         TopoDS_Shape was, now;
-        nonius::share_faces(before->shape, after->shape, &was, &now);
+        const bool shared = nonius::share_faces(before->shape, after->shape, &was, &now);
+        trace.lap("share_faces");
+        if (local != 0) {
+            // Только изменённое (local.h): совпавшие грани не пересекаются вовсе.
+            TopoDS_Shape plus, minus;
+            if (!shared ||
+                !nonius::local_diff(was, now, before->shape, after->shape, &plus, &minus)) {
+                set_error(err, err_len, "изменённые места не выделить");
+                return 0;
+            }
+            trace.lap("local diff");
+            *removed = wrap(minus);
+            *added = wrap(plus);
+            return 1;
+        }
         TopTools_ListOfShape args;
         args.Append(was);
         args.Append(now);
@@ -211,12 +227,15 @@ int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusS
         filler.SetRunParallel(Standard_True);
         filler.SetNonDestructive(Standard_True);
         filler.Perform();
+        trace.lap("pave filler");
         if (filler.HasErrors()) {
             set_error(err, err_len, "не удалось пересечь тела");
             return 0;
         }
         BRepAlgoAPI_Cut gone(was, now, filler, Standard_True);
+        trace.lap("cut: gone");
         BRepAlgoAPI_Cut appeared(was, now, filler, Standard_False);
+        trace.lap("cut: appeared");
         if (!gone.IsDone() || gone.HasErrors() || !appeared.IsDone() || appeared.HasErrors()) {
             set_error(err, err_len, "булева операция не удалась");
             return 0;

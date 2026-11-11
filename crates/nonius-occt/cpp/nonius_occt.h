@@ -63,10 +63,35 @@ int32_t nonius_shape_rough_bbox(const NoniusShape* shape, double min[3], double 
 NoniusShape* nonius_boolean(const NoniusShape* a, const NoniusShape* b, int32_t op, double fuzzy,
                             char* err, size_t err_len);
 
-/* Разность версий за одно пересечение: added = after − before, removed = before − after.
- * 1 — успех (оба результата нужно освободить), 0 — ошибка в err. */
-int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, NoniusShape** added,
-                    NoniusShape** removed, char* err, size_t err_len);
+/* Разность версий: added = after − before, removed = before − after.
+ * local = 1 — считать только там, где версии отличаются (быстро, но выходит не
+ * всегда); 0 — одно пересечение тел целиком. Результат стоит проверить балансом
+ * объёмов. 1 — успех (оба результата нужно освободить), 0 — ошибка в err. */
+int32_t nonius_diff(const NoniusShape* before, const NoniusShape* after, int32_t local,
+                    NoniusShape** added, NoniusShape** removed, char* err, size_t err_len);
+
+/* Грань, которая есть только в одной из версий, и что это за поверхность. */
+typedef struct NoniusFace {
+    int32_t side;     /* 0 — была и пропала, 1 — появилась */
+    int32_t kind;     /* 0 — прочее, 1 — плоскость, 2 — цилиндр, 3 — конус, 4 — сфера, 5 — тор */
+    int32_t inward;   /* 1 — материал вокруг оси (отверстие), 0 — внутри (вал) */
+    double origin[3]; /* точка плоскости, точка оси или центр */
+    double dir[3];    /* нормаль плоскости наружу из тела или направление оси */
+    double radius;    /* цилиндр, сфера; тор — большой; конус — в точке origin */
+    double radius2;   /* тор — малый; конус — половина угла, рад */
+    double angle;     /* охват вокруг оси, рад */
+    double from;      /* границы вдоль оси от origin, мм (у тора — по малому кругу, рад) */
+    double to;
+    double area;      /* мм² */
+    double center[3]; /* центр тяжести грани */
+} NoniusFace;
+
+/* Грани, которые не совпали у двух версий: их описания (освободить
+ * nonius_faces_free) и сами грани — fresh из «стало», gone из «было»
+ * (освободить nonius_shape_free). 0 — версии не сопоставить. */
+int32_t nonius_changed_faces(const NoniusShape* before, const NoniusShape* after, NoniusFace** out,
+                             size_t* count, NoniusShape** fresh, NoniusShape** gone);
+void nonius_faces_free(NoniusFace* faces);
 
 int32_t nonius_shape_mesh(const NoniusShape* shape, double linear_deflection,
                           double angular_deflection, NoniusMesh* out);

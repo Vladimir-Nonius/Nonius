@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 
 /// Файлы C++-прослойки.
 const SOURCES: &[&str] = &[
+    "cpp/faces.cpp",
+    "cpp/local.cpp",
+    "cpp/match.cpp",
     "cpp/nonius_occt.cpp",
     "cpp/props.cpp",
     "cpp/same.cpp",

@@ -103,24 +103,24 @@ impl GeometryDiff {
         let scale = vb.max(va);
         let threshold = (scale * 1e-6).max(tolerance_mm.powi(3));
 
-        // Быстрый путь: одно общее пересечение. Проверяем баланс
-        // «было + добавлено − убрано = стало»; если не сходится — медленный,
-        // но надёжный путь из двух отдельных вычитаний с допуском.
+        // Три пути, от быстрого к надёжному: только изменённые места, одно
+        // пересечение тел целиком, два отдельных вычитания с допуском. Первые
+        // два проверяются балансом «было + добавлено − убрано = стало».
         let measured = |(added, removed): (Shape, Shape)| {
             let (a, r) = (added.volume(), removed.volume());
             (added, a, removed, r)
         };
-        let fast = before
-            .diff(&after)
-            .ok()
-            .map(measured)
-            .filter(|&(_, a, _, r)| {
-                let mismatch = (vb + a - r - va).abs();
-                a >= -threshold
-                    && r >= -threshold
-                    && mismatch <= (scale * 1e-4).max(threshold * 10.0)
-            });
-        let (added, a, removed, r) = match fast {
+        let balanced = |&(_, a, _, r): &(Shape, f64, Shape, f64)| {
+            (vb + a - r - va).abs() <= (scale * 1e-4).max(threshold * 10.0)
+        };
+        let attempt = |local: bool| {
+            before
+                .diff(&after, local)
+                .ok()
+                .map(measured)
+                .filter(balanced)
+        };
+        let (added, a, removed, r) = match attempt(true).or_else(|| attempt(false)) {
             Some(found) => found,
             None => {
                 let fuzzy = tolerance_mm.max(0.0);

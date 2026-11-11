@@ -3,10 +3,12 @@
 //!
 //! Файлы: здесь — общие помощники и превью, `source.rs` — чтение STEP,
 //! `diff.rs` — разница двух тел, `compare.rs` — сравнение формы,
+//! `features.rs` — изменения словами (отверстия, скругления, плоскости),
 //! `highlight.rs` — картинка изменений, `preview.rs` — превью детали.
 
 mod compare;
 mod diff;
+mod features;
 mod highlight;
 mod preview;
 mod scene;
@@ -24,6 +26,7 @@ use crate::OcctError;
 pub use compare::GeometryComparator;
 use diff::shared_diff;
 pub use diff::{forget_diff, GeometryDiff};
+pub use features::FeatureComparator;
 pub use highlight::HighlightRenderer;
 pub use preview::{PreviewExporter, PREVIEW_PNG};
 pub use scene::{shape_scene, SceneRenderer};

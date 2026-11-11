@@ -24,7 +24,7 @@ fn to_scene_mesh(m: render::Mesh) -> Mesh {
 /// Места одной роли: каждое твёрдое тело — отдельное место.
 fn places(shape: &Shape, role: Role, defl: f64, out: &mut Vec<Region>) {
     for solid in shape.solids() {
-        let volume = solid.props().volume;
+        let volume = solid.volume();
         let mesh = to_scene_mesh(solid.mesh(defl, ANGULAR));
         if !mesh.is_empty() {
             out.push(Region {
@@ -40,18 +40,18 @@ impl GeometryDiff {
     /// Сцена изменений: новая и старая версии целиком, зелёное и красное —
     /// каждое добавленное и убранное тело отдельным местом, крупные первыми.
     pub fn scene(&self) -> Scene {
-        let after = self.after.props();
-        let before = self.before.props();
-        let defl = deflection(after.bbox.or(before.bbox));
+        // Объёмы уже посчитаны при сравнении, габариты нужны только для
+        // допуска сетки: полный паспорт тела здесь — лишние секунды.
+        let defl = deflection(self.after.rough_bbox().or_else(|| self.before.rough_bbox()));
         let mut regions = vec![Region {
             role: Role::After,
-            volume_mm3: after.volume.max(0.0),
+            volume_mm3: self.after.volume().max(0.0),
             mesh: to_scene_mesh(self.after.mesh(defl, ANGULAR)),
         }];
         if self.changed() {
             regions.push(Region {
                 role: Role::Before,
-                volume_mm3: before.volume.max(0.0),
+                volume_mm3: self.before.volume().max(0.0),
                 mesh: to_scene_mesh(self.before.mesh(defl, ANGULAR)),
             });
         }
@@ -72,12 +72,11 @@ impl GeometryDiff {
 
 /// Сцена одной детали без сравнения.
 pub fn shape_scene(shape: &Shape) -> Scene {
-    let p = shape.props();
     Scene {
         regions: vec![Region {
             role: Role::After,
-            volume_mm3: p.volume.max(0.0),
-            mesh: to_scene_mesh(shape.mesh(deflection(p.bbox), ANGULAR)),
+            volume_mm3: shape.volume().max(0.0),
+            mesh: to_scene_mesh(shape.mesh(deflection(shape.rough_bbox()), ANGULAR)),
         }],
     }
 }

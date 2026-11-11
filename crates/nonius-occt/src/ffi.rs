@@ -28,7 +28,34 @@ pub(crate) struct NoniusMesh {
     pub triangle_count: usize,
 }
 
+/// Грань, которая есть только в одной из версий (`NoniusFace` в заголовке).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct NoniusFace {
+    pub side: i32,
+    pub kind: i32,
+    pub inward: i32,
+    pub origin: [f64; 3],
+    pub dir: [f64; 3],
+    pub radius: f64,
+    pub radius2: f64,
+    pub angle: f64,
+    pub from: f64,
+    pub to: f64,
+    pub area: f64,
+    pub center: [f64; 3],
+}
+
 unsafe extern "C" {
+    pub(crate) fn nonius_changed_faces(
+        before: *const NoniusShape,
+        after: *const NoniusShape,
+        out: *mut *mut NoniusFace,
+        count: *mut usize,
+        fresh: *mut *mut NoniusShape,
+        gone: *mut *mut NoniusShape,
+    ) -> i32;
+    pub(crate) fn nonius_faces_free(faces: *mut NoniusFace);
     pub(crate) fn nonius_occt_version() -> *const c_char;
     pub(crate) fn nonius_read_step(
         path: *const c_char,
@@ -64,6 +91,7 @@ unsafe extern "C" {
     pub(crate) fn nonius_diff(
         before: *const NoniusShape,
         after: *const NoniusShape,
+        local: i32,
         added: *mut *mut NoniusShape,
         removed: *mut *mut NoniusShape,
         err: *mut c_char,

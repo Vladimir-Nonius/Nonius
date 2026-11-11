@@ -186,3 +186,54 @@ fn tiny_changes_are_not_hidden_by_shared_faces() {
     );
     assert!(!d.has_removed(), "убрано {}", d.removed_volume);
 }
+
+/// Разница «только там, где изменилось» обязана совпасть с пересечением
+/// тел целиком — в том числе когда старое и новое место перекрываются.
+#[test]
+fn local_diff_equals_whole_body_diff() {
+    let dir = tempfile::tempdir().unwrap();
+    let pocket = Shape::make_box([30.0, 5.0, 5.0], [20.0, 10.0, 4.0]).unwrap();
+    let cases = [
+        // Отверстие сдвинуто на полдиаметра: старое и новое перекрываются.
+        (plate_with_hole(15.0), plate_with_hole(19.0)),
+        (plate_with_hole(15.0), plate_with_hole(40.0)),
+        (
+            plate_with_hole(15.0),
+            plate_with_hole(15.0).cut(&pocket, 0.0).unwrap(),
+        ),
+    ];
+    for (i, (v1, v2)) in cases.iter().enumerate() {
+        let a = via_step(v1, dir.path(), &format!("a{i}.step"));
+        let b = via_step(v2, dir.path(), &format!("b{i}.step"));
+        let (added, removed) = a.diff(&b, true).expect("местная разница");
+        let (whole_added, whole_removed) = a.diff(&b, false).expect("разница целиком");
+        assert!(
+            close(added.volume(), whole_added.volume(), 1e-6),
+            "случай {i}: добавлено {} / {}",
+            added.volume(),
+            whole_added.volume()
+        );
+        assert!(
+            close(removed.volume(), whole_removed.volume(), 1e-6),
+            "случай {i}: убрано {} / {}",
+            removed.volume(),
+            whole_removed.volume()
+        );
+        assert_eq!(added.solid_count(), whole_added.solid_count(), "случай {i}");
+        assert_eq!(
+            removed.solid_count(),
+            whole_removed.solid_count(),
+            "случай {i}"
+        );
+    }
+}
+
+/// Тела без общих граней местным способом не сравнить — об этом говорит
+/// ошибка, а не неверный ответ; сравнение целиком работает дальше.
+#[test]
+fn local_diff_refuses_unrelated_bodies() {
+    let a = Shape::make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
+    let b = Shape::make_cylinder([5.0, 5.0, 0.0], 5.0, 20.0).unwrap();
+    assert!(a.diff(&b, true).is_err());
+    assert!(a.diff(&b, false).is_ok());
+}

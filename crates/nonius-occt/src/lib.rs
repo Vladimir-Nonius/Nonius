@@ -1,6 +1,7 @@
 //! Геометрия Nonius на OpenCascade.
 //!
 //! - [`OcctStepSource`] — читает STEP: объём, площадь, центр масс, габариты;
+//! - [`FeatureComparator`] — говорит, что сделали: отверстия, скругления, плоскости;
 //! - [`GeometryComparator`] — сравнивает форму: сколько материала добавлено и убрано;
 //! - [`HighlightRenderer`] — рисует изменения цветом: неизменённое серым
 //!   «рентгеном», добавленное зелёным, убранное красным;
@@ -14,6 +15,9 @@
 
 #[cfg(nonius_occt)]
 mod cache;
+pub mod changes;
+#[cfg(nonius_occt)]
+mod faces;
 #[cfg(nonius_occt)]
 mod ffi;
 #[cfg(nonius_occt)]
@@ -30,9 +34,12 @@ use std::path::Path;
 use nonius_core::extension::Registry;
 
 #[cfg(nonius_occt)]
+pub use faces::ChangedFaces;
+#[cfg(nonius_occt)]
 pub use modules::{
-    forget_diff, preview, shape_scene, GeometryComparator, GeometryDiff, HighlightRenderer,
-    OcctStepSource, PreviewExporter, SceneRenderer, CHANGES_PNG, MODEL_STEP, PREVIEW_PNG,
+    forget_diff, preview, shape_scene, FeatureComparator, GeometryComparator, GeometryDiff,
+    HighlightRenderer, OcctStepSource, PreviewExporter, SceneRenderer, CHANGES_PNG, MODEL_STEP,
+    PREVIEW_PNG,
 };
 #[cfg(nonius_occt)]
 pub use shape::{Props, Shape};
@@ -94,6 +101,7 @@ fn add_modules(registry: &mut Registry, picture: bool) -> nonius_core::Result<()
     #[cfg(nonius_occt)]
     {
         registry.add_geometry_source(Box::new(OcctStepSource::new()))?;
+        registry.add_comparator(Box::new(FeatureComparator::new()))?;
         registry.add_comparator(Box::new(GeometryComparator::new()))?;
         if picture {
             registry.add_renderer(Box::new(HighlightRenderer::new()))?;

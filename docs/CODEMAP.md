@@ -34,7 +34,10 @@
 | Сравнение паспортов (числа, материал, свойства) | `nonius-core/src/compare/meta.rs`, формат отчёта — `compare/mod.rs` |
 | Чтение заголовка STEP | `nonius-step/src/header.rs` |
 | Геометрия OpenCascade (объём, габариты) | `nonius-occt/src/modules/source.rs`, `shape.rs` |
-| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/share.cpp`, `src/cache.rs` |
+| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/local.cpp` (только изменённые места), `cpp/share.cpp`, `src/cache.rs` |
+| Изменения словами (отверстия, скругления, плоскости) | `nonius-occt/src/changes/` (слова, без OpenCascade), `cpp/faces.cpp`, `src/faces.rs`, `modules/features.rs` |
+| Какие грани версий совпали | `nonius-occt/cpp/match.cpp`, `cpp/same.cpp` |
+| Замер сравнения на своей детали | `nonius-occt/examples/probe.rs`; шаги C++ — переменная `NONIUS_TRACE=1` |
 | Сцена для окна (места изменений, glTF) | `nonius-scene/src/lib.rs` (модель), `glb/write.rs`, `glb/read.rs`, `contract.rs`; из OpenCascade — `nonius-occt/src/modules/scene.rs` |
 | Окно: панели, надписи, выбор версий | `nonius-gui/src/app/mod.rs` (порядок работы), `app/actions.rs` и `results.rs` (действия и их итог), `app/panels.rs`, `app/legend.rs` (цвета и места), `app/toolbar.rs`, надписи — `texts.rs` |
 | Окно: меню «Файл», «Деталь», «Вид» | `nonius-gui/src/app/file_menu.rs`; окна выбора файла — `app/choose.rs` |
@@ -127,6 +130,12 @@
 | `src/modules/source.rs` | `step-occt`: контрольные числа из STEP |
 | `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал; `shared_diff`: одна булева операция на сравнение и сцену |
 | `src/modules/compare.rs` | `geometry-occt`: сравнение формы |
+| `src/modules/features.rs` | `features-occt`: что сделали с деталью — словами |
+| `src/changes/` | слова из изменённых граней: `round.rs` — отверстия, бобышки, скругления; `flat.rs` — плоскости; собирается и без OpenCascade |
+| `src/faces.rs` | `Shape::changed_faces`: грани, которые есть только в одной версии |
+| `cpp/match.h`, `.cpp` | сопоставление рёбер, вершин и граней двух версий |
+| `cpp/faces.cpp` | описание изменённых граней числами: вид поверхности, ось, радиус |
+| `cpp/local.h`, `.cpp` | разница версий только там, где они отличаются |
 | `src/modules/highlight.rs` | `highlight-occt`: `changes.png` |
 | `src/modules/scene.rs` | `scene-occt`: сцена `changes.glb` для окна, каждый кусок изменений — отдельное место |
 | `src/render/mod.rs` | сетка, слои, цвета, вид, картинка |
@@ -268,7 +277,8 @@
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
 | `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии, меню «Файл», смена проекта, новая деталь, окошко «Добавить модель», очередь файлов, битый файл, полоса ошибки, «Считаю…», возврат в окно, первый запуск, дерево, карта, выделение (Ctrl, Shift, рамка), удаление нескольких и «Остановить», клавиши выделенного, стрелки в окошке и меню |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
-| `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, кэш STEP |
+| `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, местная разница против разницы целиком, кэш STEP |
+| `nonius-occt/tests/features.rs` | изменения словами на настоящих телах |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 | `nonius-cli/tests/folders.rs` | `folder new`, `part move`, `map --json`, `upgrade` |
