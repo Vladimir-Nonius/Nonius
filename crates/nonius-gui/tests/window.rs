@@ -58,6 +58,8 @@ struct Fake {
     deleted: Arc<Mutex<Vec<String>>>,
     /// Держит удаление, пока тест смотрит на очередь.
     gate: Arc<Mutex<()>>,
+    /// Удаление падает внутренней ошибкой.
+    broken: Arc<Mutex<bool>>,
 }
 
 impl Fake {
@@ -290,6 +292,9 @@ impl ProjectSource for Fake {
         vec![program()]
     }
     fn new_part(&self, name: &str, assembly: bool, folder: &str) -> anyhow::Result<()> {
+        if name == "сбой" {
+            panic!("сбой при создании детали");
+        }
         if name == "кронштейн" {
             anyhow::bail!("такая деталь уже есть");
         }
@@ -332,6 +337,11 @@ impl ProjectSource for Fake {
         Ok(())
     }
     fn delete_part(&self, part: &str) -> anyhow::Result<()> {
+        // Замок отпущен до сбоя: иначе он «отравится» для других тестов.
+        let broken = *self.broken.lock().unwrap();
+        if broken {
+            panic!("сбой при удалении «{part}»");
+        }
         let _wait = self.gate.lock().unwrap();
         self.deleted.lock().unwrap().push(part.to_string());
         Ok(())
@@ -534,6 +544,7 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         attached: Arc::default(),
         deleted: Arc::default(),
         gate: Arc::default(),
+        broken: Arc::default(),
     }
 }
 
@@ -2147,6 +2158,97 @@ fn queue_stops_after_the_current_one() {
     drop(held);
     wait_for(&mut h, "Удалено 1 из 3, остановлено");
     assert_eq!(deleted.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn queue_line_survives_a_comparison() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let gate = project.gate.clone();
+    let hold = project.hold.clone();
+    project.created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    let held = gate.lock().unwrap();
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить выделенное (3)?");
+    h.run();
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удаляю 1 из 3");
+
+    // Пока очередь стоит, открыли деталь: рядом пошло сравнение.
+    let comparing = hold.lock().unwrap();
+    let body = row(&h, "кронштейн");
+    click_with(&mut h, body, egui::Modifiers::NONE);
+    wait_for(&mut h, "Сравниваю…");
+    assert!(h.query_by_label_contains("Удаляю 1 из 3").is_some());
+    // Отмена сравнения не стирает ход очереди.
+    h.get_by_label("Отменить").click();
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("Сравниваю…").is_none());
+    assert!(h.query_by_label_contains("Удаляю 1 из 3").is_some());
+    assert!(h.query_by_label("Остановить").is_some());
+    drop(comparing);
+    drop(held);
+    wait_for(&mut h, "Удалено 3 из 3");
+}
+
+#[test]
+fn a_crash_frees_what_waited() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    let deleted = project.deleted.clone();
+    let broken = project.broken.clone();
+    project.created.lock().unwrap().push(("щит".into(), true));
+    let mut h = window_on(dir.path(), project);
+    wait_for(&mut h, "щит");
+
+    // Окошко «Новая деталь»: работа упала — окошко снова принимает имя.
+    h.get_by_label("Файл").click();
+    wait_for(&mut h, "Новая деталь…");
+    h.get_by_label("Новая деталь…").click();
+    wait_for(&mut h, "Это сборка");
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("сбой");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Внутренняя ошибка");
+    h.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .type_text("2");
+    h.run();
+    h.get_by_label("Создать").click();
+    wait_for(&mut h, "Создана деталь «сбой2»");
+
+    // Очередь: сбой на первом предмете — итог есть, очередь свободна.
+    *broken.lock().unwrap() = true;
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить выделенное (4)?");
+    h.run();
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удалено 0 из 4, остановлено");
+    assert!(h.query_by_label_contains("Внутренняя ошибка").is_some());
+    assert!(deleted.lock().unwrap().is_empty());
+
+    *broken.lock().unwrap() = false;
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    h.key_press(egui::Key::Delete);
+    wait_for(&mut h, "Удалить выделенное (4)?");
+    h.run();
+    h.get_by_label("Удалить").click();
+    wait_for(&mut h, "Удалено 4 из 4");
+    assert_eq!(deleted.lock().unwrap().len(), 4);
 }
 
 #[test]

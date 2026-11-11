@@ -5,7 +5,7 @@
 //! словами: ««корпус» перенесена в «Стена»».
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
@@ -71,15 +71,33 @@ fn name(node: &Node) -> &str {
     }
 }
 
+/// Строка хода: «Удаляю 2 из 5: корпус».
+fn step_line(op: &Op, i: usize, total: usize) -> String {
+    format!(
+        "{} {} {} {total}: {}",
+        op.doing(),
+        i + 1,
+        texts().of,
+        name(op.node())
+    )
+}
+
 /// Идущая очередь.
 pub(super) struct Batch {
     /// Флажок «Остановить»: работа смотрит его перед каждым предметом.
     stop: Arc<AtomicBool>,
+    /// Своя строка хода: сравнение и его отмена её не трогают.
+    progress: Arc<Mutex<String>>,
 }
 
 impl Batch {
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Что делается сейчас: «Удаляю 2 из 5: корпус».
+    pub fn progress(&self) -> String {
+        self.progress.lock().map(|p| p.clone()).unwrap_or_default()
     }
 }
 
@@ -135,8 +153,13 @@ impl App {
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
-        self.tab.batch = Some(Batch { stop: stop.clone() });
-        self.tab.jobs.spawn(ctx, move |progress| {
+        let line = Arc::new(Mutex::new(step_line(&ops[0], 0, ops.len())));
+        self.tab.batch = Some(Batch {
+            stop: stop.clone(),
+            progress: line.clone(),
+        });
+        let repaint = ctx.clone();
+        self.tab.jobs.spawn(ctx, move |_| {
             let total = ops.len();
             let mut results = Vec::new();
             let mut stopped = false;
@@ -146,15 +169,21 @@ impl App {
                     break;
                 }
                 let t = texts();
-                let what = name(op.node());
-                progress.step(&format!(
-                    "{} {} {} {total}: {what}",
-                    op.doing(),
-                    i + 1,
-                    t.of
-                ));
-                let result = op.run(project.as_ref());
-                results.push((op, result));
+                if let Ok(mut l) = line.lock() {
+                    *l = step_line(&op, i, total);
+                }
+                repaint.request_repaint();
+                // Сбой в одном предмете не должен оставить очередь «занятой»
+                // навсегда: итог приходит всегда, дальше очередь не идёт.
+                let run = std::panic::AssertUnwindSafe(|| op.run(project.as_ref()));
+                match std::panic::catch_unwind(run) {
+                    Ok(result) => results.push((op, result)),
+                    Err(_) => {
+                        results.push((op, Err(anyhow::anyhow!(t.crashed))));
+                        stopped = true;
+                        break;
+                    }
+                }
             }
             Done::Batch(Report {
                 results,

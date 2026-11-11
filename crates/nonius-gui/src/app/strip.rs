@@ -136,11 +136,12 @@ impl App {
             return;
         }
         if i != self.at {
-            self.tabs.remove(i);
+            self.tabs.remove(i).abandon();
             if i < self.at {
                 self.at -= 1;
             }
         } else {
+            self.tab.abandon();
             self.tab = ProjectTab::default();
             self.tabs.remove(i);
             if self.tabs.is_empty() {

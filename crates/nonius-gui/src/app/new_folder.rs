@@ -28,6 +28,11 @@ impl NewFolder {
     }
 
     /// Создать не вышло: окошко остаётся, причина видна в нём.
+    /// Работа идёт, кнопки ждут.
+    pub fn busy(&self) -> bool {
+        self.busy
+    }
+
     pub fn failed(&mut self, error: String) {
         self.busy = false;
         self.error = Some(error);

@@ -65,6 +65,18 @@ impl Dialog {
         base.error = Some(error);
     }
 
+    /// Работа идёт, кнопки ждут.
+    pub fn busy(&self) -> bool {
+        match self {
+            Dialog::Rename(d) => d.base.busy,
+            Dialog::Delete(c)
+            | Dialog::Restore(c, _)
+            | Dialog::RemoveFile(c, _)
+            | Dialog::Deleted(_, c)
+            | Dialog::DeleteMany(_, c) => c.busy,
+        }
+    }
+
     pub(super) fn base(&mut self) -> &mut Confirm {
         match self {
             Dialog::Rename(d) => &mut d.base,
