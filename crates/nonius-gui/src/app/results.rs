@@ -287,7 +287,10 @@ impl App {
                         }
                     }
                 }
-                Done::Crashed => self.tab.message = Some(t.crashed.to_string()),
+                Done::Crashed => {
+                    self.tab.message = Some(t.crashed.to_string());
+                    self.tab.stop_waiting(t.crashed);
+                }
                 // Устарело: выбрали другое.
                 Done::ComparedOutside(..) => {}
                 Done::Versions(..)

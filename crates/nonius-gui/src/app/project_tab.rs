@@ -117,3 +117,41 @@ pub(super) struct ProjectTab {
     /// Открытое окно «Настройки».
     pub settings: Option<settings_window::SettingsDialog>,
 }
+
+impl ProjectTab {
+    /// Фоновая работа упала, и неизвестно какая: всё, что ждёт результата,
+    /// снова свободно и говорит почему. Иначе кнопки остались бы серыми
+    /// навсегда.
+    pub fn stop_waiting(&mut self, why: &str) {
+        self.material_busy = false;
+        if let Some(d) = self.save.as_mut().filter(|d| d.saving) {
+            d.saving = false;
+            d.error = Some(why.to_string());
+        }
+        if let Some(d) = self.dialog.as_mut().filter(|d| d.busy()) {
+            d.failed(why.to_string());
+        }
+        if let Some(d) = self.add.as_mut().filter(|d| d.busy()) {
+            d.failed(why.to_string());
+        }
+        if let Some(d) = self.new_part.as_mut().filter(|d| d.busy()) {
+            d.failed(why.to_string());
+        }
+        if let Some(d) = self.new_folder.as_mut().filter(|d| d.busy()) {
+            d.failed(why.to_string());
+        }
+        if let Some(d) = self.settings.as_mut().filter(|d| d.busy()) {
+            d.failed(why.to_string());
+        }
+    }
+
+    /// Проект во вкладке больше не нужен (вкладку закрыли или открыли в ней
+    /// другой): очередь останавливается после текущего предмета, результаты
+    /// работ забываются.
+    pub fn abandon(&mut self) {
+        if let Some(batch) = self.batch.take() {
+            batch.stop();
+        }
+        self.jobs.forget_all();
+    }
+}

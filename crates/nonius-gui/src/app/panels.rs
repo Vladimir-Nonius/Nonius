@@ -41,21 +41,30 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
     let mut cancel = false;
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            if app.tab.jobs.busy() {
+            if app.tab.jobs.busy() || app.tab.batch.is_some() {
                 ui.spinner();
-                let p = app.tab.jobs.progress();
-                ui.label(if p.is_empty() {
-                    t.comparing.to_string()
-                } else {
-                    p
-                });
-                if app.tab.jobs.can_cancel() && ui.button(t.cancel_compare).clicked() {
-                    cancel = true;
-                }
-                // Очередь останавливается после текущего предмета.
+                // У очереди своя строка: «Удаляю 1 из 3» не пропадает, когда
+                // рядом идёт сравнение или его отменяют.
                 if let Some(batch) = &app.tab.batch {
+                    ui.label(batch.progress());
+                    // Очередь останавливается после текущего предмета.
                     if ui.button(t.stop).clicked() {
                         batch.stop();
+                    }
+                }
+                let p = app.tab.jobs.progress();
+                let compare = app.tab.jobs.can_cancel();
+                if app.tab.batch.is_none() || compare || !p.is_empty() {
+                    if app.tab.batch.is_some() {
+                        ui.separator();
+                    }
+                    ui.label(if p.is_empty() {
+                        t.comparing.to_string()
+                    } else {
+                        p
+                    });
+                    if compare && ui.button(t.cancel_compare).clicked() {
+                        cancel = true;
                     }
                 }
             } else if let Some(n) = &app.tab.notice {
