@@ -12,6 +12,7 @@
 | Новая команда `nonius …` | действие в `nonius-app`, затем `nonius-cli/src/args.rs` (команда и справка), `main.rs` (вызов), печать в `commands/` |
 | Изменить вывод команды | `nonius-cli/src/commands/<группа>.rs`, общие мелочи — `format.rs`; ответ `--json` — `commands/json/` |
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
+| Задумано, но не сделано: сравнение в отдельном процессе | раздел «Задумано» в `docs/ARCHITECTURE.md`; идеи по интерфейсу — `docs/proposals/interface-next.md` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
 | Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
