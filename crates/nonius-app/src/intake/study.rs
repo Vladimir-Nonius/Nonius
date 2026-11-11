@@ -1,5 +1,5 @@
 //! Изучение папки: всё долгое (обход диска, связи от SolidWorks, форма
-//! деталей) делается один раз и складывается в [`IntakeStudy`]. План из
+//! деталей, что изменилось между версиями) делается один раз и складывается в [`IntakeStudy`]. План из
 //! него получается мгновенно и сколько угодно раз — после каждого ответа
 //! человека на вопрос.
 
@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 
 use nonius_core::PartName;
 
+use super::plan::Facts;
 use super::questions::Decisions;
 use super::shape::Shape;
 use super::units::MODELS;
+use super::words::Words;
 use super::{key, plan, Found, IntakePlan, ShapeCheck};
 use crate::{App, Error, Progress, Result};
 
@@ -22,21 +24,22 @@ pub struct IntakeStudy {
     links: HashMap<String, Vec<String>>,
     taken: Vec<PartName>,
     shapes: HashMap<String, Shape>,
+    words: Words,
 }
 
 impl IntakeStudy {
     /// План с учётом ответов человека: `id` вопроса и «да»/«нет». Без
     /// ответов — то, что программа решила сама, и её вопросы.
     pub fn plan(&self, answers: &[(String, bool)]) -> IntakePlan {
-        plan::build(
-            self.source.clone(),
-            self.files.clone(),
-            &self.links,
-            &self.taken,
-            &self.shapes,
-            &Decisions::new(answers),
-            false,
-        )
+        let facts = Facts {
+            links: &self.links,
+            taken: &self.taken,
+            shapes: &self.shapes,
+            said: &Decisions::new(answers),
+            across: false,
+            words: &self.words,
+        };
+        plan::build(self.source.clone(), self.files.clone(), facts)
     }
 }
 
@@ -68,21 +71,29 @@ impl App {
             links: self.links_of(&files),
             taken: self.project.items()?.into_iter().map(|i| i.name).collect(),
             shapes: HashMap::new(),
+            words: Words::default(),
             source,
             files,
         };
         // Сначала черновик по именам и связям: из него видно, чью форму
         // смотреть. В нём одно имя в разных папках считается одной деталью.
-        let draft = plan::build(
-            study.source.clone(),
-            study.files.clone(),
-            &study.links,
-            &study.taken,
-            &study.shapes,
-            &Decisions::new(&[]),
-            true,
-        );
+        let facts = Facts {
+            links: &study.links,
+            taken: &study.taken,
+            shapes: &study.shapes,
+            said: &Decisions::new(&[]),
+            across: true,
+            words: &Words::default(),
+        };
+        let draft = plan::build(study.source.clone(), study.files.clone(), facts);
         study.shapes = self.shapes_of(&draft, check, progress);
+        // Теперь план с формой: из него видно, для каких пар версий стоит
+        // узнать, что изменилось. Слова считаются один раз.
+        if check != ShapeCheck::Off {
+            study.plan(&[]);
+            let pairs = study.words.missed();
+            study.words = Words::new(self.words_of(&pairs, progress));
+        }
         Ok(study)
     }
 

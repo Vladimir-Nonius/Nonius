@@ -36,7 +36,8 @@
 //! чему верить (сборка, человек, форма, имя), `shape.rs` — сравнение формы, `measure.rs` — откуда берётся форма (паспорт STEP, для
 //! файла SolidWorks — через модуль перевода), `memory.rs` — память о форме
 //! между разборами, `hints.rs` — похожие детали
-//! с разными именами, `questions.rs` — вопросы и ответы, `plan.rs` — сам
+//! с разными именами, `words.rs` — что изменилось между версиями словами,
+//! `questions.rs` — вопросы и ответы, `plan.rs` — сам
 //! план, `apply.rs` — выполнение.
 
 mod apply;
@@ -51,6 +52,7 @@ mod shape;
 mod split;
 mod study;
 mod units;
+mod words;
 
 use std::path::{Path, PathBuf};
 

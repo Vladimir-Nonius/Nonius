@@ -146,6 +146,25 @@ impl Registry {
             .collect()
     }
 
+    /// Есть ли быстрое сравнение (см. [`Comparator::quick`]).
+    pub fn has_quick_comparator(&self) -> bool {
+        self.comparators.iter().any(|c| c.quick())
+    }
+
+    /// Прогнать только быстрые сравнения.
+    pub fn compare_quick(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
+        ctx: &CompareContext,
+    ) -> Result<Vec<ChangeReport>> {
+        self.comparators
+            .iter()
+            .filter(|c| c.quick())
+            .map(|c| c.compare(before, after, ctx))
+            .collect()
+    }
+
     /// Разослать событие всем обработчикам. Ошибки обработчиков собираются,
     /// но не прерывают рассылку.
     pub fn emit(&self, event: &Event) -> Vec<Error> {

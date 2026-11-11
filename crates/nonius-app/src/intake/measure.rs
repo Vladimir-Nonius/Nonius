@@ -23,13 +23,13 @@ use super::shape::Shape;
 use super::{key, IntakePlan, ShapeCheck};
 use crate::{App, Progress};
 
-fn is_step(path: &Path) -> bool {
+pub(super) fn is_step(path: &Path) -> bool {
     path.extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .is_some_and(|e| e == "step" || e == "stp")
 }
 
-fn modified(path: &Path) -> SystemTime {
+pub(super) fn modified(path: &Path) -> SystemTime {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .unwrap_or(SystemTime::UNIX_EPOCH)

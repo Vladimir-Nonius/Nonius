@@ -30,7 +30,7 @@ const STEP_BEHIND: &str =
 /// пока импорт не положит его в деталь.
 pub(crate) struct Converted {
     _dir: tempfile::TempDir,
-    step: PathBuf,
+    pub(crate) step: PathBuf,
     pub(crate) read: Option<PartMeta>,
 }
 

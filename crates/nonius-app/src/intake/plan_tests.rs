@@ -9,8 +9,9 @@ use nonius_core::PartName;
 
 use super::super::questions::Decisions;
 use super::super::shape::Shape;
+use super::super::words::Words;
 use super::super::{key, Found, IntakePlan, ShapeVerdict};
-use super::build;
+use super::{build, Facts};
 
 const ROOT: &str = "/папка";
 
@@ -40,11 +41,14 @@ fn plan(files: &[Found], links: &HashMap<String, Vec<String>>) -> IntakePlan {
     build(
         PathBuf::from(ROOT),
         files.to_vec(),
-        links,
-        &[],
-        &HashMap::new(),
-        &Decisions::default(),
-        false,
+        Facts {
+            links,
+            taken: &[],
+            shapes: &HashMap::new(),
+            said: &Decisions::default(),
+            across: false,
+            words: &Words::default(),
+        },
     )
 }
 
@@ -257,11 +261,14 @@ fn names_taken_in_the_project_stay_out() {
     let p = build(
         PathBuf::from(ROOT),
         files.to_vec(),
-        &none,
-        &taken,
-        &none_shapes(),
-        &Decisions::default(),
-        false,
+        Facts {
+            links: &none,
+            taken: &taken,
+            shapes: &none_shapes(),
+            said: &Decisions::default(),
+            across: false,
+            words: &Words::default(),
+        },
     );
     assert_eq!(names(&p), ["втулка"]);
     assert!(p.left[0].why.contains("уже есть"), "{:?}", p.left);
@@ -291,11 +298,14 @@ fn shape_confirms_or_splits_versions() {
         build(
             PathBuf::from(ROOT),
             files.to_vec(),
-            &HashMap::new(),
-            &[],
-            &shapes,
-            &Decisions::new(&answers),
-            false,
+            Facts {
+                links: &HashMap::new(),
+                taken: &[],
+                shapes: &shapes,
+                said: &Decisions::new(&answers),
+                across: false,
+                words: &Words::default(),
+            },
         )
     };
     let p = answered(&[]);
@@ -359,11 +369,14 @@ fn unchecked_guess_becomes_a_question() {
     let p = build(
         PathBuf::from(ROOT),
         files.to_vec(),
-        &HashMap::new(),
-        &[],
-        &none_shapes(),
-        &no,
-        false,
+        Facts {
+            links: &HashMap::new(),
+            taken: &[],
+            shapes: &none_shapes(),
+            said: &no,
+            across: false,
+            words: &Words::default(),
+        },
     );
     assert_eq!(names(&p), ["вал", "вал_v2"]);
     assert!(p.questions.is_empty());
@@ -415,11 +428,14 @@ fn project_copied_by_folders_is_one_project() {
         build(
             PathBuf::from(ROOT),
             files.to_vec(),
-            &HashMap::new(),
-            &[],
-            shapes,
-            &Decisions::default(),
-            across,
+            Facts {
+                links: &HashMap::new(),
+                taken: &[],
+                shapes,
+                said: &Decisions::default(),
+                across,
+                words: &Words::default(),
+            },
         )
     };
     let p = built(&shapes, false);

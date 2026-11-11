@@ -43,6 +43,10 @@ impl Module for FeatureComparator {
 }
 
 impl Comparator for FeatureComparator {
+    fn quick(&self) -> bool {
+        true
+    }
+
     fn compare(
         &self,
         before: &Snapshot,

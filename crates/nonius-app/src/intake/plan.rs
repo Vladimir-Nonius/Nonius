@@ -14,22 +14,39 @@ use super::hints::hints;
 use super::questions::{ask, Decisions};
 use super::shape::Shape;
 use super::units::{attach, file_name, ordered, units_of};
+use super::words::Words;
 use super::{key, Found, IntakePlan, PlannedItem, PlannedVersion};
 
-/// Составить план. `links` — связи файлов (ключи и значения — пути строчными
-/// буквами, см. [`key`]); `taken` — имена, уже занятые в проекте; `shapes` —
-/// отпечатки формы моделей по ключу файла (каких нет — те не проверяются);
-/// `said` — ответы человека на вопросы прошлого плана; `across` — черновик:
-/// верить одному имени в разных папках, пока форму не смотрели.
-pub(super) fn build(
-    source: PathBuf,
-    files: Vec<Found>,
-    links: &HashMap<String, Vec<String>>,
-    taken: &[PartName],
-    shapes: &HashMap<String, Shape>,
-    said: &Decisions,
-    across: bool,
-) -> IntakePlan {
+/// Что известно о файлах папки, кроме их списка.
+#[derive(Clone, Copy)]
+pub(super) struct Facts<'a> {
+    /// Связи файлов (ключи и значения — пути строчными буквами, см. [`key`]).
+    pub links: &'a HashMap<String, Vec<String>>,
+    /// Имена, уже занятые в проекте.
+    pub taken: &'a [PartName],
+    /// Отпечатки формы моделей по ключу файла (каких нет — те не
+    /// проверяются).
+    pub shapes: &'a HashMap<String, Shape>,
+    /// Ответы человека на вопросы прошлого плана.
+    pub said: &'a Decisions,
+    /// Черновик: верить одному имени в разных папках, пока форму не
+    /// смотрели.
+    pub across: bool,
+    /// Что изменилось между версиями словами (чего там нет, то запомнится
+    /// как недостающее).
+    pub words: &'a Words,
+}
+
+/// Составить план из списка файлов и того, что о них известно.
+pub(super) fn build(source: PathBuf, files: Vec<Found>, facts: Facts) -> IntakePlan {
+    let Facts {
+        links,
+        taken,
+        shapes,
+        said,
+        across,
+        words,
+    } = facts;
     let mut left = Vec::new();
     let (mut units, by_name, by_path) = units_of(&files);
     attach(&files, links, &by_name, &by_path, &mut units, &mut left);
@@ -88,7 +105,14 @@ pub(super) fn build(
     let apart =
         |a: usize, b: usize| refused(a, b) || users(a).intersection(&users(b)).next().is_some();
     let similar = hints(&parts, &apart);
-    let questions = ask(&protos, &units, &similar.alike);
+    // Что изменилось между двумя моделями — словами; про сборки не знаем.
+    let changed = |a: usize, b: usize| -> Vec<String> {
+        if units[a].is_assembly() || units[b].is_assembly() {
+            return Vec::new();
+        }
+        words.get(&ordered(&units[a].models), &ordered(&units[b].models))
+    };
+    let questions = ask(&protos, &units, &similar.alike, &changed);
 
     // Сколько сборок в каждой папке: одна — папка и так её, несколько —
     // у каждой своя папка со своими деталями.
@@ -151,6 +175,17 @@ pub(super) fn build(
             ));
         }
         why.extend(proto.notes.iter().cloned());
+        for pair in proto.members.windows(2) {
+            let lines = changed(pair[0], pair[1]);
+            if !lines.is_empty() {
+                why.push(format!(
+                    "что изменилось, «{}» → «{}»: {}",
+                    label(&units, &proto.members, pair[0]),
+                    label(&units, &proto.members, pair[1]),
+                    lines.join("; ")
+                ));
+            }
+        }
         why.extend(similar.notes[n].iter().cloned());
         let mut docs: Vec<PathBuf> = Vec::new();
         for m in proto.all() {

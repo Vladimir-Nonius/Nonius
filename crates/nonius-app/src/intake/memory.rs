@@ -24,7 +24,7 @@ pub(super) struct Memory {
 
 /// Подпись версии: её файлы с размером и временем изменения. `None` —
 /// файл не читается.
-fn sign(models: &[PathBuf]) -> Option<String> {
+pub(super) fn sign(models: &[PathBuf]) -> Option<String> {
     let mut parts = Vec::new();
     for model in models {
         let meta = std::fs::metadata(model).ok()?;

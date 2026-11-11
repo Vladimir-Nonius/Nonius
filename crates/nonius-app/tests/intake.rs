@@ -5,9 +5,11 @@
 use std::path::{Path, PathBuf};
 
 use nonius_app::{App, Error, GitOptions, NoProgress, ShapeCheck, ShapeVerdict};
+use nonius_core::compare::{Change, ChangeKind, ChangeReport, CompareContext};
 use nonius_core::contract;
 use nonius_core::extension::{
-    ExtensionPoint, GeometrySource, LinkSource, Module, ModuleManifest, Registry, API_VERSION,
+    Comparator, ExtensionPoint, GeometrySource, LinkSource, Module, ModuleManifest, Registry,
+    Snapshot, API_VERSION,
 };
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::Project;
@@ -54,6 +56,41 @@ impl GeometrySource for VolumeSource {
     }
 }
 
+/// Быстрое сравнение: говорит, как изменился текст «STEP».
+struct TextComparator(ModuleManifest);
+
+impl Module for TextComparator {
+    fn manifest(&self) -> &ModuleManifest {
+        &self.0
+    }
+}
+
+impl Comparator for TextComparator {
+    fn compare(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
+        _: &CompareContext,
+    ) -> nonius_core::Result<ChangeReport> {
+        let text = |s: &Snapshot| std::fs::read_to_string(s.dir.join("model.step")).ok();
+        let mut report = ChangeReport::empty("text-test");
+        if let (Some(was), Some(now)) = (text(before), text(after)) {
+            if was != now {
+                report.changes.push(Change {
+                    kind: ChangeKind::Modified,
+                    subject: "запись".into(),
+                    before: Some(was),
+                    after: Some(now),
+                });
+            }
+        }
+        Ok(report)
+    }
+    fn quick(&self) -> bool {
+        true
+    }
+}
+
 /// Связи: в файле сборки или чертежа перечислены имена файлов, по строке.
 struct ListedLinks(ModuleManifest);
 
@@ -97,6 +134,11 @@ fn app(root: &Path) -> App {
     ))))
     .unwrap();
     reg.add_link_source(Box::new(links())).unwrap();
+    reg.add_comparator(Box::new(TextComparator(manifest(
+        "text-test",
+        ExtensionPoint::Comparator,
+    ))))
+    .unwrap();
     App::with_project(project, reg).with_git_options(GitOptions {
         identity: Some(("Тестировщик".into(), "test@example.com".into())),
         ai: None,
@@ -203,6 +245,24 @@ fn shape_of_the_parts_checks_the_names() {
     assert_eq!(names(&plan), ["вал", "кожух", "кожух_v2", "люк"]);
     assert_eq!(plan.items[0].shape, Some(ShapeVerdict::Confirmed));
     assert_eq!(plan.items[2].shape, Some(ShapeVerdict::Different));
+    // Главная улика — что изменилось, словами: и в плане, и в вопросе.
+    let said = "что изменилось, «вал» → «вал_v2»: запись: 10000 20 20 100 → 10400 20 20 100";
+    assert!(
+        plan.items[0].why.iter().any(|w| w == said),
+        "{:?}",
+        plan.items[0].why
+    );
+    let facts = &plan.questions[0].facts;
+    assert!(
+        facts
+            .iter()
+            .any(|f| f.starts_with("что изменилось: запись")),
+        "{facts:?}"
+    );
+    assert!(quick.items[0]
+        .why
+        .iter()
+        .all(|w| !w.contains("что изменилось")));
     assert!(plan.items[3].why.is_empty(), "люк не смотрели");
 
     // Глубокий: смотрит все детали и замечает, что люк похож на кожух.

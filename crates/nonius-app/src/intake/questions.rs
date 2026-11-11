@@ -91,15 +91,24 @@ fn date(time: SystemTime) -> String {
 }
 
 /// Составить вопросы. `alike` — пары будущих деталей (номера в `protos`),
-/// похожих формой при разных именах, и чем они похожи.
+/// похожих формой при разных именах, и чем они похожи; `changed` — что
+/// изменилось между двумя моделями словами (см. `words.rs`).
 pub(super) fn ask(
     protos: &[Proto],
     units: &[Unit],
     alike: &[(usize, usize, String)],
+    changed: &dyn Fn(usize, usize) -> Vec<String>,
 ) -> Vec<Question> {
     let mut out: Vec<Question> = Vec::new();
     let mut push = |mut members: Vec<usize>, mut facts: Vec<String>, suggested| {
         members.sort_by_key(|&m| units[m].newest());
+        // Главная улика — что изменилось, словами.
+        for pair in members.windows(2) {
+            let lines = changed(pair[0], pair[1]);
+            if !lines.is_empty() {
+                facts.push(format!("что изменилось: {}", lines.join("; ")));
+            }
+        }
         // В `id` имена по алфавиту: он не должен зависеть от времени файлов,
         // иначе один вопрос про два одновременных файла задали бы дважды.
         let mut ids: Vec<String> = members.iter().map(|&m| units[m].id()).collect();
