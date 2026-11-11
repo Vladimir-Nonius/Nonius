@@ -35,7 +35,7 @@
 | Сравнение паспортов (числа, материал, свойства) | `nonius-core/src/compare/meta.rs`, формат отчёта — `compare/mod.rs` |
 | Чтение заголовка STEP | `nonius-step/src/header.rs` |
 | Геометрия OpenCascade (объём, габариты) | `nonius-occt/src/modules/source.rs`, `shape.rs` |
-| Сравнение формы | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/local.cpp` (только изменённые места), `cpp/share.cpp`, `src/cache.rs` |
+| Сравнение формы (и что считается шумом) | `nonius-occt/src/modules/diff.rs`, `modules/compare.rs`; скорость — `cpp/local.cpp` (только изменённые места), `cpp/share.cpp`, `src/cache.rs` |
 | Изменения словами (отверстия, скругления, плоскости) | `nonius-occt/src/changes/` (слова, без OpenCascade), `cpp/faces.cpp`, `src/faces.rs`, `modules/features.rs` |
 | Какие грани версий совпали | `nonius-occt/cpp/match.cpp`, `cpp/same.cpp` |
 | Замер сравнения на своей детали | `nonius-occt/examples/probe.rs`; шаги C++ — переменная `NONIUS_TRACE=1` |
@@ -139,7 +139,7 @@
 | `src/cache.rs` | кэш прочитанных STEP (BRep в папке временных файлов) |
 | `src/modules/mod.rs` | общие помощники модулей, `preview` |
 | `src/modules/source.rs` | `step-occt`: контрольные числа из STEP |
-| `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал; `shared_diff`: одна булева операция на сравнение и сцену |
+| `src/modules/diff.rs` | `GeometryDiff`: добавленный и убранный материал по кускам (`Piece`), шум по толщине куска, проверка баланса объёмов, пометки «приблизительно» и «нет твёрдых тел»; `shared_diff`: одна булева операция на сравнение и сцену |
 | `src/modules/compare.rs` | `geometry-occt`: сравнение формы |
 | `src/modules/features.rs` | `features-occt`: что сделали с деталью — словами |
 | `src/changes/` | слова из изменённых граней: `round.rs` — отверстия, бобышки, скругления; `flat.rs` — плоскости; собирается и без OpenCascade |
@@ -289,6 +289,8 @@
 | `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии, меню «Файл», смена проекта, новая деталь, окошко «Добавить модель», очередь файлов, битый файл, полоса ошибки, «Считаю…», возврат в окно, первый запуск, дерево, карта, выделение (Ctrl, Shift, рамка), удаление нескольких и «Остановить», клавиши выделенного, стрелки в окошке и меню |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, местная разница против разницы целиком, кэш STEP |
+| `nonius-occt/tests/honest.rs` | маленькое отверстие в большой детали не теряется, слой тоньше допуска — шум, файл без твёрдых тел |
+| `nonius-app/tests/compare_rules.rs` | допуск проекта доходит до отрисовщиков; досчитанное остаётся в кэше при отмене |
 | `nonius-occt/tests/features.rs` | изменения словами на настоящих телах |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
 | `nonius-app/tests/convert.rs` | импорт файла SolidWorks с поддельным модулем перевода: STEP рядом, отказ перевода, без модуля |

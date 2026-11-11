@@ -100,9 +100,11 @@ impl App {
             let modules = comparators.clone();
             let (entry, _, _) = self.cached("outside-reports", &key, modules, &base, |_| {
                 progress.step("Сравниваю");
+                // Досчитанное кладём в кэш и при отмене (см. `compare.rs`).
                 let reports = self.registry.compare_all(&before, &after, &ctx)?;
-                cancelled().map_or(Ok((reports, Vec::new())), Err)
+                Ok((reports, Vec::new()))
             })?;
+            cancelled().map_or(Ok(()), Err)?;
             out.reports = entry.reports;
         }
         if options.render {
@@ -116,9 +118,10 @@ impl App {
                     comparator: "nonius-app".into(),
                     changes: out.reports.iter().flat_map(|r| r.changes.clone()).collect(),
                 };
-                let files = self.render_all(&before, &after, &merged, dir, progress)?;
-                cancelled().map_or(Ok((Vec::new(), files)), Err)
+                let files = self.render_all(&before, &after, &merged, &ctx, dir, progress)?;
+                Ok((Vec::new(), files))
             })?;
+            cancelled().map_or(Ok(()), Err)?;
             out.files = entry.files.iter().map(|f| dir.join(f)).collect();
         }
         Ok(out)

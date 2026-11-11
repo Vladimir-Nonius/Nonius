@@ -61,6 +61,22 @@ pub trait Renderer: Module {
         report: &ChangeReport,
         out_dir: &Path,
     ) -> Result<Vec<PathBuf>>;
+
+    /// То же с параметрами сравнения (допуск проекта). Программа вызывает
+    /// именно этот метод. Модулю, чей рисунок зависит от допуска, стоит
+    /// его переопределить: тогда рисунок совпадёт с отчётом сравнения.
+    /// По умолчанию параметры не нужны — вызывается [`Renderer::render`].
+    fn render_with(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
+        report: &ChangeReport,
+        ctx: &CompareContext,
+        out_dir: &Path,
+    ) -> Result<Vec<PathBuf>> {
+        let _ = ctx;
+        self.render(before, after, report, out_dir)
+    }
 }
 
 /// Экспорт файлов из версии.

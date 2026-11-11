@@ -25,7 +25,7 @@ use crate::OcctError;
 
 pub use compare::GeometryComparator;
 use diff::shared_diff;
-pub use diff::{forget_diff, GeometryDiff};
+pub use diff::{forget_diff, GeometryDiff, Piece};
 pub use features::FeatureComparator;
 pub use highlight::HighlightRenderer;
 pub use preview::{PreviewExporter, PREVIEW_PNG};

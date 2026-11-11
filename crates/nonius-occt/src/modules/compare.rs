@@ -67,6 +67,24 @@ impl Comparator for GeometryComparator {
             return Ok(report);
         }
         let diff = shared_diff(&a, &b, ctx.tolerance_mm).map_err(|e| module_err(Self::ID, e))?;
+        // Честные оговорки: строки без цвета «добавлено / убрано».
+        let note = |subject: String| Change {
+            kind: ChangeKind::Modified,
+            subject,
+            before: None,
+            after: None,
+        };
+        if diff.no_solids {
+            report.changes.push(note(
+                "Форма не сравнена: в файле нет твёрдых тел, только поверхности".into(),
+            ));
+        }
+        if let Some(off) = diff.unsure {
+            report.changes.push(note(format!(
+                "Сравнение формы приблизительное: объёмы не сходятся на {}",
+                volume_text(off, 1)
+            )));
+        }
         if diff.has_added() {
             report.changes.push(Change {
                 kind: ChangeKind::Added,

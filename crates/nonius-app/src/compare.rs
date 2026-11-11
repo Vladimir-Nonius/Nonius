@@ -224,10 +224,12 @@ impl App {
                 self.cached("reports", &key, comparators.clone(), &base, |_| {
                     let (a, b) = sides.get()?;
                     progress.step("Сравниваю");
+                    // Досчитанное кладём в кэш, даже если за это время
+                    // нажали «Остановить»: в следующий раз оно не считается.
                     let reports = self.registry.compare_all(a, b, &ctx)?;
-                    check()?;
                     Ok((reports, Vec::new()))
                 })?;
+            check()?;
             out.reports = entry.reports;
             out.from_cache &= cached;
         }
@@ -246,10 +248,10 @@ impl App {
                     comparator: "nonius-app".into(),
                     changes: out.reports.iter().flat_map(|r| r.changes.clone()).collect(),
                 };
-                let files = self.render_all(a, b, &merged, dir, progress)?;
-                check()?;
+                let files = self.render_all(a, b, &merged, &ctx, dir, progress)?;
                 Ok((Vec::new(), files))
             })?;
+            check()?;
             out.files = entry.files.iter().map(|f| dir.join(f)).collect();
             out.from_cache &= cached;
         }
@@ -274,6 +276,7 @@ impl App {
         before: &Snapshot,
         after: &Snapshot,
         report: &ChangeReport,
+        ctx: &CompareContext,
         dir: &Path,
         progress: &dyn Progress,
     ) -> Result<Vec<String>> {
@@ -284,7 +287,7 @@ impl App {
             }
             progress.step("Рисую изменения");
             let rel_dir = format!("files/{}", r.manifest().id);
-            for f in r.render(before, after, report, &dir.join(&rel_dir))? {
+            for f in r.render_with(before, after, report, ctx, &dir.join(&rel_dir))? {
                 files.push(keep_file(dir, &rel_dir, &f)?);
             }
         }

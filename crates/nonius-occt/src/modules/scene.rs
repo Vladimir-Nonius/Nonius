@@ -8,7 +8,8 @@ use nonius_core::{Error, Result};
 use nonius_scene::{Mesh, Region, Role, Scene};
 
 use super::{
-    deflection, manifest, model_pair, module_err, same_bytes, shared_diff, GeometryDiff, ANGULAR,
+    deflection, manifest, model_pair, module_err, same_bytes, shared_diff, GeometryDiff, Piece,
+    ANGULAR,
 };
 use crate::render;
 use crate::shape::Shape;
@@ -21,15 +22,14 @@ fn to_scene_mesh(m: render::Mesh) -> Mesh {
     }
 }
 
-/// Места одной роли: каждое твёрдое тело — отдельное место.
-fn places(shape: &Shape, role: Role, defl: f64, out: &mut Vec<Region>) {
-    for solid in shape.solids() {
-        let volume = solid.volume();
-        let mesh = to_scene_mesh(solid.mesh(defl, ANGULAR));
+/// Места одной роли: каждый кусок — отдельное место.
+fn places(pieces: &[Piece], role: Role, defl: f64, out: &mut Vec<Region>) {
+    for piece in pieces {
+        let mesh = to_scene_mesh(piece.shape.mesh(defl, ANGULAR));
         if !mesh.is_empty() {
             out.push(Region {
                 role,
-                volume_mm3: volume.max(0.0),
+                volume_mm3: piece.volume,
                 mesh,
             });
         }
@@ -56,14 +56,9 @@ impl GeometryDiff {
             });
         }
         let mut changes = Vec::new();
-        if self.has_added() {
-            places(&self.added, Role::Added, defl, &mut changes);
-        }
-        if self.has_removed() {
-            places(&self.removed, Role::Removed, defl, &mut changes);
-        }
-        // Шум булевых операций (крошки меньше порога) местом не считается.
-        changes.retain(|r| r.volume_mm3 > self.threshold);
+        // Шум булевых операций сюда не попадает: он отсеян при сравнении.
+        places(&self.added, Role::Added, defl, &mut changes);
+        places(&self.removed, Role::Removed, defl, &mut changes);
         changes.sort_by(|a, b| b.volume_mm3.total_cmp(&a.volume_mm3));
         regions.extend(changes);
         Scene { regions }
@@ -81,13 +76,16 @@ pub fn shape_scene(shape: &Shape) -> Scene {
     }
 }
 
-fn scene_of(before: &Path, after: &Path) -> std::result::Result<Scene, OcctError> {
+fn scene_of(
+    before: &Path,
+    after: &Path,
+    tolerance_mm: f64,
+) -> std::result::Result<Scene, OcctError> {
     // Одинаковые файлы: булевы операции не нужны, показываем деталь как есть.
     if same_bytes(before, after) {
         return Ok(shape_scene(&Shape::read_step(after)?));
     }
-    let tolerance = CompareContext::default().tolerance_mm;
-    Ok(shared_diff(before, after, tolerance)?.scene())
+    Ok(shared_diff(before, after, tolerance_mm)?.scene())
 }
 
 /// Сцена изменений для окна: `changes.glb` с местами изменений.
@@ -128,13 +126,26 @@ impl Renderer for SceneRenderer {
         &self,
         before: &Snapshot,
         after: &Snapshot,
+        report: &ChangeReport,
+        out_dir: &Path,
+    ) -> Result<Vec<PathBuf>> {
+        self.render_with(before, after, report, &CompareContext::default(), out_dir)
+    }
+
+    /// С допуском проекта: та же разница, что в отчёте сравнения, — и она
+    /// не считается второй раз.
+    fn render_with(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
         _report: &ChangeReport,
+        ctx: &CompareContext,
         out_dir: &Path,
     ) -> Result<Vec<PathBuf>> {
         let Some((a, b)) = model_pair(before, after) else {
             return Ok(Vec::new());
         };
-        let scene = scene_of(&a, &b).map_err(|e| module_err(Self::ID, e))?;
+        let scene = scene_of(&a, &b, ctx.tolerance_mm).map_err(|e| module_err(Self::ID, e))?;
         std::fs::create_dir_all(out_dir).map_err(|e| Error::Io {
             path: out_dir.to_path_buf(),
             source: e,
