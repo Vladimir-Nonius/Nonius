@@ -1,11 +1,15 @@
 //! `nonius intake`: разобрать папку с моделями и чертежами в проект.
 //!
-//! Без `--apply` только показывает план — ничего не меняет.
+//! Без `--apply` только показывает план — ничего не меняет. Версии, угаданные
+//! по именам, проверяются формой деталей; `--quick` — без этой проверки,
+//! `--deep` — посмотреть форму всех деталей.
 
 use std::path::Path;
 
 use anyhow::Result;
-use nonius_app::{App, IntakeDone, IntakePlan, Progress, NOT_OURS};
+use nonius_app::{
+    App, IntakeDone, IntakePlan, PlannedItem, Progress, ShapeCheck, ShapeVerdict, NOT_OURS,
+};
 use nonius_core::meta::ItemKind;
 
 /// Ход разбора — строками в консоль.
@@ -20,8 +24,8 @@ impl Progress for Printed {
     }
 }
 
-pub fn intake(app: &App, folder: &Path, apply: bool) -> Result<()> {
-    let plan = app.intake_plan(folder)?;
+pub fn intake(app: &App, folder: &Path, apply: bool, check: ShapeCheck) -> Result<()> {
+    let plan = app.intake_plan_with(folder, check, &Printed)?;
     print_plan(&plan);
     if plan.items.is_empty() {
         return Ok(());
@@ -40,10 +44,29 @@ pub fn intake(app: &App, folder: &Path, apply: bool) -> Result<()> {
     Ok(())
 }
 
+/// Глубина проверки формой по флагам `--quick` и `--deep`.
+pub fn check(quick: bool, deep: bool) -> ShapeCheck {
+    match (quick, deep) {
+        (true, _) => ShapeCheck::Off,
+        (_, true) => ShapeCheck::All,
+        _ => ShapeCheck::Names,
+    }
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// Стоит ли показать деталь человеку: версии угаданы по именам и форма их
+/// не подтвердила, либо форма развела похожие имена на разные детали.
+fn unsure(item: &PlannedItem) -> bool {
+    match item.shape {
+        Some(ShapeVerdict::Confirmed) => false,
+        Some(ShapeVerdict::Copy | ShapeVerdict::Different) => true,
+        None => item.guessed,
+    }
 }
 
 fn print_plan(plan: &IntakePlan) {
@@ -82,7 +105,7 @@ fn print_plan(plan: &IntakePlan) {
         } else {
             String::new()
         };
-        let mark = if item.guessed { "  (?)" } else { "" };
+        let mark = if unsure(item) { "  (?)" } else { "" };
         println!("  {kind} «{}»{versions}{mark}", item.name);
         for why in &item.why {
             println!("      {why}");
@@ -91,9 +114,9 @@ fn print_plan(plan: &IntakePlan) {
             println!("      + {}", file_name(doc));
         }
     }
-    if plan.items.iter().any(|i| i.guessed) {
+    if plan.items.iter().any(unsure) {
         println!();
-        println!("(?) — версии угаданы по именам файлов: проверьте.");
+        println!("(?) — догадка, которую форма деталей не подтвердила: проверьте.");
     }
     let (junk, papers): (Vec<_>, Vec<_>) = plan.left.iter().partition(|l| l.why == NOT_OURS);
     if !papers.is_empty() {

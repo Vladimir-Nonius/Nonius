@@ -2,6 +2,7 @@
 //!
 //! `вал`, `вал_v2`, `вал (3)` — версии одной детали; но файлы, которые
 //! вместе стоят в одной сборке, — разные детали, как бы они ни назывались.
+//! Догадку по именам проверяет форма (`shape.rs`): непохожие расходятся.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,6 +10,7 @@ use nonius_core::PartName;
 
 use super::names::{parse, Mark};
 use super::plan::Unit;
+use super::shape::{split, Shape, ShapeVerdict};
 use super::LeftFile;
 
 /// Будущая деталь: одна модель или несколько версий одной.
@@ -17,11 +19,21 @@ pub(super) struct Proto {
     pub base: String,
     pub guessed: bool,
     pub name: Option<PartName>,
+    /// Что сказала о версиях форма; `None` — не проверялось.
+    pub shape: Option<ShapeVerdict>,
+    /// Строки «почему» от проверки формой.
+    pub notes: Vec<String>,
 }
 
 /// Собрать версии одной детали по именам: `вал`, `вал_v2`, `вал (3)`.
-/// Файлы, которые вместе стоят в одной сборке, — разные детали.
-pub(super) fn group(units: &[Unit], used_by: &[BTreeSet<usize>]) -> Vec<Proto> {
+/// Файлы, которые вместе стоят в одной сборке, — разные детали. `shape` —
+/// отпечаток формы модели по её номеру: группу с отпечатками проверяет
+/// форма, и непохожие становятся отдельными деталями.
+pub(super) fn group(
+    units: &[Unit],
+    used_by: &[BTreeSet<usize>],
+    shape: &dyn Fn(usize) -> Option<Shape>,
+) -> Vec<Proto> {
     let mut by_base: BTreeMap<(String, bool, String), Vec<usize>> = BTreeMap::new();
     for (i, u) in units.iter().enumerate() {
         let base = parse(&u.stem).base.to_lowercase();
@@ -35,6 +47,8 @@ pub(super) fn group(units: &[Unit], used_by: &[BTreeSet<usize>]) -> Vec<Proto> {
         base: units[i].stem.clone(),
         guessed: false,
         name: None,
+        shape: None,
+        notes: Vec::new(),
     };
     let mut protos = Vec::new();
     for mut members in by_base.into_values() {
@@ -64,12 +78,23 @@ pub(super) fn group(units: &[Unit], used_by: &[BTreeSet<usize>]) -> Vec<Proto> {
             (number, units[i].newest())
         };
         members.sort_by_key(|&i| order(i));
-        protos.push(Proto {
-            base: parse(&units[members[0]].stem).base,
-            members,
-            guessed: true,
-            name: None,
-        });
+        for part in split(&members, shape, &|i| units[i].stem.clone()) {
+            // Отделилась от группы — зовётся своим именем файла.
+            let alone = part.members.len() == 1;
+            let first = &units[part.members[0]].stem;
+            protos.push(Proto {
+                base: if alone {
+                    first.clone()
+                } else {
+                    parse(first).base
+                },
+                members: part.members,
+                guessed: !alone,
+                name: None,
+                shape: part.verdict,
+                notes: part.notes,
+            });
+        }
     }
     protos
 }

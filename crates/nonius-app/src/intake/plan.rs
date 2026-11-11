@@ -10,6 +10,7 @@ use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 
 use super::grouping::{group, name};
+use super::shape::{hints, Shape};
 use super::{key, Found, IntakePlan, LeftFile, PlannedItem, PlannedVersion};
 
 /// Файлы моделей: из них получаются детали и сборки.
@@ -51,12 +52,14 @@ fn file_name(path: &std::path::Path) -> String {
 }
 
 /// Составить план. `links` — связи файлов (ключи и значения — пути строчными
-/// буквами, см. [`key`]); `taken` — имена, уже занятые в проекте.
+/// буквами, см. [`key`]); `taken` — имена, уже занятые в проекте; `shapes` —
+/// отпечатки формы моделей по ключу файла (каких нет — те не проверяются).
 pub(super) fn build(
     source: PathBuf,
     files: Vec<Found>,
     links: &HashMap<String, Vec<String>>,
     taken: &[PartName],
+    shapes: &HashMap<String, Shape>,
 ) -> IntakePlan {
     let mut left = Vec::new();
     let (mut units, by_name, by_path) = units_of(&files);
@@ -76,8 +79,38 @@ pub(super) fn build(
         }
     }
 
-    let mut protos = group(&units, &used_by);
+    let shape = |u: usize| -> Option<Shape> {
+        let models = units[u].models.iter();
+        models
+            .filter_map(|m| shapes.get(&key(&m.path)))
+            .next()
+            .copied()
+    };
+    let mut protos = group(&units, &used_by, &shape);
     name(&mut protos, &units, taken, &mut left);
+
+    // Похожие формой детали с непохожими именами: только подсказка.
+    let parts: Vec<(String, Option<Shape>)> = protos
+        .iter()
+        .map(|p| {
+            let last = p
+                .members
+                .last()
+                .copied()
+                .filter(|&m| !units[m].is_assembly());
+            let label = p.name.as_ref().map(ToString::to_string);
+            (
+                label.clone().unwrap_or_default(),
+                label.and(last).and_then(shape),
+            )
+        })
+        .collect();
+    let users = |p: usize| -> BTreeSet<usize> {
+        let members = protos[p].members.iter();
+        members.flat_map(|&m| used_by[m].iter().copied()).collect()
+    };
+    let apart = |a: usize, b: usize| users(a).intersection(&users(b)).next().is_some();
+    let similar = hints(&parts, &apart);
 
     // Сколько сборок в каждой папке: одна — папка и так её, несколько —
     // у каждой своя папка со своими деталями.
@@ -94,7 +127,7 @@ pub(super) fn build(
         .collect();
 
     let mut items = Vec::new();
-    for proto in &protos {
+    for (n, proto) in protos.iter().enumerate() {
         let Some(item_name) = &proto.name else {
             continue;
         };
@@ -140,6 +173,8 @@ pub(super) fn build(
                 labels.join(" → ")
             ));
         }
+        why.extend(proto.notes.iter().cloned());
+        why.extend(similar[n].iter().cloned());
         let mut docs: Vec<PathBuf> = Vec::new();
         for &m in &proto.members {
             why.extend(units[m].why.iter().cloned());
@@ -169,6 +204,7 @@ pub(super) fn build(
             docs,
             why,
             guessed: proto.guessed,
+            shape: proto.shape,
         });
     }
     items.sort_by(|a, b| (&a.folder, &a.name).cmp(&(&b.folder, &b.name)));

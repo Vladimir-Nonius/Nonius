@@ -28,10 +28,10 @@ const STEP_BEHIND: &str =
 
 /// STEP, полученный модулем перевода: лежит во временной папке до тех пор,
 /// пока импорт не положит его в деталь.
-struct Converted {
+pub(crate) struct Converted {
     _dir: tempfile::TempDir,
     step: PathBuf,
-    read: Option<PartMeta>,
+    pub(crate) read: Option<PartMeta>,
 }
 
 /// Итог импорта.
@@ -148,7 +148,7 @@ impl App {
     /// Получить STEP файла CAD модулем перевода и прочитать его паспорт.
     /// `None` — модуля нет или перевод не удался (причина — в предупреждениях):
     /// импорт идёт дальше по-старому, без свежего STEP.
-    fn convert(&self, file: &Path, warnings: &mut Vec<String>) -> Option<Converted> {
+    pub(crate) fn convert(&self, file: &Path, warnings: &mut Vec<String>) -> Option<Converted> {
         let converter = self.registry.converter_for(file)?;
         let failed = |why: String, warnings: &mut Vec<String>| {
             warnings.push(format!("STEP не получен: {why}"));

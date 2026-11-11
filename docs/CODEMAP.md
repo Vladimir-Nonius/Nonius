@@ -14,7 +14,7 @@
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Задумано, но не сделано: сравнение в отдельном процессе | раздел «Задумано» в `docs/ARCHITECTURE.md`; идеи по интерфейсу — `docs/proposals/interface-next.md` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
-| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs` |
+| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма); выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs` |
 | Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
@@ -247,6 +247,8 @@
 | `intake/mod.rs` | разбор папки: данные плана (`IntakePlan`), обход папки, `intake_plan` |
 | `intake/names.rs` | пометки версий в именах файлов: `v2`, `(2)`, «копия», «доработанный» |
 | `intake/grouping.rs` | какие модели — версии одной детали; имена деталей без повторов |
+| `intake/shape.rs` | проверка догадок формой: отпечаток (`Shape`), `compare` (та же / похожая / разная), `split` (делит группу по именам), `hints` (похожие детали с разными именами), итог `ShapeVerdict` |
+| `intake/measure.rs` | откуда берётся форма: паспорт STEP, для файла SolidWorks — STEP через модуль перевода; глубина — `ShapeCheck` |
 | `intake/plan.rs` | правила: модель + её чертежи и бумаги, папки по сборкам, сам план |
 | `intake/apply.rs` | `intake_apply`: копии файлов в проект, версии в историю, итог |
 | `import.rs` | `import`: файл модели в деталь, паспорт, превью; для файла SolidWorks — свежий STEP через модуль перевода (`convert`) |
@@ -276,7 +278,7 @@
 | `commands/project.rs` | `init`, `part new`, `list`, `info`, `overview`, `agents`, `modules` |
 | `commands/layout.rs` | `map`, `folder new`, `part move`, `upgrade` |
 | `commands/import.rs` | `import` |
-| `commands/intake.rs` | `intake`: план разбора папки и его выполнение (`--apply`) |
+| `commands/intake.rs` | `intake`: план разбора папки и его выполнение (`--apply`); `--quick` — без проверки формой, `--deep` — форма всех деталей |
 | `commands/history.rs` | `status`, `commit`, `log`, `restore`, `hide`, `unhide`, `export` |
 | `commands/files.rs` | `files`, `show`, `file add`, `file remove`, `open` |
 | `commands/compare.rs` | `diff`, `render` |
@@ -303,8 +305,9 @@
 | `nonius-app/tests/compare_rules.rs` | допуск проекта доходит до отрисовщиков; досчитанное остаётся в кэше при отмене |
 | `nonius-occt/tests/features.rs` | изменения словами на настоящих телах |
 | `nonius-app/tests/app.rs` | действия на временном проекте: статус, история, масса, сравнение и кэш, отмена, два потока |
-| `nonius-app/src/intake/plan_tests.rs` | правила разбора на придуманных папках: версии по именам, нумерованные детали, чертёж по ссылке, папки сборок |
-| `nonius-app/tests/intake.rs` | разбор настоящей папки на диске с поддельными связями: план, выполнение, версии в истории, повторный разбор |
+| `nonius-app/src/intake/plan_tests.rs` | правила разбора на придуманных папках: версии по именам, нумерованные детали, чертёж по ссылке, папки сборок, форма подтверждает или разводит версии |
+| `nonius-app/src/intake/shape_tests.rs` | сравнение формы на числах настоящих деталей (коллектор и его доработка): копия, версия, другая деталь; деление группы; подсказки |
+| `nonius-app/tests/intake.rs` | разбор настоящей папки на диске с поддельными связями: план, выполнение, версии в истории, повторный разбор; три глубины проверки формой |
 | `nonius-app/tests/convert.rs` | импорт файла SolidWorks с поддельным модулем перевода: STEP рядом, отказ перевода, без модуля |
 | `nonius-solidworks/tests/contract.rs` | контракт модуля; с настоящим SolidWorks — только если задать `NONIUS_TEST_SOLIDWORKS=путь к .sldprt` |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |

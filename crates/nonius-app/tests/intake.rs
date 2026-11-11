@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use nonius_app::{App, Error, GitOptions, NoProgress};
+use nonius_app::{App, Error, GitOptions, NoProgress, ShapeCheck, ShapeVerdict};
 use nonius_core::contract;
 use nonius_core::extension::{
     ExtensionPoint, GeometrySource, LinkSource, Module, ModuleManifest, Registry, API_VERSION,
@@ -23,7 +23,7 @@ fn manifest(id: &str, point: ExtensionPoint) -> ModuleManifest {
     }
 }
 
-/// «STEP», в котором записан объём.
+/// «STEP», в котором записан объём, а за ним, если есть, три габарита.
 struct VolumeSource(ModuleManifest);
 
 impl Module for VolumeSource {
@@ -39,7 +39,17 @@ impl GeometrySource for VolumeSource {
     fn read(&self, path: &Path) -> nonius_core::Result<PartMeta> {
         let text = std::fs::read_to_string(path).unwrap();
         let mut m = PartMeta::new(ItemKind::Part);
-        m.geometry.volume_mm3 = text.trim().parse().ok();
+        let numbers: Vec<f64> = text
+            .split_whitespace()
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        m.geometry.volume_mm3 = numbers.first().copied();
+        if let [_, x, y, z] = numbers[..] {
+            m.geometry.bbox = Some(nonius_core::meta::BoundingBox {
+                min: [0.0; 3],
+                max: [x, y, z],
+            });
+        }
         Ok(m)
     }
 }
@@ -163,6 +173,48 @@ fn folder_becomes_a_project() {
     let again = app.intake_plan(&source).unwrap();
     assert!(again.items.is_empty(), "{:?}", again.items);
     assert!(again.left.iter().any(|l| l.why.contains("уже есть")));
+}
+
+#[test]
+fn shape_of_the_parts_checks_the_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("свалка");
+    std::fs::create_dir_all(&source).unwrap();
+    let put = |name: &str, text: &str| std::fs::write(source.join(name), text).unwrap();
+    put("вал.step", "10000 20 20 100");
+    put("вал_v2.step", "10400 20 20 100");
+    put("кожух.step", "5000 2 80 120");
+    put("кожух_v2.step", "900 10 10 30");
+    put("люк.step", "5100 2 80 121");
+    let app = app(&tmp.path().join("станок"));
+    let names = |plan: &nonius_app::IntakePlan| -> Vec<String> {
+        plan.items.iter().map(|i| i.name.clone()).collect()
+    };
+
+    // Без проверки формой — как раньше, по одним именам.
+    let quick = app
+        .intake_plan_with(&source, ShapeCheck::Off, &NoProgress)
+        .unwrap();
+    assert_eq!(names(&quick), ["вал", "кожух", "люк"]);
+    assert!(quick.items.iter().all(|i| i.shape.is_none()));
+
+    // Обычный разбор: вал подтверждён, кожух — две разные детали.
+    let plan = app.intake_plan(&source).unwrap();
+    assert_eq!(names(&plan), ["вал", "кожух", "кожух_v2", "люк"]);
+    assert_eq!(plan.items[0].shape, Some(ShapeVerdict::Confirmed));
+    assert_eq!(plan.items[2].shape, Some(ShapeVerdict::Different));
+    assert!(plan.items[3].why.is_empty(), "люк не смотрели");
+
+    // Глубокий: смотрит все детали и замечает, что люк похож на кожух.
+    let deep = app
+        .intake_plan_with(&source, ShapeCheck::All, &NoProgress)
+        .unwrap();
+    assert!(deep.items[3].why[0].contains("похожа на «кожух»"));
+
+    let done = app.intake_apply(&plan, &NoProgress).unwrap();
+    assert_eq!(done.failed, []);
+    assert_eq!(app.versions("вал").unwrap().len(), 2);
+    assert_eq!(app.versions("кожух_v2").unwrap().len(), 1);
 }
 
 #[test]

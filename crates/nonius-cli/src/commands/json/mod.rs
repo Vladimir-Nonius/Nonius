@@ -189,9 +189,15 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
         Command::Overview { changed } => overview(&app()?, *changed)?,
         Command::Agents => json!({ "updated": app()?.update_agents()? }),
         Command::Modules => modules(),
-        Command::Intake { folder, apply } => {
+        Command::Intake {
+            folder,
+            apply,
+            quick,
+            deep,
+        } => {
             let app = app()?;
-            let plan = app.intake_plan(folder)?;
+            let check = super::intake::check(*quick, *deep);
+            let plan = app.intake_plan_with(folder, check, &NoProgress)?;
             let done = if *apply {
                 Some(app.intake_apply(&plan, &NoProgress)?)
             } else {

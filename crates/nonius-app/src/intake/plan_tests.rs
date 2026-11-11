@@ -7,7 +7,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 
-use super::super::{key, Found, IntakePlan};
+use super::super::shape::Shape;
+use super::super::{key, Found, IntakePlan, ShapeVerdict};
 use super::build;
 
 const ROOT: &str = "/папка";
@@ -34,7 +35,28 @@ fn link(links: &mut HashMap<String, Vec<String>>, from: &str, to: &[&str]) {
 }
 
 fn plan(files: &[Found], links: &HashMap<String, Vec<String>>) -> IntakePlan {
-    build(PathBuf::from(ROOT), files.to_vec(), links, &[])
+    build(
+        PathBuf::from(ROOT),
+        files.to_vec(),
+        links,
+        &[],
+        &HashMap::new(),
+    )
+}
+
+fn none_shapes() -> HashMap<String, Shape> {
+    HashMap::new()
+}
+
+/// Форма файла `rel`: объём и габариты.
+fn shaped(shapes: &mut HashMap<String, Shape>, rel: &str, volume: f64, dims: [f64; 3]) {
+    let shape = Shape {
+        volume,
+        area: None,
+        dims,
+        faces: None,
+    };
+    shapes.insert(key(&Path::new(ROOT).join(rel)), shape);
 }
 
 /// Имена деталей плана с папками: `папка/имя`.
@@ -227,7 +249,58 @@ fn one_assembly_keeps_the_folder_as_it_is() {
 fn names_taken_in_the_project_stay_out() {
     let files = [file("вал.SLDPRT", 1), file("втулка.SLDPRT", 1)];
     let taken = [PartName::new("Вал").unwrap()];
-    let p = build(PathBuf::from(ROOT), files.to_vec(), &HashMap::new(), &taken);
+    let none = HashMap::new();
+    let p = build(
+        PathBuf::from(ROOT),
+        files.to_vec(),
+        &none,
+        &taken,
+        &none_shapes(),
+    );
     assert_eq!(names(&p), ["втулка"]);
     assert!(p.left[0].why.contains("уже есть"), "{:?}", p.left);
+}
+
+#[test]
+fn shape_confirms_or_splits_versions() {
+    let files = [
+        file("вал.SLDPRT", 1),
+        file("вал_v2.SLDPRT", 2),
+        file("кожух.SLDPRT", 1),
+        file("кожух_v2.SLDPRT", 2),
+        file("люк.SLDPRT", 1),
+    ];
+    let mut shapes = none_shapes();
+    shaped(&mut shapes, "вал.SLDPRT", 10_000.0, [20.0, 20.0, 100.0]);
+    shaped(&mut shapes, "вал_v2.SLDPRT", 10_400.0, [20.0, 20.0, 100.0]);
+    shaped(&mut shapes, "кожух.SLDPRT", 5_000.0, [2.0, 80.0, 120.0]);
+    shaped(&mut shapes, "кожух_v2.SLDPRT", 900.0, [10.0, 10.0, 30.0]);
+    // «Люк» назван иначе, а формой — почти «кожух».
+    shaped(&mut shapes, "люк.SLDPRT", 5_100.0, [2.0, 80.0, 121.0]);
+    let p = build(
+        PathBuf::from(ROOT),
+        files.to_vec(),
+        &HashMap::new(),
+        &[],
+        &shapes,
+    );
+    assert_eq!(names(&p), ["вал", "кожух", "кожух_v2", "люк"]);
+    let item = |name: &str| p.items.iter().find(|i| i.name == name).unwrap();
+
+    let shaft = item("вал");
+    assert_eq!(labels(&p, "вал"), ["вал", "вал_v2"]);
+    assert_eq!(shaft.shape, Some(ShapeVerdict::Confirmed));
+    assert!(shaft.why.iter().any(|w| w.contains("подтверждено формой")));
+
+    // Разная форма: две детали, и обе это объясняют.
+    let (cover, other) = (item("кожух"), item("кожух_v2"));
+    assert_eq!(cover.versions.len(), 1);
+    assert_eq!(cover.shape, Some(ShapeVerdict::Different));
+    assert!(!cover.guessed && !other.guessed);
+    assert!(other.why[0].starts_with("имя похоже на «кожух», но форма другая"));
+
+    // Похожие формой детали с разными именами не объединяются: подсказка.
+    assert!(cover.why.iter().any(|w| w.contains("похожа на «люк»")));
+    assert!(item("люк").why[0].contains("похожа на «кожух»"));
+    assert_eq!(item("люк").shape, None);
 }

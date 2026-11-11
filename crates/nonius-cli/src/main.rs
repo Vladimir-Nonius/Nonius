@@ -128,7 +128,12 @@ fn run(cli: Cli) -> Result<()> {
         Command::Mcp { write } => mcp::serve(&cli, *write)?,
         Command::Describe => println!("{}", describe::describe()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
-        Command::Intake { folder, apply } => intake::intake(&app()?, folder, *apply)?,
+        Command::Intake {
+            folder,
+            apply,
+            quick,
+            deep,
+        } => intake::intake(&app()?, folder, *apply, intake::check(*quick, *deep))?,
         Command::Status { part } => history::status(&app()?, part.as_deref())?,
         Command::Commit { part, message } => history::commit(&app()?, part, message)?,
         Command::Log { part } => history::log(&app()?, part)?,

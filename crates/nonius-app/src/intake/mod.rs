@@ -20,16 +20,22 @@
 //!   отвечает SolidWorks), даже если назван иначе;
 //! - `вал`, `вал_v2`, `вал (3)` — версии одной детали (`names.rs`), но не
 //!   тогда, когда оба файла стоят в одной сборке: это разные детали;
+//! - догадку по именам проверяет форма (`shape.rs`): похожие — версии,
+//!   непохожие — разные детали, одинаковые — возможно, копии;
 //! - детали, которые нужны только одной сборке, кладутся в её папку.
 //!
 //! Файлы: здесь — данные плана и обход папки, `names.rs` — пометки версий в
 //! именах, `grouping.rs` — какие модели одна деталь и как её назвать,
+//! `shape.rs` — сравнение формы, `measure.rs` — откуда берётся форма
+//! (паспорт STEP, для файла SolidWorks — через модуль перевода),
 //! `plan.rs` — остальные правила и сам план, `apply.rs` — выполнение.
 
 mod apply;
 mod grouping;
+mod measure;
 mod names;
 mod plan;
+mod shape;
 
 use std::collections::HashMap;
 use std::fs;
@@ -39,9 +45,23 @@ use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 use serde::Serialize;
 
-use crate::{App, Error, Result};
+use crate::{App, Error, NoProgress, Progress, Result};
 
 pub use apply::{IntakeDone, IntakeFailure};
+pub use shape::ShapeVerdict;
+
+/// Насколько глубоко проверять догадки формой деталей. Проверка читает
+/// модели (файлы SolidWorks — через сам SolidWorks, секунды на деталь).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShapeCheck {
+    /// Не проверять: только имена и связи. Мгновенно.
+    Off,
+    /// Проверить версии, угаданные по именам.
+    #[default]
+    Names,
+    /// Посмотреть все детали: найдёт и похожие с непохожими именами.
+    All,
+}
 
 /// План раскладки папки. Ничего не сделано, пока его не выполнят.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -71,6 +91,8 @@ pub struct PlannedItem {
     pub why: Vec<String>,
     /// Версии угаданы по именам файлов: стоит показать человеку.
     pub guessed: bool,
+    /// Что о догадке сказала форма деталей; `None` — не проверялось.
+    pub shape: Option<ShapeVerdict>,
 }
 
 /// Одна версия будущей детали.
@@ -115,8 +137,20 @@ fn key(path: &Path) -> String {
 
 impl App {
     /// Посмотреть папку `folder` и предложить, как разложить её в проект.
-    /// Ничего не меняет ни в папке, ни в проекте.
+    /// Ничего не меняет ни в папке, ни в проекте. Версии, угаданные по
+    /// именам, проверяются формой.
     pub fn intake_plan(&self, folder: &Path) -> Result<IntakePlan> {
+        self.intake_plan_with(folder, ShapeCheck::default(), &NoProgress)
+    }
+
+    /// То же с выбором глубины проверки формой и строкой хода: проверка
+    /// может идти минуты. «Остановить» — план будет с тем, что успели.
+    pub fn intake_plan_with(
+        &self,
+        folder: &Path,
+        check: ShapeCheck,
+        progress: &dyn Progress,
+    ) -> Result<IntakePlan> {
         let source = std::path::absolute(folder).map_err(|e| Error::io(folder, e))?;
         if !source.is_dir() {
             return Err(Error::FileNotFound(source));
@@ -131,7 +165,19 @@ impl App {
 
         let links = self.links_of(&files);
         let taken: Vec<PartName> = self.project.items()?.into_iter().map(|i| i.name).collect();
-        Ok(plan::build(source, files, &links, &taken))
+        // Сначала план по именам и связям: из него видно, чью форму смотреть.
+        let draft = plan::build(
+            source.clone(),
+            files.clone(),
+            &links,
+            &taken,
+            &HashMap::new(),
+        );
+        let shapes = self.shapes_of(&draft, check, progress);
+        if shapes.is_empty() {
+            return Ok(draft);
+        }
+        Ok(plan::build(source, files, &links, &taken, &shapes))
     }
 
     /// Связи файлов от подключённых модулей. Нет модуля или он не ответил —
