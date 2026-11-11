@@ -25,7 +25,9 @@ use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
 use args::{Cli, Command, FileCommand, FolderCommand, PartCommand};
-use commands::{compare, describe, files, history, import, json, layout, mcp, passport, project};
+use commands::{
+    compare, describe, files, history, import, intake, json, layout, mcp, passport, project,
+};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
@@ -126,6 +128,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Mcp { write } => mcp::serve(&cli, *write)?,
         Command::Describe => println!("{}", describe::describe()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
+        Command::Intake { folder, apply } => intake::intake(&app()?, folder, *apply)?,
         Command::Status { part } => history::status(&app()?, part.as_deref())?,
         Command::Commit { part, message } => history::commit(&app()?, part, message)?,
         Command::Log { part } => history::log(&app()?, part)?,

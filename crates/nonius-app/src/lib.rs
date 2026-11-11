@@ -12,7 +12,8 @@
 //! `layout.rs` — папки, карта проекта, перенос детали, обновление старого проекта,
 //! `history.rs` — версии, `files.rs` — файлы версии и их открытие,
 //! `system/` — программы системы, запуск, показ в папке,
-//! `import.rs` — импорт модели, `passport.rs` — паспорт и масса,
+//! `import.rs` — импорт модели, `intake/` — разбор папки с файлами в проект,
+//! `passport.rs` — паспорт и масса,
 //! `materials.rs` — справочник плотностей, `compare.rs` — сравнение,
 //! `model_view.rs` — показ детали без сравнения, `outside.rs` — сравнение с
 //! файлом или другой деталью, `cache.rs` — кэш сравнений, `error.rs` — ошибки.
@@ -23,6 +24,7 @@ mod error;
 mod files;
 mod history;
 mod import;
+mod intake;
 mod items;
 mod layout;
 mod materials;
@@ -44,6 +46,9 @@ use nonius_store::Store;
 pub use compare::{CompareOptions, Comparison, NoProgress, Progress};
 pub use error::{Error, Result, ERROR_CODES};
 pub use import::{Imported, PREVIEW_FORMAT};
+pub use intake::{
+    IntakeDone, IntakeFailure, IntakePlan, LeftFile, PlannedItem, PlannedVersion, NOT_OURS,
+};
 pub use items::{ItemState, ItemStatus};
 pub use layout::{MapItem, ProjectMap};
 pub use materials::{find_material, similar_materials, Material, MATERIALS};

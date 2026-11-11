@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use super::{
-    Comparator, Converter, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource, Module,
-    ModuleManifest, Renderer, Snapshot, TreeSource,
+    Comparator, Converter, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource,
+    LinkSource, Module, ModuleManifest, Renderer, Snapshot, TreeSource,
 };
 use crate::compare::{ChangeReport, CompareContext};
 use crate::error::{Error, Result};
@@ -18,6 +18,7 @@ pub struct Registry {
     renderers: Vec<Box<dyn Renderer>>,
     exporters: Vec<Box<dyn Exporter>>,
     converters: Vec<Box<dyn Converter>>,
+    links: Vec<Box<dyn LinkSource>>,
     events: Vec<Box<dyn EventHandler>>,
 }
 
@@ -86,6 +87,13 @@ impl Registry {
             ids(&self.converters),
         )?;
         self.converters.push(m);
+        Ok(())
+    }
+
+    /// Подключить источник связей файлов.
+    pub fn add_link_source(&mut self, m: Box<dyn LinkSource>) -> Result<()> {
+        check(m.manifest(), ExtensionPoint::Links, ids(&self.links))?;
+        self.links.push(m);
         Ok(())
     }
 
@@ -163,6 +171,11 @@ impl Registry {
             .map(|m| m.as_ref())
     }
 
+    /// Все подключённые источники связей файлов.
+    pub fn link_sources(&self) -> impl Iterator<Item = &dyn LinkSource> + '_ {
+        self.links.iter().map(|m| m.as_ref())
+    }
+
     /// Все подключённые отрисовщики.
     pub fn renderers(&self) -> impl Iterator<Item = &dyn Renderer> + '_ {
         self.renderers.iter().map(|m| m.as_ref())
@@ -171,13 +184,14 @@ impl Registry {
     /// Манифесты всех подключённых модулей (модуль с несколькими точками — один раз).
     pub fn manifests(&self) -> Vec<&ModuleManifest> {
         let mut all: Vec<&ModuleManifest> = Vec::new();
-        let lists: [Vec<&ModuleManifest>; 7] = [
+        let lists: [Vec<&ModuleManifest>; 8] = [
             self.geometry.iter().map(|m| m.manifest()).collect(),
             self.trees.iter().map(|m| m.manifest()).collect(),
             self.comparators.iter().map(|m| m.manifest()).collect(),
             self.renderers.iter().map(|m| m.manifest()).collect(),
             self.exporters.iter().map(|m| m.manifest()).collect(),
             self.converters.iter().map(|m| m.manifest()).collect(),
+            self.links.iter().map(|m| m.manifest()).collect(),
             self.events.iter().map(|m| m.manifest()).collect(),
         ];
         for m in lists.into_iter().flatten() {

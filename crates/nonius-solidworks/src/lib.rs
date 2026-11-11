@@ -16,9 +16,16 @@
 //! Модуль подключается к точке [`Converter`] и только там, где SolidWorks
 //! установлен ([`available`]); без него импорт работает по-старому.
 //!
-//! Файлы: здесь — модуль `solidworks-step`, `run.rs` — запуск скрипта и
-//! разбор его ответа, `export_step.ps1` — сам разговор с SolidWorks.
+//! Второй модуль — связи файлов (точка [`LinkSource`]): из каких деталей
+//! собрана сборка и к какой модели относится чертёж. По ним Nonius сам
+//! раскладывает папку с файлами.
+//!
+//! Файлы: здесь — модуль `solidworks-step`, `run.rs` — запуск скриптов и
+//! разбор их ответа, `export_step.ps1` — выгрузка STEP, `links.rs` и
+//! `links.ps1` — модуль `solidworks-links`, `close.ps1` — сторож, который
+//! держит SolidWorks открытым на время работы и закрывает после простоя.
 
+mod links;
 mod run;
 
 use std::path::Path;
@@ -28,6 +35,7 @@ use nonius_core::extension::{
 };
 use nonius_core::{Error, Result};
 
+pub use links::SolidWorksLinks;
 pub use run::{available, export_step};
 
 /// Модуль: STEP из `.sldprt` и `.sldasm` силами установленного SolidWorks.
@@ -81,10 +89,11 @@ impl Converter for SolidWorksConverter {
     }
 }
 
-/// Подключить модуль, если на этом компьютере есть SolidWorks.
+/// Подключить модули, если на этом компьютере есть SolidWorks.
 pub fn register(registry: &mut Registry) -> Result<()> {
     if available() {
         registry.add_converter(Box::new(SolidWorksConverter::new()))?;
+        registry.add_link_source(Box::new(SolidWorksLinks::new()))?;
     }
     Ok(())
 }

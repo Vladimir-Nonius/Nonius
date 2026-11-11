@@ -21,7 +21,8 @@ use std::path::Path;
 
 use crate::compare::CompareContext;
 use crate::extension::{
-    Comparator, Converter, Exporter, ExtensionPoint, GeometrySource, Module, Snapshot, TreeSource,
+    Comparator, Converter, Exporter, ExtensionPoint, GeometrySource, LinkSource, Module, Snapshot,
+    TreeSource,
 };
 use crate::schema::Versioned;
 use crate::{meta::PartMeta, tree::FeatureTree};
@@ -230,6 +231,41 @@ pub fn converter<C: Converter>(conv: &C, sample: &Path, out_dir: &Path) -> Resul
     }
     if std::fs::read(sample).ok() != before {
         v.push("образец изменился после перевода".into());
+    }
+    finish(v)
+}
+
+/// Связи файлов: берёт образец, не берёт чужие файлы, отвечает списком той
+/// же длины, что и вопрос, полными путями, и повторяемо.
+pub fn link_source<S: LinkSource>(src: &S, sample: &Path) -> Result<(), Violations> {
+    let mut v = manifest(src, ExtensionPoint::Links)
+        .err()
+        .unwrap_or_default();
+    if !src.knows(sample) {
+        v.push(format!("не знает связей образца {}", sample.display()));
+        return finish(v);
+    }
+    if src.knows(Path::new("contract-check.nonius-unknown-format")) {
+        v.push("берётся за файл неизвестного формата".into());
+    }
+    let ask = [sample.to_path_buf(), sample.to_path_buf()];
+    match (src.links(&ask), src.links(&ask)) {
+        (Ok(a), Ok(b)) => {
+            if a.len() != ask.len() {
+                v.push(format!(
+                    "спросили про {} файла, ответов {}",
+                    ask.len(),
+                    a.len()
+                ));
+            }
+            if a != b {
+                v.push("два одинаковых вопроса дали разный ответ".into());
+            }
+            if a.iter().flatten().any(|p| !p.is_absolute()) {
+                v.push("в ответе есть неполный путь".into());
+            }
+        }
+        (Err(e), _) | (_, Err(e)) => v.push(format!("ошибка на образце: {e}")),
     }
     finish(v)
 }

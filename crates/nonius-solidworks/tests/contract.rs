@@ -8,7 +8,7 @@ use std::path::Path;
 
 use nonius_core::contract;
 use nonius_core::extension::{Converter, ExtensionPoint};
-use nonius_solidworks::SolidWorksConverter;
+use nonius_solidworks::{SolidWorksConverter, SolidWorksLinks};
 
 #[test]
 fn manifest_and_file_kinds() {
@@ -42,4 +42,20 @@ fn real_solidworks_passes_contract() {
     if let Err(v) = contract::converter(&c, Path::new(&sample), dir.path()) {
         panic!("нарушения контракта:\n- {}", v.join("\n- "));
     }
+    if let Err(v) = contract::link_source(&SolidWorksLinks::new(), Path::new(&sample)) {
+        panic!("нарушения контракта:\n- {}", v.join("\n- "));
+    }
+}
+
+#[test]
+fn links_manifest_and_file_kinds() {
+    let l = SolidWorksLinks::new();
+    if let Err(v) = contract::manifest(&l, ExtensionPoint::Links) {
+        panic!("нарушения контракта:\n- {}", v.join("\n- "));
+    }
+    use nonius_core::extension::LinkSource;
+    assert!(l.knows(Path::new("узел.SLDASM")));
+    assert!(l.knows(Path::new("вал.slddrw")));
+    assert!(!l.knows(Path::new("вал.step")));
+    assert_eq!(l.links(&[]).unwrap(), Vec::<Vec<std::path::PathBuf>>::new());
 }

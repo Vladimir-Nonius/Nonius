@@ -24,6 +24,9 @@ pub enum ExtensionPoint {
     Exporter,
     /// Файл CAD → STEP ([`Converter`](super::Converter)).
     Converter,
+    /// Связи файлов CAD: сборка → детали, чертёж → модель
+    /// ([`LinkSource`](super::LinkSource)).
+    Links,
     /// Реакция на события проекта ([`EventHandler`](super::EventHandler)).
     Events,
     /// Панели и вкладки интерфейса (подключаются веб-интерфейсом).

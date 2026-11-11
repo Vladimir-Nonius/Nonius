@@ -6,6 +6,7 @@ pub mod describe;
 pub mod files;
 pub mod history;
 pub mod import;
+pub mod intake;
 pub mod json;
 pub mod layout;
 pub mod mcp;
