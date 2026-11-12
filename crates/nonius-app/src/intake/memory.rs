@@ -6,6 +6,9 @@
 //! узнаётся по файлам модели: путь, размер и время изменения; файл
 //! поменяли — запись не подойдёт, и форму снимут заново.
 //!
+//! Форму, снятую бегло (по сетке из самого файла), помечает слово `mesh`
+//! в конце строки: такие числа с точными на равных не сравнивают.
+//!
 //! Это кэш: его можно удалить, испорченная строка просто пропускается.
 
 use std::collections::HashMap;
@@ -14,6 +17,9 @@ use std::time::UNIX_EPOCH;
 
 use super::key;
 use super::shape::Shape;
+
+/// Пометка в конце строки: форма снята бегло.
+const ROUGH: &str = "mesh";
 
 /// Запомненные формы по подписи файлов модели.
 pub(super) struct Memory {
@@ -42,13 +48,15 @@ fn parse(line: &str) -> Option<(String, Shape)> {
     let area = number();
     let dims = [number()?, number()?, number()?];
     let faces = cells.next()?.parse::<u32>().ok();
+    let sign = cells.next()?.to_string();
     let shape = Shape {
         volume,
         area,
         dims,
         faces,
+        rough: cells.next() == Some(ROUGH),
     };
-    Some((cells.next()?.to_string(), shape))
+    Some((sign, shape))
 }
 
 impl Memory {
@@ -85,13 +93,18 @@ impl Memory {
             .iter()
             .map(|(sign, s)| {
                 format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{sign}\n",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{sign}{}\n",
                     s.volume,
                     cell(s.area.map(|a| a.to_string())),
                     s.dims[0],
                     s.dims[1],
                     s.dims[2],
                     cell(s.faces.map(|f| f.to_string())),
+                    if s.rough {
+                        format!("\t{ROUGH}")
+                    } else {
+                        String::new()
+                    },
                 )
             })
             .collect();
@@ -120,6 +133,7 @@ mod tests {
             area: None,
             dims: [70.0, 84.04, 397.9],
             faces: Some(352),
+            rough: false,
         };
         let mut memory = Memory::load(tmp.path());
         assert_eq!(memory.get(&models), None);
@@ -128,6 +142,16 @@ mod tests {
 
         let memory = Memory::load(tmp.path());
         assert_eq!(memory.get(&models), Some(shape), "числа — без потерь");
+        // Беглая форма помнит, что она беглая.
+        let rough = Shape {
+            rough: true,
+            ..shape
+        };
+        let mut memory = memory;
+        memory.put(&models, rough);
+        memory.save();
+        let memory = Memory::load(tmp.path());
+        assert_eq!(memory.get(&models), Some(rough));
 
         // Файл изменился — старая запись не годится.
         std::fs::write(&model, "раз и два").unwrap();

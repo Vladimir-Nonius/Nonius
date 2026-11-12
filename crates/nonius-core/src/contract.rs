@@ -21,8 +21,8 @@ use std::path::Path;
 
 use crate::compare::CompareContext;
 use crate::extension::{
-    Comparator, Converter, Exporter, ExtensionPoint, GeometrySource, LinkSource, Module, Snapshot,
-    TreeSource,
+    Comparator, Converter, Exporter, ExtensionPoint, GeometrySource, LinkSource, Module,
+    ShapeGlance, Snapshot, TreeSource,
 };
 use crate::schema::Versioned;
 use crate::{meta::PartMeta, tree::FeatureTree};
@@ -266,6 +266,40 @@ pub fn link_source<S: LinkSource>(src: &S, sample: &Path) -> Result<(), Violatio
             }
         }
         (Err(e), _) | (_, Err(e)) => v.push(format!("ошибка на образце: {e}")),
+    }
+    finish(v)
+}
+
+/// Беглый взгляд на форму: берёт образец, не берёт чужие файлы, числа
+/// корректны (есть объём и габариты), повторяемы, образец не меняется.
+pub fn glance<G: ShapeGlance>(src: &G, sample: &Path) -> Result<(), Violations> {
+    let mut v = manifest(src, ExtensionPoint::Glance)
+        .err()
+        .unwrap_or_default();
+    if !src.can_glance(sample) {
+        v.push(format!("не берётся за образец {}", sample.display()));
+        return finish(v);
+    }
+    if src.can_glance(Path::new("contract-check.nonius-unknown-format")) {
+        v.push("берётся за файл неизвестного формата".into());
+    }
+    let before = std::fs::read(sample).ok();
+    match (src.glance(sample), src.glance(sample)) {
+        (Ok(a), Ok(b)) => {
+            if !a.is_valid() {
+                v.push("числа формы некорректны".into());
+            }
+            if a.volume_mm3.is_none_or(|x| x <= 0.0) || a.bbox.is_none() {
+                v.push("нет объёма или габаритов: сравнивать нечем".into());
+            }
+            if a != b {
+                v.push("два взгляда на один файл дали разные числа".into());
+            }
+        }
+        (Err(e), _) | (_, Err(e)) => v.push(format!("ошибка на образце: {e}")),
+    }
+    if std::fs::read(sample).ok() != before {
+        v.push("образец изменился".into());
     }
     finish(v)
 }

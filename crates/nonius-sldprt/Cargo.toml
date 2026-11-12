@@ -1,0 +1,19 @@
+[package]
+name = "nonius-sldprt"
+description = "Nonius module: reads a shape fingerprint and the preview straight from a .sldprt file, without SolidWorks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nonius-core.workspace = true
+miniz_oxide.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

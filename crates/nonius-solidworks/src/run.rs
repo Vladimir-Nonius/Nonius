@@ -24,8 +24,13 @@ const CLOSE: &str = include_str!("close.ps1");
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Установлен ли SolidWorks: записан ли он в реестре Windows как программа,
-/// которой можно давать команды.
+/// которой можно давать команды. Переменная окружения
+/// `NONIUS_NO_SOLIDWORKS` (любое непустое значение) отключает модуль: так
+/// работают, когда SolidWorks завис или его не хочется будить.
 pub fn available() -> bool {
+    if std::env::var_os("NONIUS_NO_SOLIDWORKS").is_some_and(|v| !v.is_empty()) {
+        return false;
+    }
     #[cfg(windows)]
     {
         use winreg::enums::HKEY_CLASSES_ROOT;

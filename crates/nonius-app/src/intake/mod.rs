@@ -67,7 +67,8 @@ pub use shape::ShapeVerdict;
 pub use study::IntakeStudy;
 
 /// Насколько глубоко проверять догадки формой деталей. Проверка читает
-/// модели (файлы SolidWorks — через сам SolidWorks, секунды на деталь).
+/// модели: файл SolidWorks — обычно прямо из файла (доли секунды), и
+/// только если в нём нет годной сетки — через сам SolidWorks (секунды).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShapeCheck {
     /// Не проверять: только имена и связи. Мгновенно.

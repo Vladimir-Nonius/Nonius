@@ -1,6 +1,7 @@
 //! Разбор папки от начала до конца: настоящие файлы на диске, настоящий git,
 //! игрушечные модули. «STEP» — текст с объёмом; связи файлов выдаёт
-//! поддельный модуль (как их выдавал бы SolidWorks).
+//! поддельный модуль (как их выдавал бы SolidWorks); беглый взгляд на форму
+//! читает те же числа из «файла SolidWorks».
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +10,7 @@ use nonius_core::compare::{Change, ChangeKind, ChangeReport, CompareContext};
 use nonius_core::contract;
 use nonius_core::extension::{
     Comparator, ExtensionPoint, GeometrySource, LinkSource, Module, ModuleManifest, Registry,
-    Snapshot, API_VERSION,
+    ShapeGlance, Snapshot, API_VERSION,
 };
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::Project;
@@ -53,6 +54,43 @@ impl GeometrySource for VolumeSource {
             });
         }
         Ok(m)
+    }
+}
+
+/// Беглый взгляд: «файл SolidWorks», в котором записаны объём и габариты.
+/// Файл без чисел — как настоящий без сетки: отказ.
+struct TextGlance(ModuleManifest);
+
+impl Module for TextGlance {
+    fn manifest(&self) -> &ModuleManifest {
+        &self.0
+    }
+}
+
+impl ShapeGlance for TextGlance {
+    fn can_glance(&self, path: &Path) -> bool {
+        path.extension().is_some_and(|e| e == "sldprt")
+    }
+    fn glance(&self, path: &Path) -> nonius_core::Result<nonius_core::meta::GeometrySummary> {
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        let numbers: Vec<f64> = text
+            .split_whitespace()
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        let [volume, x, y, z] = numbers[..] else {
+            return Err(nonius_core::Error::Module {
+                module: "glance-test".into(),
+                message: "в файле нет сетки".into(),
+            });
+        };
+        Ok(nonius_core::meta::GeometrySummary {
+            volume_mm3: Some(volume),
+            bbox: Some(nonius_core::meta::BoundingBox {
+                min: [0.0; 3],
+                max: [x, y, z],
+            }),
+            ..Default::default()
+        })
     }
 }
 
@@ -134,6 +172,11 @@ fn app(root: &Path) -> App {
     ))))
     .unwrap();
     reg.add_link_source(Box::new(links())).unwrap();
+    reg.add_glance(Box::new(TextGlance(manifest(
+        "glance-test",
+        ExtensionPoint::Glance,
+    ))))
+    .unwrap();
     reg.add_comparator(Box::new(TextComparator(manifest(
         "text-test",
         ExtensionPoint::Comparator,
@@ -275,6 +318,38 @@ fn shape_of_the_parts_checks_the_names() {
     assert_eq!(done.failed, []);
     assert_eq!(app.versions("вал").unwrap().len(), 2);
     assert_eq!(app.versions("кожух_v2").unwrap().len(), 1);
+}
+
+#[test]
+fn shape_is_read_from_the_cad_file_itself() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("свалка");
+    std::fs::create_dir_all(&source).unwrap();
+    let put = |name: &str, text: &str| std::fs::write(source.join(name), text).unwrap();
+    // Модуля перевода в STEP нет вовсе: SolidWorks не спрашивают.
+    put("вал.sldprt", "10000 20 20 100");
+    put("вал_v2.sldprt", "10400 20 20 100");
+    // В файле нет сетки — форму берут из STEP рядом, с запасом на способ.
+    put("ось.sldprt", "файл без сетки");
+    put("ось.step", "700 5 5 40");
+    put("ось_v2.sldprt", "704 5 5 40");
+    // Форму взять неоткуда — догадка остаётся догадкой.
+    put("штифт.sldprt", "файл без сетки");
+    put("штифт_v2.sldprt", "файл без сетки");
+    let app = app(&tmp.path().join("станок"));
+    assert_eq!(
+        contract::glance(
+            &TextGlance(manifest("glance-test", ExtensionPoint::Glance)),
+            &source.join("вал.sldprt")
+        ),
+        Ok(())
+    );
+
+    let plan = app.intake_plan(&source).unwrap();
+    let shape = |name: &str| plan.items.iter().find(|i| i.name == name).unwrap().shape;
+    assert_eq!(shape("вал"), Some(ShapeVerdict::Confirmed));
+    assert_eq!(shape("ось"), Some(ShapeVerdict::Copy), "точная и беглая");
+    assert_eq!(shape("штифт"), None);
 }
 
 #[test]

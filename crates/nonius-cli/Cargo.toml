@@ -18,6 +18,7 @@ nonius-app.workspace = true
 nonius-step.workspace = true
 nonius-occt.workspace = true
 nonius-solidworks.workspace = true
+nonius-sldprt.workspace = true
 nonius-scene.workspace = true
 nonius-gui.workspace = true
 clap.workspace = true

@@ -97,6 +97,7 @@ crates/
 ├── nonius-step/   # модуль: чтение заголовка STEP (какая CAD, автор, протокол)
 ├── nonius-occt/   # модули на OpenCascade: геометрия, сравнение формы, подсветка
 ├── nonius-solidworks/  # модуль: STEP из .sldprt/.sldasm силами установленного SolidWorks
+├── nonius-sldprt/  # модуль: форма и превью прямо из файла .sldprt, без SolidWorks
 ├── nonius-scene/  # модель 3D-сцены изменений и её файл glTF
 ├── nonius-gui/    # окно программы: детали, версии, 3D с подсветкой
 └── nonius-cli/    # команда `nonius` и запуск окна

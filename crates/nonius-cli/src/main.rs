@@ -74,6 +74,8 @@ fn registry_with(occt: fn(&mut Registry) -> nonius_core::Result<()>) -> Registry
     occt(&mut r).expect("встроенный модуль должен проходить проверку");
     r.add_geometry_source(Box::new(StepHeaderSource::new()))
         .expect("встроенный модуль должен проходить проверку");
+    // Форма прямо из файла .sldprt: SolidWorks для этого не нужен.
+    nonius_sldprt::register(&mut r).expect("встроенный модуль должен проходить проверку");
     // STEP из файлов SolidWorks — только там, где SolidWorks установлен.
     // В тестах не подключаем: они не должны запускать чужую программу.
     #[cfg(not(test))]

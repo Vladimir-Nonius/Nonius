@@ -14,7 +14,8 @@
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Задумано, но не сделано: сравнение в отдельном процессе | раздел «Задумано» в `docs/ARCHITECTURE.md`; идеи по интерфейсу — `docs/proposals/interface-next.md` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
-| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
+| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма: сначала из самого файла — `nonius-sldprt`, потом STEP, потом SolidWorks); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
+| Форма детали прямо из файла `.sldprt`, без SolidWorks (сетка показа, превью) | контейнер файла — `nonius-sldprt/src/container.rs`, сетка и числа по ней — `mesh.rs`, модуль и отказы — `lib.rs`; точка `ShapeGlance` — `nonius-core/src/extension/traits.rs`; где разбор папки это зовёт — `nonius-app/src/intake/measure.rs` |
 | Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
@@ -113,6 +114,16 @@
 | `lib.rs` | модуль `step-header` (`StepHeaderSource`) и его тесты |
 | `header.rs` | разбор `FILE_NAME`, `FILE_SCHEMA`, кириллицы `\X2\` |
 
+### `nonius-sldprt` — форма прямо из файла `.sldprt`
+
+SolidWorks не нужен: модуль читает сам файл (формат SolidWorks 2015 и новее). Числа приблизительные — по сетке, которой SolidWorks рисует деталь; в паспорт версии не идут, служат разбору папки.
+
+| Файл | Что внутри |
+|---|---|
+| `lib.rs` | модуль `sldprt-glance` (`SldprtGlance`, точка `ShapeGlance`), `fingerprint` — числа формы или причина отказа (нет сетки, сетка старее модели, не замкнута), `preview_png` — картинка из файла, `register` |
+| `container.rs` | `Container`: куски файла (заголовок как у zip, имена с переставленными половинками байта, deflate, CRC-32); `chunk`, `chunk_by`, `names`; `pack` — собрать файл для тестов |
+| `mesh.rs` | `measure`: записи граней в куске `Contents/DisplayLists` (ленты треугольников с нормалями) → объём с поправкой на кривизну, площадь, габариты, число граней; проверка, что сетка замкнута |
+
 ### `nonius-solidworks` — STEP из файлов SolidWorks
 
 Только Windows и только если SolidWorks установлен; иначе модуль не подключается, и импорт работает без него.
@@ -120,7 +131,7 @@
 | Файл | Что внутри |
 |---|---|
 | `lib.rs` | модуль `solidworks-step` (`SolidWorksConverter`, точка `Converter`), `register` — подключить, если SolidWorks есть |
-| `run.rs` | `available` (есть ли SolidWorks), `export_step`, `script`: запуск скрипта без окна, ожидание до 5 минут, разбор ответа `OK` / `ERROR: причина`; `close_later` — оставить сторожа |
+| `run.rs` | `available` (есть ли SolidWorks; `NONIUS_NO_SOLIDWORKS=1` — считать, что нет), `export_step`, `script`: запуск скрипта без окна, ожидание до 5 минут, разбор ответа `OK` / `ERROR: причина`; `close_later` — оставить сторожа |
 | `links.rs`, `links.ps1` | модуль `solidworks-links` (точка `LinkSource`): из чего собрана сборка, к какой модели чертёж; вся папка одним запуском |
 | `close.ps1` | сторож: держит SolidWorks запущенным, пока Nonius к нему обращается, и закрывает наш невидимый после полуминуты простоя (иначе разбор папки запускал бы его на каждую деталь) |
 | `export_step.ps1` | сам разговор с SolidWorks (PowerShell + COM): открыть деталь, «сохранить как STEP», закрыть за собой; в начале — правила вежливости к работающему человеку и почему вызовы идут через `InvokeMember` |
@@ -320,6 +331,7 @@
 | `nonius-app/src/intake/shape_tests.rs` | сравнение формы на числах настоящих деталей (коллектор и его доработка): копия, версия, другая деталь; деление группы (`split.rs`): слово человека, копии из других папок, детали одной сборки |
 | `nonius-app/tests/intake.rs` | разбор настоящей папки на диске с поддельными связями: план, выполнение, версии в истории, повторный разбор; три глубины проверки формой; ответы на вопросы меняют план; копии проекта по папкам сворачиваются в одну деталь; слова об изменениях в плане и в вопросе (поддельное быстрое сравнение) |
 | `nonius-app/tests/convert.rs` | импорт файла SolidWorks с поддельным модулем перевода: STEP рядом, отказ перевода, без модуля |
+| `nonius-sldprt/tests/glance.rs` | файл собирается в тесте: брусок и цилиндр (поправка объёма), отказы, превью, контракт; с настоящими файлами — `NONIUS_TEST_SLDPRT=путь к .sldprt`, сверка с эталоном — `NONIUS_TEST_SLDPRT_TRUTH=путь к .tsv` |
 | `nonius-solidworks/tests/contract.rs` | контракт модуля; с настоящим SolidWorks — только если задать `NONIUS_TEST_SOLIDWORKS=путь к .sldprt` |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 | `nonius-cli/tests/folders.rs` | `folder new`, `part move`, `map --json`, `upgrade` |

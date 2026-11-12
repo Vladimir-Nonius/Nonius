@@ -2,8 +2,8 @@
 //!
 //! Имя файла — слабое свидетельство. Сильное — сама деталь: у версий одной
 //! детали почти те же габариты и близкий объём. Здесь нет ни диска, ни
-//! SolidWorks: «отпечаток» формы ([`Shape`]) снимает `measure.rs` из
-//! паспорта модели, а тут его только сравнивают.
+//! SolidWorks: «отпечаток» формы ([`Shape`]) снимает `measure.rs` — из
+//! самого файла CAD или из паспорта модели, — а тут его только сравнивают.
 //!
 //! Три ответа ([`Likeness`]):
 //! - одинаковая форма — это копия файла, а не новая версия;
@@ -28,6 +28,9 @@ const TOUCHED: f64 = 0.10;
 const MAX_CHANGE: f64 = 0.25;
 /// Копия: все числа совпали с точностью записи в файл.
 const COPY: f64 = 1e-4;
+/// Копия, когда одну форму сняли точно (по STEP), а другую — бегло, по
+/// сетке показа из файла: способы расходятся до 2 %, мельче не разглядеть.
+const COPY_MIXED: f64 = 0.02;
 
 /// Что форма говорит о версиях детали.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -52,6 +55,10 @@ pub(super) struct Shape {
     pub dims: [f64; 3],
     /// Число граней.
     pub faces: Option<u32>,
+    /// Числа сняты бегло — по сетке показа из самого файла CAD, а не по
+    /// STEP. Они чуть грубее, а граней в сетке меньше, чем в STEP, поэтому
+    /// с точной формой такая сравнивается мягче (см. [`compare`]).
+    pub rough: bool,
 }
 
 impl Shape {
@@ -70,6 +77,7 @@ impl Shape {
             area: g.area_mm2,
             dims,
             faces: g.faces,
+            rough: false,
         })
     }
 
@@ -114,11 +122,15 @@ pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
         (Some(x), Some(y)) => gap(x, y),
         _ => 0.0,
     };
+    // Точная форма и беглая — числа из разных источников: грани не
+    // сравниваем вовсе, остальное — с запасом на расхождение способов.
+    let mixed = a.rough != b.rough;
     let faces = match (a.faces, b.faces) {
-        (Some(x), Some(y)) => x == y,
+        (Some(x), Some(y)) if !mixed => x == y,
         _ => true,
     };
-    if worst < COPY && volume < COPY && area < COPY && faces {
+    let copy = if mixed { COPY_MIXED } else { COPY };
+    if worst < copy && volume < copy && area < copy && faces {
         return Likeness::Same;
     }
     let percent = format!(

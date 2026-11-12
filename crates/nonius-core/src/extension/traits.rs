@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::Module;
 use crate::compare::{ChangeReport, CompareContext};
 use crate::error::Result;
-use crate::meta::PartMeta;
+use crate::meta::{GeometrySummary, PartMeta};
 use crate::names::{PartName, VersionNumber};
 use crate::tree::FeatureTree;
 
@@ -117,6 +117,20 @@ pub trait LinkSource: Module {
     /// (полные пути). Ответ той же длины и в том же порядке; у файла без
     /// ссылок список пуст.
     fn links(&self, files: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>>;
+}
+
+/// Беглый взгляд на форму: контрольные числа прямо из родного файла CAD,
+/// без CAD-системы и без STEP. Нужен там, где файлов много и ждать нельзя:
+/// разбор папки сверяет формой десятки деталей подряд. Числа приблизительные
+/// (обычно их считают по сетке показа, сохранённой в файле), поэтому в
+/// паспорт версии они не идут и с точными числами из STEP на равных не
+/// сравниваются.
+pub trait ShapeGlance: Module {
+    /// Берётся ли модуль за этот файл (обычно по расширению).
+    fn can_glance(&self, path: &Path) -> bool;
+    /// Объём, площадь, габариты и число граней. Ошибка — когда в файле нет
+    /// нужных данных или они устарели: тогда форму узнают обычным путём.
+    fn glance(&self, path: &Path) -> Result<GeometrySummary>;
 }
 
 /// Событие проекта.

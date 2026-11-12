@@ -63,6 +63,7 @@ fn shaped(shapes: &mut HashMap<String, Shape>, rel: &str, volume: f64, dims: [f6
         area: None,
         dims,
         faces: None,
+        rough: false,
     };
     shapes.insert(key(&Path::new(ROOT).join(rel)), shape);
 }

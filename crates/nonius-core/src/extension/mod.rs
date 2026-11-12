@@ -12,7 +12,7 @@
 //!
 //! Точки: источник геометрии, источник дерева, сравнение, отрисовка,
 //! экспорт, перевод файла CAD в STEP ([`Converter`]), связи файлов
-//! ([`LinkSource`]), события.
+//! ([`LinkSource`]), беглый взгляд на форму ([`ShapeGlance`]), события.
 //!
 //! Файлы: `manifest.rs` — манифест и права, `traits.rs` — трейты точек и
 //! [`Snapshot`], `registry.rs` — реестр подключённых модулей.
@@ -27,5 +27,5 @@ pub use manifest::{
 pub use registry::Registry;
 pub use traits::{
     Comparator, Converter, Event, EventHandler, Exporter, GeometrySource, LinkSource, Renderer,
-    Snapshot, TreeSource,
+    ShapeGlance, Snapshot, TreeSource,
 };

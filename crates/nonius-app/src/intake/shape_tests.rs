@@ -9,6 +9,7 @@ fn shape(volume: f64, dims: [f64; 3]) -> Shape {
         area: None,
         dims,
         faces: None,
+        rough: false,
     }
 }
 
@@ -101,6 +102,27 @@ fn copy_is_not_a_revision() {
         ..v1
     };
     assert!(matches!(compare(&v1, &other), Likeness::Similar(_)));
+}
+
+#[test]
+fn exact_and_rough_shapes_are_compared_softly() {
+    // Одна и та же деталь: точно по STEP и бегло по сетке из файла.
+    // Объём разошёлся на 0,2 %, граней в сетке меньше — это всё ещё копия.
+    let (exact, _) = manifold();
+    let rough = Shape {
+        volume: exact.volume * 1.002,
+        faces: Some(316),
+        rough: true,
+        ..exact
+    };
+    assert_eq!(compare(&exact, &rough), Likeness::Same);
+    // Обе беглые — источник один, сравнение строгое, как у точных.
+    let rough_too = Shape {
+        faces: Some(312),
+        ..rough
+    };
+    assert!(matches!(compare(&rough, &rough_too), Likeness::Similar(_)));
+    assert_eq!(compare(&rough, &rough), Likeness::Same);
 }
 
 #[test]

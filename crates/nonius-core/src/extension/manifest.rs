@@ -27,6 +27,9 @@ pub enum ExtensionPoint {
     /// Связи файлов CAD: сборка → детали, чертёж → модель
     /// ([`LinkSource`](super::LinkSource)).
     Links,
+    /// Беглый взгляд на форму прямо из файла CAD
+    /// ([`ShapeGlance`](super::ShapeGlance)).
+    Glance,
     /// Реакция на события проекта ([`EventHandler`](super::EventHandler)).
     Events,
     /// Панели и вкладки интерфейса (подключаются веб-интерфейсом).

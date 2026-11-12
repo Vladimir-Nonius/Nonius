@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::{
     Comparator, Converter, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource,
-    LinkSource, Module, ModuleManifest, Renderer, Snapshot, TreeSource,
+    LinkSource, Module, ModuleManifest, Renderer, ShapeGlance, Snapshot, TreeSource,
 };
 use crate::compare::{ChangeReport, CompareContext};
 use crate::error::{Error, Result};
@@ -19,6 +19,7 @@ pub struct Registry {
     exporters: Vec<Box<dyn Exporter>>,
     converters: Vec<Box<dyn Converter>>,
     links: Vec<Box<dyn LinkSource>>,
+    glances: Vec<Box<dyn ShapeGlance>>,
     events: Vec<Box<dyn EventHandler>>,
 }
 
@@ -94,6 +95,13 @@ impl Registry {
     pub fn add_link_source(&mut self, m: Box<dyn LinkSource>) -> Result<()> {
         check(m.manifest(), ExtensionPoint::Links, ids(&self.links))?;
         self.links.push(m);
+        Ok(())
+    }
+
+    /// Подключить беглый взгляд на форму.
+    pub fn add_glance(&mut self, m: Box<dyn ShapeGlance>) -> Result<()> {
+        check(m.manifest(), ExtensionPoint::Glance, ids(&self.glances))?;
+        self.glances.push(m);
         Ok(())
     }
 
@@ -190,6 +198,14 @@ impl Registry {
             .map(|m| m.as_ref())
     }
 
+    /// Первый модуль, который берётся взглянуть на форму этого файла.
+    pub fn glance_for(&self, path: &Path) -> Option<&dyn ShapeGlance> {
+        self.glances
+            .iter()
+            .find(|m| m.can_glance(path))
+            .map(|m| m.as_ref())
+    }
+
     /// Все подключённые источники связей файлов.
     pub fn link_sources(&self) -> impl Iterator<Item = &dyn LinkSource> + '_ {
         self.links.iter().map(|m| m.as_ref())
@@ -203,7 +219,7 @@ impl Registry {
     /// Манифесты всех подключённых модулей (модуль с несколькими точками — один раз).
     pub fn manifests(&self) -> Vec<&ModuleManifest> {
         let mut all: Vec<&ModuleManifest> = Vec::new();
-        let lists: [Vec<&ModuleManifest>; 8] = [
+        let lists: [Vec<&ModuleManifest>; 9] = [
             self.geometry.iter().map(|m| m.manifest()).collect(),
             self.trees.iter().map(|m| m.manifest()).collect(),
             self.comparators.iter().map(|m| m.manifest()).collect(),
@@ -211,6 +227,7 @@ impl Registry {
             self.exporters.iter().map(|m| m.manifest()).collect(),
             self.converters.iter().map(|m| m.manifest()).collect(),
             self.links.iter().map(|m| m.manifest()).collect(),
+            self.glances.iter().map(|m| m.manifest()).collect(),
             self.events.iter().map(|m| m.manifest()).collect(),
         ];
         for m in lists.into_iter().flatten() {

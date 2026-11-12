@@ -91,6 +91,7 @@ mod tests {
             area: None,
             dims,
             faces: None,
+            rough: false,
         }
     }
 
