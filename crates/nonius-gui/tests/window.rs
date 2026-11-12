@@ -17,6 +17,9 @@ use nonius_gui::source::{
 use nonius_gui::{App, Options, Settings};
 use nonius_scene::{Mesh, Region, Role, Scene};
 
+#[path = "window/intake.rs"]
+mod intake;
+
 /// Добавленная модель: файл, деталь и описание.
 type Added = (PathBuf, String, String);
 
@@ -60,6 +63,8 @@ struct Fake {
     gate: Arc<Mutex<()>>,
     /// Удаление падает внутренней ошибкой.
     broken: Arc<Mutex<bool>>,
+    /// Что делал разбор папки: изучение и раскладка.
+    intake: Arc<Mutex<Vec<String>>>,
 }
 
 impl Fake {
@@ -307,6 +312,26 @@ impl ProjectSource for Fake {
         }
         Ok(())
     }
+    fn intake_study(
+        &self,
+        _folder: &Path,
+        progress: &dyn Progress,
+    ) -> anyhow::Result<nonius_gui::source::IntakePlan> {
+        self.study(progress)
+    }
+    fn intake_plan(
+        &self,
+        answers: &[(String, bool)],
+    ) -> anyhow::Result<nonius_gui::source::IntakePlan> {
+        Ok(intake::plan(answers))
+    }
+    fn intake_apply(
+        &self,
+        answers: &[(String, bool)],
+        _progress: &dyn Progress,
+    ) -> anyhow::Result<nonius_gui::source::IntakeOutcome> {
+        self.apply(answers)
+    }
     fn new_folder(&self, folder: &str) -> anyhow::Result<()> {
         let mut folders = self.folders.lock().unwrap();
         if folders.iter().any(|f| f == folder) {
@@ -545,6 +570,7 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         deleted: Arc::default(),
         gate: Arc::default(),
         broken: Arc::default(),
+        intake: Arc::default(),
     }
 }
 

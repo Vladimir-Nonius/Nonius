@@ -138,7 +138,7 @@ fn file_name(path: &Path) -> String {
 
 /// Стоит ли показать деталь человеку: версии угаданы по именам и форма их
 /// не подтвердила, либо форма развела похожие имена на разные детали.
-fn unsure(item: &PlannedItem) -> bool {
+pub(crate) fn unsure(item: &PlannedItem) -> bool {
     match item.shape {
         Some(ShapeVerdict::Confirmed) => false,
         Some(ShapeVerdict::Copy | ShapeVerdict::Different) => true,

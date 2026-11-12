@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use super::jobs::Jobs;
 use super::{
-    add_model, batch, bottom, material, new_folder, new_part, node, open_menu, part_dialogs, save,
-    selection, settings_window, shown, structure,
+    add_model, batch, bottom, intake, material, new_folder, new_part, node, open_menu,
+    part_dialogs, save, selection, settings_window, shown, structure,
 };
 use crate::source::{
     Comparison, DiffEntry, FileEntry, MassEntry, MaterialEntry, PartEntry, Pick, ProjectSource,
@@ -59,6 +59,9 @@ pub(super) struct ProjectTab {
     pub in_structure: bool,
     /// Идёт очередь: перенос или удаление нескольких.
     pub batch: Option<batch::Batch>,
+    /// Открытый экран «Разобрать папку» и счётчик разборов.
+    pub intake: Option<intake::Intake>,
+    pub intake_runs: u64,
     /// Что где на экране: строки дерева и «Структуры» с прошлого кадра.
     pub on_screen: Vec<shown::Shown>,
     /// Куда ляжет файл из Проводника: запомнено, пока его несли над окном.
@@ -124,6 +127,7 @@ impl ProjectTab {
     /// навсегда.
     pub fn stop_waiting(&mut self, why: &str) {
         self.material_busy = false;
+        self.intake_crashed();
         if let Some(d) = self.save.as_mut().filter(|d| d.saving) {
             d.saving = false;
             d.error = Some(why.to_string());
@@ -151,6 +155,9 @@ impl ProjectTab {
     pub fn abandon(&mut self) {
         if let Some(batch) = self.batch.take() {
             batch.stop();
+        }
+        if let Some(intake) = self.intake.take() {
+            intake.stop();
         }
         self.jobs.forget_all();
     }

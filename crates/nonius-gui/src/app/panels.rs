@@ -52,10 +52,16 @@ pub fn status_bar(app: &mut App, ctx: &egui::Context) {
                         batch.stop();
                     }
                 }
+                // У разбора папки тоже своя строка; «Остановить» — на его экране.
+                let intake = app.tab.intake.as_ref().and_then(|i| i.progress());
+                if let Some(line) = &intake {
+                    ui.label(line);
+                }
+                let own = app.tab.batch.is_some() || intake.is_some();
                 let p = app.tab.jobs.progress();
                 let compare = app.tab.jobs.can_cancel();
-                if app.tab.batch.is_none() || compare || !p.is_empty() {
-                    if app.tab.batch.is_some() {
+                if !own || compare || !p.is_empty() {
+                    if own {
                         ui.separator();
                     }
                     ui.label(if p.is_empty() {

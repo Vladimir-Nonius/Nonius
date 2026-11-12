@@ -2,11 +2,12 @@
 //! OpenCascade, а сравнения берёт из того же кэша, что и команды.
 //!
 //! Здесь — проект и замки чтения и записи; `compare.rs` — сравнение,
-//! `files.rs` — файлы детали, `machine.rs` — git и имя автора, `words.rs` —
+//! `files.rs` — файлы детали, `intake.rs` — разбор папки, `machine.rs` — git и имя автора, `words.rs` —
 //! ошибки и масса словами.
 
 mod compare;
 mod files;
+mod intake;
 mod machine;
 mod words;
 
@@ -15,7 +16,7 @@ pub(super) use words::plainly;
 use words::{in_words, mass_entry};
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::format::short_date;
 use crate::window_lock::WindowLock;
@@ -26,8 +27,9 @@ use nonius_app::{App, FileChangeKind, History, MaterialChoice, MATERIALS};
 use nonius_core::meta::ItemKind;
 use nonius_core::VersionNumber;
 use nonius_gui::source::{
-    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, MassEntry, MaterialEntry, OpenWay,
-    Other, PartEntry, Pick, ProgramEntry, Progress, ProjectSettings, ProjectSource, VersionEntry,
+    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, IntakeOutcome, IntakePlan,
+    MassEntry, MaterialEntry, OpenWay, Other, PartEntry, Pick, ProgramEntry, Progress,
+    ProjectSettings, ProjectSource, VersionEntry,
 };
 
 /// Проект для окна поверх `nonius-app`.
@@ -40,6 +42,8 @@ pub(super) struct AppSource {
     /// папку детали и git: иначе git спотыкается о свой index.lock, а
     /// сравнение видит полусохранённое.
     files: RwLock<()>,
+    /// Последняя изученная папка: по ней план пересчитывается после ответов.
+    study: Mutex<Option<Arc<nonius_app::IntakeStudy>>>,
     /// Держит проект за этим процессом, пока он открыт.
     _lock: WindowLock,
 }
@@ -52,6 +56,7 @@ impl AppSource {
             app,
             busy: Mutex::new(()),
             files: RwLock::new(()),
+            study: Mutex::new(None),
             _lock: lock,
         }))
     }
@@ -380,6 +385,22 @@ impl ProjectSource for AppSource {
         progress: &dyn Progress,
     ) -> Result<Comparison> {
         self.compare_with(part, pick, other, progress)
+    }
+
+    fn intake_study(&self, folder: &Path, progress: &dyn Progress) -> Result<IntakePlan> {
+        self.study_folder(folder, progress)
+    }
+
+    fn intake_plan(&self, answers: &[(String, bool)]) -> Result<IntakePlan> {
+        self.plan_folder(answers)
+    }
+
+    fn intake_apply(
+        &self,
+        answers: &[(String, bool)],
+        progress: &dyn Progress,
+    ) -> Result<IntakeOutcome> {
+        self.apply_folder(answers, progress)
     }
 
     fn settings(&self) -> ProjectSettings {

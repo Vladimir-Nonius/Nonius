@@ -14,7 +14,7 @@
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Задумано, но не сделано: сравнение в отдельном процессе | раздел «Задумано» в `docs/ARCHITECTURE.md`; идеи по интерфейсу — `docs/proposals/interface-next.md` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
-| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs` |
+| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
 | Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
@@ -173,6 +173,7 @@
 | `lib.rs` | `run` — открыть окно, `show_error` — сообщение без консоли |
 | `source/mod.rs` | `ProjectSource`: детали, папки, версии, сравнение, сохранение, материал и масса — всё, что окно берёт у программы; `Progress` (ход и отмена) |
 | `source/entries.rs` | что приходит в окно: `PartEntry` (с папкой), `Listing` (детали и папки), версии, файлы, массы |
+| `source/intake.rs` | разбор папки для окна: `IntakePlan` (детали, вопросы, остатки), `IntakeItem`, `IntakeQuestion`, итог `IntakeOutcome` |
 | `texts.rs` | все надписи окна (русский) |
 | `app/mod.rs` | `App`: состояние окна, раскладка панелей (`draw`); `raw_input_hook` забирает стрелки ↑/↓ у открытого меню |
 | `app/actions.rs` | действия: открыть проект, выбрать деталь и версии, сравнить, отменить, сохранить, назначить материал |
@@ -197,6 +198,7 @@
 | `app/command.rs` | одна команда для клавиш, меню и перетаскивания (`Command`, `App::command`); клавиши выделенного: Delete, Ctrl+A, Esc, F2, Enter |
 | `app/choice.rs` | выбор с клавиатуры: в окошке главная кнопка сразу в фокусе, ←/→ — на соседнюю; в меню ↑/↓ по пунктам по кругу; Enter нажимает |
 | `app/batch.rs` | очередь: перенести или удалить несколько одной фоновой работой, своя строка хода, «Остановить», итог «Перенесено 3 из 5»; сбой предмета останавливает очередь с итогом |
+| `app/intake/` | «Разобрать папку…»: изучение папки в фоне со своей строкой хода и «Остановить», ответы «Да / Нет / Потом» с пересчётом плана, «Разложить в проект», итог; после раскладки дерево перечитывается (`mod.rs`); экран в центре окна: вопрос в рамке, план по папкам, «почему», пометка `(?)`, остатки (`screen.rs`) |
 | `app/marquee.rs` | рамка мышью с пустого места дерева и «Структуры»: что задела, то выделено (с Ctrl — добавлено) |
 | `app/settings_window.rs` | окно «Настройки»: «Проект» (название, допуск — `project.yaml`), «Программа» (вид на этом компьютере) |
 | `app/tree_folders.rs` | папки в дереве: строки папок и файлов, кнопки «+ деталь», «+ папка», «свернуть всё», перетаскивание детали на папку или в корень; исполнение щелчков, порядок строк для Shift и Ctrl+A |
@@ -277,6 +279,7 @@
 | `window.rs` | окно: `nonius` без команды, `nonius view` |
 | `window/source/mod.rs` | мост от `nonius-app` к окну (`AppSource`), замки чтения и записи |
 | `window/source/compare.rs`, `files.rs` | сравнение для окна; файлы детали |
+| `window/source/intake.rs` | разбор папки для окна: `intake_study` один раз (изученное помнит `AppSource`), план по ответам, раскладка под замком записи |
 | `window/source/machine.rs`, `words.rs` | git и имя автора; ошибки и масса словами |
 | `window/scenarios.rs` | сценарии человека: настоящее окно и настоящий проект на git |
 | `window_lock.rs` | один проект в одном окне |
@@ -306,6 +309,7 @@
 | `nonius-occt/tests/scene.rs` | сцена изменений на настоящем OpenCascade |
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
 | `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии, меню «Файл», смена проекта, новая деталь, окошко «Добавить модель», очередь файлов, битый файл, полоса ошибки, «Считаю…», возврат в окно, первый запуск, дерево, карта, выделение (Ctrl, Shift, рамка), удаление нескольких и «Остановить», ход очереди рядом со сравнением, сбой работы освобождает окошки и очередь, клавиши выделенного, стрелки в окошке и меню |
+| `nonius-gui/tests/window/intake.rs` | часть `window.rs`: «Разобрать папку» — план, вопрос «Потом / Нет», раскладка и итог; остановка изучения |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, местная разница против разницы целиком, кэш STEP |
 | `nonius-occt/tests/honest.rs` | маленькое отверстие в большой детали не теряется, слой тоньше допуска — шум, файл без твёрдых тел |

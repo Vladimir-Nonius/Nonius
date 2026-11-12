@@ -19,6 +19,7 @@ mod file_menu;
 mod files;
 mod first_run;
 mod history;
+mod intake;
 mod jobs;
 mod legend;
 mod map;
@@ -231,6 +232,9 @@ impl App {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(fill))
             .show(ctx, |ui| {
+                if intake::show(self, ui) {
+                    return;
+                }
                 structure::switch(self, ui);
                 if self.tab.view == structure::View::Structure {
                     structure::show(self, ui);
