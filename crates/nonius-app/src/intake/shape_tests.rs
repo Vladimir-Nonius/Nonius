@@ -265,3 +265,20 @@ fn parts_of_one_assembly_never_merge() {
     assert_eq!(parts[0].members, [0, 2]);
     assert_eq!(parts[1].members, [1]);
 }
+
+/// Проставку укоротили вдвое: форма «другая», но два габарита из трёх те
+/// же — об этом сказано словами, и вопрос человеку идёт без мнения.
+#[test]
+fn shortened_part_is_marked_as_close() {
+    let long = shape(100_000.0, [40.0, 40.0, 52.0]);
+    let short = shape(48_000.0, [25.0, 40.0, 40.0]);
+    match compare(&long, &short) {
+        Likeness::Different(how) => assert!(how.contains(TWO_KEPT), "{how}"),
+        other => panic!("ждал «другая», получил {other:?}"),
+    }
+    let other = shape(48_000.0, [25.0, 30.0, 70.0]);
+    match compare(&long, &other) {
+        Likeness::Different(how) => assert!(!how.contains(TWO_KEPT), "{how}"),
+        other => panic!("ждал «другая», получил {other:?}"),
+    }
+}

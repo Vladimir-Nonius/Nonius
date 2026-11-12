@@ -144,7 +144,11 @@ pub(super) fn ask(
             push(p.members.clone(), facts, None);
         }
         if let Some(rival) = p.rival {
-            push(vec![rival, p.members[0]], p.notes.clone(), Some(false));
+            // Два габарита из трёх те же — деталь могли просто укоротить:
+            // тут своего мнения у программы нет.
+            let close = p.notes.iter().any(|n| n.contains(super::shape::TWO_KEPT));
+            let opinion = if close { None } else { Some(false) };
+            push(vec![rival, p.members[0]], p.notes.clone(), opinion);
         }
     }
     // Похожие формой: спрашиваем, только когда у обеих деталей пара одна.

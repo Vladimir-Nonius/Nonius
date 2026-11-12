@@ -26,6 +26,10 @@ const SAME_SIZE: f64 = 0.02;
 const TOUCHED: f64 = 0.10;
 /// Насколько может уйти третий габарит и объём у версий одной детали.
 const MAX_CHANGE: f64 = 0.25;
+/// Форма «другая», но два габарита из трёх те же: так выглядит и деталь,
+/// которую укоротили или утолщили. По этим словам вопрос человеку задаётся
+/// без мнения «похоже, нет» (см. `questions.rs`).
+pub(super) const TWO_KEPT: &str = "два габарита из трёх совпали";
 /// Копия: все числа совпали с точностью записи в файл.
 const COPY: f64 = 1e-4;
 /// Копия, когда одну форму сняли точно (по STEP), а другую — бегло, по
@@ -141,7 +145,18 @@ pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
     let kept = sizes.iter().filter(|s| **s <= SAME_SIZE).count();
     let resized = kept >= 2 && worst <= MAX_CHANGE;
     if worst > TOUCHED && !resized {
-        return Likeness::Different(format!("габариты {} и {}", a.size(), b.size()));
+        let sizes = format!("габариты {} и {}", a.size(), b.size());
+        // Габариты отсортированы, поэтому «те же два» ищем без учёта места.
+        let mut free = b.dims.to_vec();
+        let same = a.dims.iter().filter(|&&d| {
+            let hit = free.iter().position(|&o| gap(d, o) <= SAME_SIZE);
+            hit.map(|at| free.swap_remove(at)).is_some()
+        });
+        return Likeness::Different(if same.count() >= 2 {
+            format!("{sizes}; {TWO_KEPT}")
+        } else {
+            sizes
+        });
     }
     if volume > MAX_CHANGE {
         return Likeness::Different(percent);
