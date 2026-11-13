@@ -84,6 +84,7 @@ pub(super) fn hints(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intake::shape::Source;
 
     fn shape(volume: f64, dims: [f64; 3]) -> Shape {
         Shape {
@@ -91,7 +92,7 @@ mod tests {
             area: None,
             dims,
             faces: None,
-            rough: false,
+            source: Source::Exact,
         }
     }
 

@@ -7,7 +7,8 @@
 //! поменяли — запись не подойдёт, и форму снимут заново.
 //!
 //! Форму, снятую бегло (по сетке из самого файла), помечает слово `mesh`
-//! в конце строки: такие числа с точными на равных не сравнивают.
+//! в конце строки. У одной версии могут быть обе записи: беглая — с
+//! первого разбора, точная — после уточнения через SolidWorks.
 //!
 //! Это кэш: его можно удалить, испорченная строка просто пропускается.
 
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::key;
-use super::shape::Shape;
+use super::shape::{Shape, Source};
 
 /// Пометка в конце строки: форма снята бегло.
 const ROUGH: &str = "mesh";
@@ -24,7 +25,7 @@ const ROUGH: &str = "mesh";
 /// Запомненные формы по подписи файлов модели.
 pub(super) struct Memory {
     file: PathBuf,
-    shapes: HashMap<String, Shape>,
+    shapes: HashMap<(String, Source), Shape>,
     changed: bool,
 }
 
@@ -41,7 +42,7 @@ pub(super) fn sign(models: &[PathBuf]) -> Option<String> {
     Some(parts.join("|"))
 }
 
-fn parse(line: &str) -> Option<(String, Shape)> {
+fn parse(line: &str) -> Option<((String, Source), Shape)> {
     let mut cells = line.split('\t');
     let mut number = || cells.next()?.parse::<f64>().ok();
     let volume = number()?;
@@ -49,14 +50,19 @@ fn parse(line: &str) -> Option<(String, Shape)> {
     let dims = [number()?, number()?, number()?];
     let faces = cells.next()?.parse::<u32>().ok();
     let sign = cells.next()?.to_string();
+    let source = if cells.next() == Some(ROUGH) {
+        Source::Glance
+    } else {
+        Source::Exact
+    };
     let shape = Shape {
         volume,
         area,
         dims,
         faces,
-        rough: cells.next() == Some(ROUGH),
+        source,
     };
-    Some((sign, shape))
+    Some(((sign, source), shape))
 }
 
 impl Memory {
@@ -71,13 +77,14 @@ impl Memory {
         }
     }
 
-    pub fn get(&self, models: &[PathBuf]) -> Option<Shape> {
-        self.shapes.get(&sign(models)?).copied()
+    /// Запомненная форма версии, снятая этим способом.
+    pub fn get(&self, models: &[PathBuf], source: Source) -> Option<Shape> {
+        self.shapes.get(&(sign(models)?, source)).copied()
     }
 
     pub fn put(&mut self, models: &[PathBuf], shape: Shape) {
         if let Some(sign) = sign(models) {
-            self.shapes.insert(sign, shape);
+            self.shapes.insert((sign, shape.source), shape);
             self.changed = true;
         }
     }
@@ -91,7 +98,7 @@ impl Memory {
         let mut lines: Vec<String> = self
             .shapes
             .iter()
-            .map(|(sign, s)| {
+            .map(|((sign, _), s)| {
                 format!(
                     "{}\t{}\t{}\t{}\t{}\t{}\t{sign}{}\n",
                     s.volume,
@@ -100,7 +107,7 @@ impl Memory {
                     s.dims[1],
                     s.dims[2],
                     cell(s.faces.map(|f| f.to_string())),
-                    if s.rough {
+                    if s.source == Source::Glance {
                         format!("\t{ROUGH}")
                     } else {
                         String::new()
@@ -133,31 +140,38 @@ mod tests {
             area: None,
             dims: [70.0, 84.04, 397.9],
             faces: Some(352),
-            rough: false,
+            source: Source::Exact,
         };
         let mut memory = Memory::load(tmp.path());
-        assert_eq!(memory.get(&models), None);
+        assert_eq!(memory.get(&models, Source::Exact), None);
         memory.put(&models, shape);
         memory.save();
 
         let memory = Memory::load(tmp.path());
-        assert_eq!(memory.get(&models), Some(shape), "числа — без потерь");
-        // Беглая форма помнит, что она беглая.
+        assert_eq!(
+            memory.get(&models, Source::Exact),
+            Some(shape),
+            "числа — без потерь"
+        );
+        assert_eq!(memory.get(&models, Source::Glance), None);
+        // Беглая форма помнит, что она беглая, и живёт рядом с точной.
         let rough = Shape {
-            rough: true,
+            volume: 440_000.0,
+            source: Source::Glance,
             ..shape
         };
         let mut memory = memory;
         memory.put(&models, rough);
         memory.save();
         let memory = Memory::load(tmp.path());
-        assert_eq!(memory.get(&models), Some(rough));
+        assert_eq!(memory.get(&models, Source::Glance), Some(rough));
+        assert_eq!(memory.get(&models, Source::Exact), Some(shape));
 
         // Файл изменился — старая запись не годится.
         std::fs::write(&model, "раз и два").unwrap();
-        assert_eq!(memory.get(&models), None);
+        assert_eq!(memory.get(&models, Source::Exact), None);
         // Испорченная строка пропускается.
         std::fs::write(tmp.path().join("intake-shapes.tsv"), "мусор\n").unwrap();
-        assert_eq!(Memory::load(tmp.path()).get(&models), None);
+        assert_eq!(Memory::load(tmp.path()).get(&models, Source::Exact), None);
     }
 }

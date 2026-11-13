@@ -392,6 +392,10 @@ impl ProjectSource for AppSource {
         self.study_folder(folder, progress)
     }
 
+    fn intake_refine(&self, progress: &dyn Progress) -> Result<()> {
+        self.refine_folder(progress)
+    }
+
     fn intake_plan(&self, answers: &[(String, bool)]) -> Result<IntakePlan> {
         self.plan_folder(answers)
     }

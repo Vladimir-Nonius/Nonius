@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::measure::Exports;
 use crate::{App, Error, FilesCompared, Progress, Result};
 
 impl App {
@@ -26,7 +27,7 @@ impl App {
             let main = models.last().map_or_else(PathBuf::new, Clone::clone);
             progress.step(&format!("Беру STEP: {}", name(&main)));
             let mut warnings = Vec::new();
-            let got = self.step_of(models, &mut warnings);
+            let got = self.step_of(models, Some(&Exports::default()), &mut warnings);
             if progress.cancelled() {
                 return Err(Error::Cancelled);
             }

@@ -6,7 +6,8 @@
 //! Слова дают «быстрые» модули сравнения (`Comparator::quick`) — те, что
 //! отвечают за доли секунды и не считают разницу объёмов. Им нужен STEP
 //! обеих версий: готовый, если он не старше файла SolidWorks, иначе — от
-//! модуля перевода. Посчитанное запоминается (`intake-words.tsv` рядом с
+//! модуля перевода (только во втором, точном проходе разбора: первый
+//! чужую программу не будит). Посчитанное запоминается (`intake-words.tsv` рядом с
 //! памятью о форме): второй разбор SolidWorks не ждёт.
 //!
 //! Правила плана (`plan.rs`) сами ничего не считают: они спрашивают у
@@ -23,7 +24,7 @@ use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::PartName;
 
 use super::key;
-use super::measure::{is_step, modified};
+use super::measure::{is_step, modified, Exports};
 use super::memory::sign;
 use crate::{App, Progress};
 
@@ -92,9 +93,11 @@ pub(super) struct Step {
 
 impl App {
     /// Посчитать слова для пар версий. Чего не вышло — того просто нет.
+    /// `exports` — можно просить STEP у модуля перевода (SolidWorks).
     pub(super) fn words_of(
         &self,
         pairs: &[Pair],
+        exports: Option<&Exports>,
         progress: &dyn Progress,
     ) -> HashMap<(String, String), Vec<String>> {
         let mut known = HashMap::new();
@@ -119,7 +122,7 @@ impl App {
                         n + 1,
                         pairs.len()
                     ));
-                    let Some(lines) = self.compare_words(before, after) else {
+                    let Some(lines) = self.compare_words(before, after, exports) else {
                         continue;
                     };
                     memory.insert(signs, lines.clone());
@@ -135,10 +138,15 @@ impl App {
         known
     }
 
-    fn compare_words(&self, before: &[PathBuf], after: &[PathBuf]) -> Option<Vec<String>> {
+    fn compare_words(
+        &self,
+        before: &[PathBuf],
+        after: &[PathBuf],
+        exports: Option<&Exports>,
+    ) -> Option<Vec<String>> {
         let mut warnings = Vec::new();
-        let was = self.step_of(before, &mut warnings)?;
-        let now = self.step_of(after, &mut warnings)?;
+        let was = self.step_of(before, exports, &mut warnings)?;
+        let now = self.step_of(after, exports, &mut warnings)?;
         let snapshot = |step: &Step| {
             Some(Snapshot {
                 item: PartName::new("разбор").ok()?,
@@ -169,8 +177,15 @@ impl App {
     }
 
     /// STEP версии: готовый, если он не старше файла SolidWorks рядом,
-    /// иначе — от модуля перевода (почему не вышло — в `warnings`).
-    pub(super) fn step_of(&self, models: &[PathBuf], warnings: &mut Vec<String>) -> Option<Step> {
+    /// иначе — от модуля перевода (почему не вышло — в `warnings`). Без
+    /// склада `exports` модуль перевода не зовётся: нет свежего STEP — нет
+    /// ответа.
+    pub(super) fn step_of(
+        &self,
+        models: &[PathBuf],
+        exports: Option<&Exports>,
+        warnings: &mut Vec<String>,
+    ) -> Option<Step> {
         let step = models.iter().find(|m| is_step(m));
         let cad = models.iter().find(|m| !is_step(m));
         let fresh = match (step, cad) {
@@ -190,7 +205,7 @@ impl App {
         if fresh {
             return copied(step?, false);
         }
-        let converted = cad.and_then(|c| self.convert(c, warnings));
+        let converted = cad.and_then(|c| exports?.of(self, c, warnings));
         match converted {
             Some(c) => Some(Step {
                 dir: c.step.parent()?.to_path_buf(),

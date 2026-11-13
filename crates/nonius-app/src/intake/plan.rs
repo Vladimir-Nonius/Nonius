@@ -222,6 +222,7 @@ pub(super) fn build(source: PathBuf, files: Vec<Found>, facts: Facts) -> IntakeP
             guessed: proto.guessed,
             shape: proto.shape,
             changed: words,
+            doubtful: false,
         });
     }
     items.sort_by(|a, b| (&a.folder, &a.name).cmp(&(&b.folder, &b.name)));

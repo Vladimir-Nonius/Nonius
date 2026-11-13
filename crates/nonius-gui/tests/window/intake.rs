@@ -1,6 +1,7 @@
 //! «Разобрать папку» в окне: изучение в фоне со строкой хода и
 //! «Остановить», план, вопрос с кнопками, раскладка и итог; «Показать в 3D»
-//! у вопроса и у детали с версиями. Проект — поддельный: что считает ядро,
+//! у вопроса и у детали с версиями; уточнение беглого плана в фоне
+//! («уточняю…») и галочка «Уточнять через SolidWorks». Проект — поддельный: что считает ядро,
 //! проверяют тесты `nonius-app`.
 
 use super::*;
@@ -22,8 +23,9 @@ fn sides() -> Vec<IntakeSide> {
 const CHANGED: &str = "отверстие ⌀8 → ⌀10";
 
 /// План поддельного проекта: пока на вопрос не ответили, версии кронштейна —
-/// догадка; «нет» разводит их на две детали.
-pub fn plan(answers: &[(String, bool)]) -> IntakePlan {
+/// догадка; «нет» разводит их на две детали. `rough` — план беглый, форма
+/// кронштейна спорная.
+pub fn plan(answers: &[(String, bool)], rough: bool) -> IntakePlan {
     let said = answers.iter().find(|(id, _)| id == QUESTION).map(|a| a.1);
     let part = |name: &str, versions: usize| IntakeItem {
         name: name.into(),
@@ -33,6 +35,7 @@ pub fn plan(answers: &[(String, bool)]) -> IntakePlan {
         unsure: said.is_none(),
         sides: if versions > 1 { sides() } else { Vec::new() },
         changed: vec![vec![CHANGED.into()]],
+        doubtful: rough,
         ..IntakeItem::default()
     };
     let mut items = match said {
@@ -55,6 +58,7 @@ pub fn plan(answers: &[(String, bool)]) -> IntakePlan {
             suggested: Some(true),
             sides: sides(),
             changed: vec![vec![CHANGED.into()]],
+            doubtful: rough,
         }],
     };
     IntakePlan {
@@ -63,6 +67,7 @@ pub fn plan(answers: &[(String, bool)]) -> IntakePlan {
         questions,
         left: vec![("ТЗ.docx".into(), "непонятно, к какой детали".into())],
         other: 3,
+        refine: rough,
     }
 }
 
@@ -99,7 +104,24 @@ impl Fake {
         let stopped = progress.cancelled();
         let line = format!("изучено, остановлено: {stopped}");
         self.intake.lock().unwrap().push(line);
-        Ok(plan(&[]))
+        Ok(self.intake_plan_now(&[]))
+    }
+
+    /// План с ответами: беглый, пока его не уточнили.
+    pub fn intake_plan_now(&self, answers: &[(String, bool)]) -> IntakePlan {
+        plan(answers, *self.rough.lock().unwrap())
+    }
+
+    /// Уточнение: тест держит его, пока смотрит на «уточняю…».
+    pub fn refine(&self, progress: &dyn Progress) -> anyhow::Result<()> {
+        progress.step("Уточняю форму 1 из 1: кронштейн");
+        let _held = self.refine_gate.lock().unwrap_or_else(|e| e.into_inner());
+        let stopped = progress.cancelled();
+        if !stopped {
+            *self.rough.lock().unwrap() = false;
+        }
+        self.refines.lock().unwrap().push(stopped);
+        Ok(())
     }
 
     pub fn apply(&self, answers: &[(String, bool)]) -> anyhow::Result<IntakeOutcome> {
@@ -107,7 +129,7 @@ impl Fake {
         self.intake.lock().unwrap().push(line);
         self.created.lock().unwrap().push(("плита".into(), false));
         Ok(IntakeOutcome {
-            parts: plan(answers).items.len(),
+            parts: plan(answers, false).items.len(),
             versions: 3,
             warnings: vec!["«рама»: STEP не получен".into()],
             failed: vec![("крышка".into(), "файл занят".into())],
@@ -296,4 +318,79 @@ fn question_shows_both_parts_in_3d() {
     wait_for(&mut h, "Внутренняя ошибка программы");
     wait_for(&mut h, "Вопрос (осталось 1)");
     assert!(h.query_by_label("Сравнение в 3D").is_none());
+}
+
+/// Шагать окно, пока надпись не пропадёт.
+fn wait_gone(h: &mut Harness<'_, App>, text: &str) {
+    for _ in 0..300 {
+        h.step();
+        if h.query_all_by_label_contains(text).next().is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("«{text}» не пропало");
+}
+
+#[test]
+fn rough_plan_is_refined_in_background() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    *project.rough.lock().unwrap() = true;
+    let (log, refines) = (project.intake.clone(), project.refines.clone());
+    let gate = project.refine_gate.clone();
+    let held = gate.lock().unwrap();
+    let mut h = window_for_folder(dir.path(), project);
+    open_intake(&mut h);
+
+    // План уже на экране, спорное помечено, уточнение идёт само.
+    wait_for(&mut h, "деталь «кронштейн», версий: 2  (?)  — уточняю…");
+    wait_for(&mut h, "Вопрос (осталось 1) — уточняю…");
+    wait_for(&mut h, "Уточняю форму 1 из 1: кронштейн");
+    wait_for(&mut h, "Уточняю через SolidWorks");
+    // Раскладывать рано: план ещё поменяется.
+    h.get_by_label("Разложить в проект").click();
+    h.run_steps(3);
+    assert_eq!(log.lock().unwrap().len(), 1, "раскладка не началась");
+
+    drop(held);
+    wait_gone(&mut h, "уточняю…");
+    wait_gone(&mut h, "Уточняю через SolidWorks");
+    wait_for(&mut h, "деталь «кронштейн», версий: 2  (?)");
+    assert_eq!(*refines.lock().unwrap(), [false]);
+    h.get_by_label("Разложить в проект").click();
+    wait_for(&mut h, "Разложено:");
+}
+
+#[test]
+fn refining_can_be_switched_off_and_on() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    *project.rough.lock().unwrap() = true;
+    let refines = project.refines.clone();
+    let gate = project.refine_gate.clone();
+    let held = gate.lock().unwrap();
+    let mut h = window_for_folder(dir.path(), project);
+    open_intake(&mut h);
+    wait_for(&mut h, "Уточняю через SolidWorks");
+
+    // Галочку сняли — уточнение брошено, план беглый, так и сказано.
+    h.get_by_label("Уточнять разбор папки через SolidWorks")
+        .click();
+    wait_for(&mut h, "Останавливаю");
+    drop(held);
+    wait_for(&mut h, "уточнение через SolidWorks выключено");
+    assert_eq!(*refines.lock().unwrap(), [true]);
+    assert!(h.query_by_label_contains("уточняю…").is_none());
+    let saved = std::fs::read_to_string(dir.path().join("window.txt")).unwrap();
+    assert!(saved.contains("intake_refine=0"), "запомнено: {saved}");
+
+    // Поставили снова — уточняется до конца.
+    h.get_by_label("Уточнять разбор папки через SolidWorks")
+        .click();
+    wait_gone(&mut h, "уточнение через SolidWorks выключено");
+    wait_gone(&mut h, "Уточняю через SolidWorks");
+    assert_eq!(*refines.lock().unwrap(), [true, false]);
 }

@@ -3,12 +3,16 @@
 //! и по кнопке раскладывает копии файлов в проект. Здесь — состояние и
 //! действия; сам экран — `screen.rs`.
 //!
-//! Изучение идёт минуты (форму деталей даёт SolidWorks), поэтому у него своя
-//! строка хода и «Остановить»: план тогда строится из того, что успели.
+//! Изучение идёт в два прохода. Быстрый (форма прямо из файлов) — секунды,
+//! со своей строкой хода и «Остановить»: план тогда строится из того, что
+//! успели. Точный, через SolidWorks, — в фоне, пока план уже на экране
+//! (`refine.rs`).
 //!
 //! «Показать в 3D» у вопроса и у детали с версиями — `sight.rs`: две модели
 //! из папки в 3D, тоже в фоне со своей строкой хода.
 
+mod ask;
+mod refine;
 mod screen;
 mod sight;
 
@@ -50,6 +54,8 @@ pub(in crate::app) struct Intake {
     later: Vec<String>,
     /// План пересчитывается после ответа: кнопки ждут.
     recounting: bool,
+    /// Идёт точный проход через SolidWorks (`refine.rs`).
+    refining: bool,
     stop: Arc<AtomicBool>,
     /// Своя строка хода: сравнение её не трогает.
     line: Arc<Mutex<String>>,
@@ -64,9 +70,10 @@ impl Intake {
         matches!(self.stage, Stage::Studying | Stage::Applying)
     }
 
-    /// Строка хода, пока идёт долгая работа, — для строки состояния.
+    /// Строка хода, пока идёт долгая работа или уточнение, — для строки
+    /// состояния.
     pub fn progress(&self) -> Option<String> {
-        self.working()
+        (self.working() || self.refining)
             .then(|| self.line.lock().map(|l| l.clone()).unwrap_or_default())
     }
 
@@ -132,6 +139,10 @@ impl App {
         let Some(project) = self.tab.project.clone() else {
             return;
         };
+        // Уточнение прошлой папки больше не нужно.
+        if let Some(old) = &self.tab.intake {
+            old.stop();
+        }
         self.tab.intake_runs += 1;
         let run = self.tab.intake_runs;
         let stop = Arc::new(AtomicBool::new(false));
@@ -144,6 +155,7 @@ impl App {
             answers: Vec::new(),
             later: Vec::new(),
             recounting: false,
+            refining: false,
             stop: stop.clone(),
             line: line.clone(),
             sight: None,
@@ -173,9 +185,11 @@ impl App {
         match result {
             Ok(plan) => {
                 intake.plan = plan;
-                intake.stage = Stage::Plan;
                 // «Остановить» относилось к изучению, а не к будущей раскладке.
-                intake.stop.store(false, Ordering::Relaxed);
+                if matches!(intake.stage, Stage::Studying) {
+                    intake.stop.store(false, Ordering::Relaxed);
+                }
+                intake.stage = Stage::Plan;
             }
             // Изучить не вышло — показывать нечего; пересчёт не вышел —
             // прежний план остаётся.
@@ -190,11 +204,20 @@ impl App {
 
     /// Ответ на вопрос: «да» или «нет». План пересчитывается сразу.
     fn intake_answer(&mut self, ctx: &egui::Context, id: String, answer: bool) {
+        let Some(intake) = self.tab.intake.as_mut() else {
+            return;
+        };
+        intake.answers.push((id, answer));
+        self.intake_recount(ctx);
+    }
+
+    /// Пересчитать план с ответами человека (после ответа и после
+    /// уточнения).
+    fn intake_recount(&mut self, ctx: &egui::Context) {
         let (Some(project), Some(intake)) = (self.tab.project.clone(), self.tab.intake.as_mut())
         else {
             return;
         };
-        intake.answers.push((id, answer));
         intake.recounting = true;
         let (run, answers) = (intake.run, intake.answers.clone());
         self.tab.jobs.spawn(ctx, move |_| {
@@ -257,6 +280,7 @@ impl super::project_tab::ProjectTab {
             if i.sight.as_ref().is_some_and(sight::Sight::waiting) {
                 i.sight = None;
             }
+            i.refining = false;
         }
         match self.intake.as_mut().map(|i| (i.working(), &mut i.stage)) {
             Some((true, stage @ Stage::Applying)) => *stage = Stage::Plan,

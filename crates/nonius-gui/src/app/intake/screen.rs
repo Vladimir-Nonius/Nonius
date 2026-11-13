@@ -1,16 +1,17 @@
 //! Экран разбора папки в центре окна: ход изучения, вопрос с кнопками
-//! «Да / Нет / Потом», план по папкам проекта, «Разложить» и итог. У вопроса
+//! «Да / Нет / Потом» (рамка вопроса — `ask.rs`), план по папкам проекта,
+//! «Разложить» и итог. У вопроса
 //! и у детали с версиями — «Показать в 3D» (сам показ — `sight.rs`).
 
 use eframe::egui::{self, RichText};
 
 use super::{Intake, Stage};
 use crate::app::App;
-use crate::source::{IntakeItem, IntakeOutcome, IntakePlan, IntakeQuestion, IntakeSide};
+use crate::source::{IntakeItem, IntakeOutcome, IntakePlan, IntakeSide};
 use crate::texts::texts;
 
 /// Что человек нажал на экране в этом кадре.
-enum Act {
+pub(super) enum Act {
     Stop,
     Close,
     Answer(String, bool),
@@ -19,6 +20,8 @@ enum Act {
     Apply,
     /// Показать две модели в 3D и слова, что изменилось.
     Look(IntakeSide, IntakeSide, Vec<String>),
+    /// Галочка или «Остановить» уточнения через SolidWorks (`refine.rs`).
+    Refine(super::refine::Pick),
 }
 
 /// Нарисовать экран; `false` — экран не открыт, центр окна свободен.
@@ -35,7 +38,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) -> bool {
         ui.separator();
         match &intake.stage {
             Stage::Studying | Stage::Applying => working(ui, intake, &mut act),
-            Stage::Plan => plan(ui, intake, &mut act),
+            Stage::Plan => plan(ui, intake, app.settings.intake_refine, &mut act),
             Stage::Done(outcome) => done(ui, outcome, &mut act),
         }
     });
@@ -61,6 +64,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) -> bool {
         }
         Some(Act::Apply) => app.intake_apply(&ctx),
         Some(Act::Look(before, after, words)) => app.intake_look(&ctx, before, after, words),
+        Some(Act::Refine(pick)) => app.intake_refine_pick(&ctx, pick),
     }
     true
 }
@@ -123,10 +127,13 @@ pub(super) fn summary(plan: &IntakePlan) -> String {
     )
 }
 
-fn plan(ui: &mut egui::Ui, intake: &Intake, act: &mut Option<Act>) {
+fn plan(ui: &mut egui::Ui, intake: &Intake, refine: bool, act: &mut Option<Act>) {
     let t = texts();
     let plan = &intake.plan;
     ui.label(summary(plan));
+    if let Some(pick) = super::refine::bar(ui, intake, refine) {
+        *act = Some(Act::Refine(pick));
+    }
     if plan.items.is_empty() {
         ui.add_space(8.0);
         ui.label(t.intake_empty);
@@ -139,11 +146,14 @@ fn plan(ui: &mut egui::Ui, intake: &Intake, act: &mut Option<Act>) {
             ui.label(t.intake_recount);
         });
     } else if let Some(q) = intake.question() {
-        question(ui, q, intake.questions_left(), act);
+        if let Some(pick) = super::ask::question(ui, q, intake.questions_left(), intake.refining) {
+            *act = Some(pick);
+        }
     }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let ready = !intake.recounting;
+        // Пока уточняется, раскладывать рано: план ещё поменяется.
+        let ready = !intake.recounting && !intake.refining;
         let apply = egui::Button::new(RichText::new(t.intake_apply).strong());
         if ui.add_enabled(ready, apply).clicked() {
             *act = Some(Act::Apply);
@@ -160,40 +170,9 @@ fn plan(ui: &mut egui::Ui, intake: &Intake, act: &mut Option<Act>) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            items(ui, &plan.items, act);
+            items(ui, &plan.items, intake.refining, act);
             leftovers(ui, plan);
         });
-}
-
-/// Вопрос в рамке: текст, улики, мнение программы и три кнопки.
-fn question(ui: &mut egui::Ui, q: &IntakeQuestion, left: usize, act: &mut Option<Act>) {
-    let t = texts();
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        let title = format!("{} ({} {left})", t.intake_question, t.intake_left_count);
-        ui.label(RichText::new(title).weak());
-        ui.add(egui::Label::new(RichText::new(&q.text).strong()).wrap());
-        for fact in &q.facts {
-            ui.add(egui::Label::new(format!("    {fact}")).wrap());
-        }
-        match q.suggested {
-            Some(true) => ui.label(RichText::new(t.intake_think_yes).italics()),
-            Some(false) => ui.label(RichText::new(t.intake_think_no).italics()),
-            None => ui.label(RichText::new(t.intake_think_none).italics()),
-        };
-        look(ui, &q.sides, &q.changed, act);
-        ui.horizontal(|ui| {
-            if ui.button(t.intake_yes).clicked() {
-                *act = Some(Act::Answer(q.id.clone(), true));
-            }
-            if ui.button(t.intake_no).clicked() {
-                *act = Some(Act::Answer(q.id.clone(), false));
-            }
-            if ui.button(t.intake_later).clicked() {
-                *act = Some(Act::Later(q.id.clone()));
-            }
-        });
-    });
 }
 
 /// Строка детали: «деталь «кронштейн», версий: 3  (?)».
@@ -215,14 +194,19 @@ pub(super) fn item_line(item: &IntakeItem) -> String {
 }
 
 /// Кнопки «Показать в 3D» (`sight.rs`): нажатая — в действие экрана.
-fn look(ui: &mut egui::Ui, sides: &[IntakeSide], changed: &[Vec<String>], act: &mut Option<Act>) {
+pub(super) fn look(
+    ui: &mut egui::Ui,
+    sides: &[IntakeSide],
+    changed: &[Vec<String>],
+    act: &mut Option<Act>,
+) {
     if let Some((before, after, words)) = super::sight::buttons(ui, sides, changed) {
         *act = Some(Act::Look(before, after, words));
     }
 }
 
 /// Детали и сборки по папкам проекта, под каждой — «почему» и бумаги.
-fn items(ui: &mut egui::Ui, items: &[IntakeItem], act: &mut Option<Act>) {
+fn items(ui: &mut egui::Ui, items: &[IntakeItem], refining: bool, act: &mut Option<Act>) {
     let t = texts();
     let warn = ui.visuals().warn_fg_color;
     let mut folder = None;
@@ -237,7 +221,11 @@ fn items(ui: &mut egui::Ui, items: &[IntakeItem], act: &mut Option<Act>) {
             };
             ui.label(RichText::new(title).strong());
         }
-        let line = RichText::new(item_line(item));
+        let mut line = item_line(item);
+        if refining && item.doubtful {
+            line = format!("{line}  — {}", t.intake_refining_mark);
+        }
+        let line = RichText::new(line);
         ui.label(if item.unsure { line.color(warn) } else { line });
         ui.indent(("intake-why", &item.folder, &item.name), |ui| {
             for why in &item.why {

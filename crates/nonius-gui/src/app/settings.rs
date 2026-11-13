@@ -1,5 +1,5 @@
-//! Что окно помнит между запусками: открытые вкладки проектов и переключатели
-//! вида.
+//! Что окно помнит между запусками: открытые вкладки проектов, переключатели
+//! вида и «уточнять ли разбор папки через SolidWorks».
 //!
 //! Файл `window.txt` в папке настроек пользователя (Windows — `%APPDATA%\Nonius`),
 //! строки `ключ=значение`. Испорченный или чужой файл не мешает запуску:
@@ -20,6 +20,9 @@ pub struct Settings {
     pub edges: bool,
     /// Колесо мыши наоборот.
     pub wheel_reverse: bool,
+    /// Разбор папки: уточнять спорные детали через SolidWorks (иначе —
+    /// только быстро, по файлам).
+    pub intake_refine: bool,
 }
 
 impl Default for Settings {
@@ -30,6 +33,7 @@ impl Default for Settings {
             xray: true,
             edges: true,
             wheel_reverse: false,
+            intake_refine: true,
         }
     }
 }
@@ -53,6 +57,7 @@ impl Settings {
                 "xray" => s.xray = flag,
                 "edges" => s.edges = flag,
                 "wheel_reverse" => s.wheel_reverse = flag,
+                "intake_refine" => s.intake_refine = flag,
                 _ => {}
             }
         }
@@ -68,11 +73,12 @@ impl Settings {
             .map(|p| format!("tab={}\n", p.to_string_lossy()))
             .collect();
         format!(
-            "{tabs}active={}\nxray={}\nedges={}\nwheel_reverse={}\n",
+            "{tabs}active={}\nxray={}\nedges={}\nwheel_reverse={}\nintake_refine={}\n",
             self.active,
             flag(self.xray),
             flag(self.edges),
             flag(self.wheel_reverse),
+            flag(self.intake_refine),
         )
     }
 
@@ -138,6 +144,7 @@ mod tests {
             xray: false,
             edges: true,
             wheel_reverse: true,
+            intake_refine: false,
         };
         assert_eq!(Settings::parse(&s.render()), s);
         assert_eq!(Settings::parse("мусор\n=\nxray\n"), Settings::default());

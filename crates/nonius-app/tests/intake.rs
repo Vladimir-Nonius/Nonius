@@ -4,13 +4,14 @@
 //! читает те же числа из «файла SolidWorks».
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use nonius_app::{App, Error, GitOptions, NoProgress, ShapeCheck, ShapeVerdict};
 use nonius_core::compare::{Change, ChangeKind, ChangeReport, CompareContext};
 use nonius_core::contract;
 use nonius_core::extension::{
-    Comparator, ExtensionPoint, GeometrySource, LinkSource, Module, ModuleManifest, Registry,
-    ShapeGlance, Snapshot, API_VERSION,
+    Comparator, Converter, ExtensionPoint, GeometrySource, LinkSource, Module, ModuleManifest,
+    Registry, ShapeGlance, Snapshot, API_VERSION,
 };
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::Project;
@@ -72,8 +73,12 @@ impl ShapeGlance for TextGlance {
         path.extension().is_some_and(|e| e == "sldprt")
     }
     fn glance(&self, path: &Path) -> nonius_core::Result<nonius_core::meta::GeometrySummary> {
+        // Вторая строка — то, что сказал бы о файле SolidWorks (см. Exporter).
         let text = std::fs::read_to_string(path).unwrap_or_default();
         let numbers: Vec<f64> = text
+            .lines()
+            .next()
+            .unwrap_or_default()
             .split_whitespace()
             .filter_map(|n| n.parse().ok())
             .collect();
@@ -164,8 +169,14 @@ fn links() -> ListedLinks {
 }
 
 fn app(root: &Path) -> App {
+    app_with(root, |_| {})
+}
+
+/// То же, а модули сверх обычных добавит `more`.
+fn app_with(root: &Path, more: impl FnOnce(&mut Registry)) -> App {
     let project = Project::init(root, "Станок").unwrap();
     let mut reg = Registry::with_builtins();
+    more(&mut reg);
     reg.add_geometry_source(Box::new(VolumeSource(manifest(
         "volume-test",
         ExtensionPoint::GeometrySource,
@@ -438,4 +449,99 @@ fn project_folder_itself_is_refused() {
         app.intake_plan(&tmp.path().join("нет такой")),
         Err(Error::FileNotFound(_))
     ));
+}
+
+/// «SolidWorks»: STEP из «файла SolidWorks» — его последняя строка (там,
+/// где беглый взгляд и SolidWorks расходятся, вторая строка — точная).
+/// Помнит, какие файлы переводил.
+struct Exporter(ModuleManifest, Arc<Mutex<Vec<String>>>);
+
+impl Module for Exporter {
+    fn manifest(&self) -> &ModuleManifest {
+        &self.0
+    }
+}
+
+impl Converter for Exporter {
+    fn can_convert(&self, path: &Path) -> bool {
+        path.extension().is_some_and(|e| e == "sldprt")
+    }
+    fn to_step(&self, source: &Path, target: &Path) -> nonius_core::Result<()> {
+        let name = source.file_name().unwrap().to_string_lossy().into_owned();
+        self.1.lock().unwrap().push(name);
+        let text = std::fs::read_to_string(source).unwrap();
+        std::fs::write(target, text.lines().last().unwrap()).unwrap();
+        Ok(())
+    }
+}
+
+#[test]
+fn quick_plan_first_then_disputed_parts_are_refined() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("свалка");
+    std::fs::create_dir_all(&source).unwrap();
+    let put = |name: &str, text: &str| std::fs::write(source.join(name), text).unwrap();
+    // По сетке объём вала ушёл на 25,4 % — чуть за порогом «похожи»;
+    // SolidWorks знает точно: на 16,7 %.
+    put("вал.sldprt", "10000 20 20 100");
+    put("вал_v2.sldprt", "13400 20 20 100\n12000 20 20 100");
+    // Ось далеко от порогов: беглой формы достаточно.
+    put("ось.sldprt", "1000 5 5 40");
+    put("ось_v2.sldprt", "1050 5 5 40");
+    let converted = Arc::new(Mutex::new(Vec::new()));
+    let exporter = Exporter(
+        manifest("sw-test", ExtensionPoint::Converter),
+        converted.clone(),
+    );
+    let app = app_with(&tmp.path().join("станок"), |reg| {
+        reg.add_converter(Box::new(exporter)).unwrap();
+    });
+    // Память о форме живёт в `.git/nonius`: у проекта должна быть история.
+    let git = std::process::Command::new("git")
+        .arg("init")
+        .current_dir(tmp.path().join("станок"))
+        .output()
+        .unwrap();
+    assert!(git.status.success());
+
+    // Первый проход: SolidWorks не зовут, спорное помечено.
+    let quick = app
+        .intake_glance(&source, ShapeCheck::Names, &NoProgress)
+        .unwrap();
+    assert!(quick.needs_refine());
+    let plan = quick.plan(&[]);
+    let item = |plan: &nonius_app::IntakePlan, name: &str| {
+        plan.items.iter().find(|i| i.name == name).cloned().unwrap()
+    };
+    assert_eq!(item(&plan, "вал").shape, Some(ShapeVerdict::Different));
+    assert!(item(&plan, "вал").doubtful && item(&plan, "вал_v2").doubtful);
+    assert!(!item(&plan, "ось").doubtful);
+    assert_eq!(item(&plan, "ось").shape, Some(ShapeVerdict::Confirmed));
+    assert!(converted.lock().unwrap().is_empty());
+
+    // Второй проход: точная форма — у спорного вала, обе версии; слова
+    // «что изменилось» — у всех пар. Каждый файл SolidWorks переводит раз.
+    let exact = app.intake_refine(&quick, &NoProgress);
+    assert!(!exact.needs_refine());
+    let plan = exact.plan(&[]);
+    let shaft = item(&plan, "вал");
+    assert_eq!(shaft.versions.len(), 2);
+    assert_eq!(shaft.shape, Some(ShapeVerdict::Confirmed));
+    assert!(!shaft.doubtful);
+    let mut asked = converted.lock().unwrap().clone();
+    asked.sort();
+    assert_eq!(
+        asked,
+        ["вал.sldprt", "вал_v2.sldprt", "ось.sldprt", "ось_v2.sldprt"]
+    );
+
+    // Следующий разбор помнит точную форму: сразу верный ответ.
+    let again = app
+        .intake_glance(&source, ShapeCheck::Names, &NoProgress)
+        .unwrap();
+    let plan = again.plan(&[]);
+    assert_eq!(item(&plan, "вал").shape, Some(ShapeVerdict::Confirmed));
+    assert!(!item(&plan, "вал").doubtful);
+    assert!(!again.needs_refine(), "всё уже известно");
+    assert_eq!(converted.lock().unwrap().len(), 4, "SolidWorks не звали");
 }

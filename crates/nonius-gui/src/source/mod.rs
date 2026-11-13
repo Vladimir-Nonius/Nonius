@@ -191,11 +191,22 @@ pub trait ProjectSource: Send + Sync {
         Ok(())
     }
     /// Изучить папку с моделями: что в ней станет деталями и версиями.
-    /// Ничего не меняет; идёт минуты. «Остановить» (`progress.cancelled`) —
-    /// план из того, что успели. Проект помнит изученное для
-    /// [`intake_plan`](Self::intake_plan) и [`intake_apply`](Self::intake_apply).
+    /// Быстрый проход: чужих программ не будит, идёт секунды. «Остановить»
+    /// (`progress.cancelled`) — план из того, что успели. Проект помнит
+    /// изученное для [`intake_plan`](Self::intake_plan),
+    /// [`intake_refine`](Self::intake_refine) и
+    /// [`intake_apply`](Self::intake_apply).
     fn intake_study(&self, folder: &Path, progress: &dyn Progress) -> anyhow::Result<IntakePlan> {
         let _ = (folder, progress);
+        anyhow::bail!("разбор папки здесь не поддержан")
+    }
+    /// Точный проход по изученной папке (если [`IntakePlan::refine`]):
+    /// связи сборок и чертежей, точная форма спорных деталей, слова «что
+    /// изменилось» — через SolidWorks. Минуты; «Остановить» — с тем, что
+    /// успели. Сам план не отдаёт: его заново даёт
+    /// [`intake_plan`](Self::intake_plan).
+    fn intake_refine(&self, progress: &dyn Progress) -> anyhow::Result<()> {
+        let _ = progress;
         anyhow::bail!("разбор папки здесь не поддержан")
     }
     /// План изученной папки с ответами на вопросы: `id` и «да»/«нет». Быстро.

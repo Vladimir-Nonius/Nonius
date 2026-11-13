@@ -1,5 +1,6 @@
-//! Разбор папки для окна: изучение (долгое, один раз), план с ответами
-//! человека (мгновенно) и раскладка. Правила те же, что у команды
+//! Разбор папки для окна: изучение (быстрый проход — секунды, точный через
+//! SolidWorks — в фоне, минуты), план с ответами человека (мгновенно) и
+//! раскладка. Правила те же, что у команды
 //! `nonius intake`, — из `nonius-app`; здесь только перевод в то, что
 //! показывает окно.
 
@@ -56,7 +57,8 @@ fn sides(versions: &[nonius_app::PlannedVersion]) -> Vec<IntakeSide> {
 }
 
 /// План ядра → план для окна.
-fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
+fn entry(study: &IntakeStudy, answers: &[(String, bool)]) -> IntakePlan {
+    let plan = study.plan(answers);
     let items = plan
         .items
         .iter()
@@ -74,6 +76,7 @@ fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
                 sides(&item.versions)
             },
             changed: item.changed.clone(),
+            doubtful: item.doubtful,
         })
         .collect();
     let questions = plan
@@ -86,6 +89,7 @@ fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
             suggested: q.suggested,
             sides: sides(&q.versions),
             changed: q.changed,
+            doubtful: q.doubtful,
         })
         .collect();
     let (junk, papers): (Vec<_>, Vec<_>) = plan.left.iter().partition(|l| l.why == NOT_OURS);
@@ -98,6 +102,7 @@ fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
             .map(|l| (file_name(&l.path), l.why.clone()))
             .collect(),
         other: junk.len(),
+        refine: study.needs_refine(),
     }
 }
 
@@ -120,15 +125,33 @@ impl AppSource {
         let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let study = self
             .app
-            .intake_study(folder, ShapeCheck::Names, &Steps(progress))
+            .intake_glance(folder, ShapeCheck::Names, &Steps(progress))
             .map_err(in_words)?;
-        let plan = entry(study.plan(&[]));
+        let plan = entry(&study, &[]);
         *self.study.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(study));
         Ok(plan)
     }
 
+    /// Точный проход. Остановленный — не в счёт: беглое изучение остаётся,
+    /// и уточнить можно снова (посчитанное ядро помнит). Пока он шёл, могли
+    /// начать разбирать другую папку — тогда уточнённое уже никому не нужно.
+    pub(super) fn refine_folder(&self, progress: &dyn Progress) -> Result<()> {
+        let rough = self.studied()?;
+        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let exact = self.app.intake_refine(&rough, &Steps(progress));
+        if progress.cancelled() {
+            return Ok(());
+        }
+        let mut study = self.study.lock().unwrap_or_else(|e| e.into_inner());
+        if study.as_ref().is_some_and(|s| Arc::ptr_eq(s, &rough)) {
+            *study = Some(Arc::new(exact));
+        }
+        Ok(())
+    }
+
     pub(super) fn plan_folder(&self, answers: &[(String, bool)]) -> Result<IntakePlan> {
-        Ok(entry(self.studied()?.plan(answers)))
+        let study = self.studied()?;
+        Ok(entry(&study, answers))
     }
 
     pub(super) fn apply_folder(
