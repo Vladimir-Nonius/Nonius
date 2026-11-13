@@ -35,6 +35,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         app.start_adding(models_in(&dir), None);
                     }
                 }
+                if ui.button(t.intake_folder).clicked() {
+                    ui.close();
+                    app.start_intake(ctx);
+                }
                 if ui.button(t.new_part).clicked() {
                     ui.close();
                     app.tab.new_part = Some(NewPart::in_folder(&app.tab.place));

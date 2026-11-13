@@ -15,8 +15,8 @@ use nonius_scene::Scene;
 use super::batch::Report;
 
 use crate::source::{
-    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, Listing, MassEntry, Pick,
-    ProgramEntry, Progress, ProjectSource, VersionEntry,
+    AddedModel, Comparison, DeletedEntry, DiffEntry, FileEntry, IntakeOutcome, IntakePlan, Listing,
+    MassEntry, Pick, ProgramEntry, Progress, ProjectSource, VersionEntry,
 };
 
 /// Готовый результат.
@@ -87,6 +87,14 @@ pub enum Done {
     Moved(anyhow::Result<Box<dyn ProjectSource>>, Option<String>),
     /// Очередь закончилась.
     Batch(Report),
+    /// Папка изучена: номер разбора и план.
+    IntakeStudied(u64, anyhow::Result<IntakePlan>),
+    /// План пересчитан после ответа на вопрос.
+    IntakePlanned(u64, anyhow::Result<IntakePlan>),
+    /// Папка разложена в проект.
+    IntakeApplied(u64, anyhow::Result<IntakeOutcome>),
+    /// «Показать в 3D»: номер разбора, номер показа, сравнение двух моделей.
+    IntakeLooked(u64, u64, anyhow::Result<Comparison>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

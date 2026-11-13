@@ -1,5 +1,6 @@
 //! Безопасная обёртка над телом OpenCascade.
 
+use std::cell::OnceCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::Path;
@@ -37,7 +38,20 @@ pub struct Props {
 
 /// Тело (или несколько тел) OpenCascade.
 pub struct Shape {
-    ptr: NonNull<ffi::NoniusShape>,
+    pub(crate) ptr: NonNull<ffi::NoniusShape>,
+    /// Объём считается один раз: тело не меняется, а на детали со сплайнами
+    /// это заметное время.
+    volume: OnceCell<f64>,
+}
+
+impl Shape {
+    /// Тело, которое вернула прослойка: отныне им владеет `Shape`.
+    pub(crate) fn own(ptr: NonNull<ffi::NoniusShape>) -> Self {
+        Self {
+            ptr,
+            volume: OnceCell::new(),
+        }
+    }
 }
 
 impl Drop for Shape {
@@ -69,7 +83,7 @@ fn error_text(buf: &[c_char]) -> String {
 
 fn wrap(ptr: *mut ffi::NoniusShape, err: &[c_char], what: &str) -> Result<Shape, OcctError> {
     NonNull::new(ptr)
-        .map(|ptr| Shape { ptr })
+        .map(Shape::own)
         .ok_or_else(|| OcctError(format!("{what}: {}", error_text(err))))
 }
 
@@ -112,7 +126,7 @@ impl Shape {
         let c = c_path(path).ok()?;
         // SAFETY: строка живёт до конца вызова.
         let ptr = unsafe { ffi::nonius_read_brep(c.as_ptr()) };
-        NonNull::new(ptr).map(|ptr| Shape { ptr })
+        NonNull::new(ptr).map(Shape::own)
     }
 
     fn write_brep(&self, path: &Path) -> bool {
@@ -163,8 +177,10 @@ impl Shape {
 
     /// Только объём, мм³. Быстрее [`Shape::props`]: без площади и точных габаритов.
     pub fn volume(&self) -> f64 {
-        // SAFETY: тело живое.
-        unsafe { ffi::nonius_shape_volume(self.ptr.as_ptr()) }
+        *self.volume.get_or_init(|| {
+            // SAFETY: тело живое.
+            unsafe { ffi::nonius_shape_volume(self.ptr.as_ptr()) }
+        })
     }
 
     /// Число твёрдых тел (отдельных кусков).
@@ -215,10 +231,11 @@ impl Shape {
         self.boolean(other, 2, fuzzy, "объединение")
     }
 
-    /// Разность версий за одно пересечение: `(добавлено, убрано)`, где
-    /// добавлено = `after` − `self`, убрано = `self` − `after`. Быстрее двух
-    /// [`Shape::cut`]: самое дорогое — пересечение — считается один раз.
-    pub fn diff(&self, after: &Shape) -> Result<(Shape, Shape), OcctError> {
+    /// Разность версий: `(добавлено, убрано)`, где добавлено = `after` −
+    /// `self`, убрано = `self` − `after`. С `local` считается только там, где
+    /// версии отличаются: это в разы быстрее, но получается не всегда. Без
+    /// него — одно пересечение тел целиком; и оно быстрее двух [`Shape::cut`].
+    pub fn diff(&self, after: &Shape, local: bool) -> Result<(Shape, Shape), OcctError> {
         let mut err = [0 as c_char; ERR_LEN];
         let mut added: *mut ffi::NoniusShape = std::ptr::null_mut();
         let mut removed: *mut ffi::NoniusShape = std::ptr::null_mut();
@@ -227,6 +244,7 @@ impl Shape {
             ffi::nonius_diff(
                 self.ptr.as_ptr(),
                 after.ptr.as_ptr(),
+                i32::from(local),
                 &mut added,
                 &mut removed,
                 err.as_mut_ptr(),
@@ -248,7 +266,7 @@ impl Shape {
             .map_while(|i| {
                 // SAFETY: тело живое; новое тело принадлежит возвращённому `Shape`.
                 let ptr = unsafe { ffi::nonius_shape_solid(self.ptr.as_ptr(), i) };
-                NonNull::new(ptr).map(|ptr| Shape { ptr })
+                NonNull::new(ptr).map(Shape::own)
             })
             .collect()
     }
@@ -287,7 +305,7 @@ impl Shape {
             ffi::nonius_make_box(origin[0], origin[1], origin[2], size[0], size[1], size[2])
         };
         NonNull::new(ptr)
-            .map(|ptr| Shape { ptr })
+            .map(Shape::own)
             .ok_or_else(|| OcctError("не удалось построить параллелепипед".into()))
     }
 
@@ -296,7 +314,7 @@ impl Shape {
         // SAFETY: простые числовые аргументы.
         let ptr = unsafe { ffi::nonius_make_cylinder(base[0], base[1], base[2], radius, height) };
         NonNull::new(ptr)
-            .map(|ptr| Shape { ptr })
+            .map(Shape::own)
             .ok_or_else(|| OcctError("не удалось построить цилиндр".into()))
     }
 }

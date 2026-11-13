@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use nonius_core::compare::ChangeReport;
+use nonius_core::compare::{ChangeReport, CompareContext};
 use nonius_core::extension::ExtensionPoint;
 use nonius_core::schema::Versioned;
 use nonius_core::VersionNumber;
@@ -50,7 +50,8 @@ impl App {
                 None => self.project.working_snapshot(&item)?,
             };
             let report = ChangeReport::empty("nonius-app");
-            let files = self.render_all(&snapshot, &snapshot, &report, dir, progress)?;
+            let ctx = CompareContext::default();
+            let files = self.render_all(&snapshot, &snapshot, &report, &ctx, dir, progress)?;
             Ok((Vec::new(), files))
         })?;
         Ok(entry.files.iter().map(|f| dir.join(f)).collect())

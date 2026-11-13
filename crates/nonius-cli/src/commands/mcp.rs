@@ -16,7 +16,8 @@ use crate::commands::json::{self, COMMANDS};
 /// Версии протокола, которые понимает сервер; первая — своя.
 const PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
-/// Команды, которые что-то меняют. `material` меняет, только если назначает.
+/// Команды, которые что-то меняют. `material` меняет, только если назначает,
+/// `intake` — только с `apply`.
 const WRITING: [&str; 17] = [
     "init",
     "part new",
@@ -134,7 +135,8 @@ impl Session {
             return json::failure("unknown_tool", &format!("нет инструмента {name}"));
         };
         let assigns = args.contains_key("material") || args.get("remove") == Some(&json!(true));
-        if !self.write && *path == "material" && assigns {
+        let applies = *path == "intake" && args.get("apply") == Some(&json!(true));
+        if !self.write && ((*path == "material" && assigns) || applies) {
             return json::failure("read_only", "сервер запущен без --write: только чтение");
         }
         let Some(command) = find(path) else {

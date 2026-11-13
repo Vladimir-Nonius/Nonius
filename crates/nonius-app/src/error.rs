@@ -37,6 +37,10 @@ pub enum Error {
     #[error("{0}: файл не найден")]
     FileNotFound(PathBuf),
 
+    /// Папка для разбора — сам проект, его часть или папка вокруг него.
+    #[error("{0}: эту папку разобрать нельзя — она пересекается с самим проектом")]
+    IntakeInsideProject(PathBuf),
+
     /// Формат файла модели не поддерживается.
     #[error("{0}: неизвестный формат (поддерживаются STEP, SLDPRT, SLDASM)")]
     UnknownFormat(PathBuf),
@@ -122,6 +126,15 @@ pub enum Error {
     #[error("{0}: сравнить можно только с файлом STEP")]
     NotStep(PathBuf),
 
+    /// Для модели нет STEP: рядом его нет, а SolidWorks его не сделал.
+    #[error("{}: STEP не получен — {why}", .path.display())]
+    NoStep {
+        /// Файл модели.
+        path: PathBuf,
+        /// Почему.
+        why: String,
+    },
+
     /// Настройка проекта не подходит: пустое название, допуск вне пределов.
     #[error("{0}")]
     BadSettings(String),
@@ -170,6 +183,10 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("empty_message", "нужно описание версии"),
     ("file_not_found", "файл для импорта не найден"),
     ("unknown_format", "неизвестный формат модели"),
+    (
+        "intake_inside_project",
+        "папка для разбора пересекается с проектом",
+    ),
     ("no_versions", "у детали ещё нет версий"),
     ("no_renderer", "сборка без подсветки изменений"),
     ("bad_density", "неверная плотность"),
@@ -185,6 +202,7 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     ("in_use", "файлы детали открыты в другой программе"),
     ("not_deleted", "среди удалённых нет такой детали"),
     ("not_step", "сравнить можно только с файлом STEP"),
+    ("no_step", "для модели не получен STEP"),
     ("not_text", "файл не текстовый"),
     ("bad_settings", "неверная настройка проекта"),
     (
@@ -203,6 +221,7 @@ impl Error {
             Self::UnknownItem(_) => "unknown_item",
             Self::FileNotFound(_) => "file_not_found",
             Self::UnknownFormat(_) => "unknown_format",
+            Self::IntakeInsideProject(_) => "intake_inside_project",
             Self::BadItemName(_) => "invalid_name",
             Self::NoVersions(_) => "no_versions",
             Self::NoRenderer => "no_renderer",
@@ -217,6 +236,7 @@ impl Error {
             Self::Cancelled => "cancelled",
             Self::InsideProject { .. } => "inside_project",
             Self::NotStep(_) => "not_step",
+            Self::NoStep { .. } => "no_step",
             Self::BadSettings(_) => "bad_settings",
         }
     }

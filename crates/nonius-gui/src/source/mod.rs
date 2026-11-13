@@ -4,8 +4,10 @@
 //! Реализацию даёт программа: `nonius-cli` поверх `nonius-app`.
 
 mod entries;
+mod intake;
 
 pub use entries::*;
+pub use intake::*;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -187,6 +189,41 @@ pub trait ProjectSource: Send + Sync {
     /// открыть заново.
     fn upgrade(&self) -> anyhow::Result<()> {
         Ok(())
+    }
+    /// Изучить папку с моделями: что в ней станет деталями и версиями.
+    /// Ничего не меняет; идёт минуты. «Остановить» (`progress.cancelled`) —
+    /// план из того, что успели. Проект помнит изученное для
+    /// [`intake_plan`](Self::intake_plan) и [`intake_apply`](Self::intake_apply).
+    fn intake_study(&self, folder: &Path, progress: &dyn Progress) -> anyhow::Result<IntakePlan> {
+        let _ = (folder, progress);
+        anyhow::bail!("разбор папки здесь не поддержан")
+    }
+    /// План изученной папки с ответами на вопросы: `id` и «да»/«нет». Быстро.
+    fn intake_plan(&self, answers: &[(String, bool)]) -> anyhow::Result<IntakePlan> {
+        let _ = answers;
+        anyhow::bail!("разбор папки здесь не поддержан")
+    }
+    /// Разложить изученную папку по плану с этими ответами: копии файлов в
+    /// проект, версии в историю. «Остановить» действует между деталями.
+    fn intake_apply(
+        &self,
+        answers: &[(String, bool)],
+        progress: &dyn Progress,
+    ) -> anyhow::Result<IntakeOutcome> {
+        let _ = (answers, progress);
+        anyhow::bail!("разбор папки здесь не поддержан")
+    }
+    /// «Показать в 3D»: сравнить две модели разбираемой папки (файлы одной
+    /// стороны — [`IntakeSide::models`]). Ничего не сохраняет. Для файла
+    /// SolidWorks STEP делает SolidWorks: может идти минуту.
+    fn intake_compare(
+        &self,
+        before: &[PathBuf],
+        after: &[PathBuf],
+        progress: &dyn Progress,
+    ) -> anyhow::Result<Comparison> {
+        let _ = (before, after, progress);
+        anyhow::bail!("разбор папки здесь не поддержан")
     }
     /// Сравнить деталь с файлом или другой деталью, ничего не сохраняя.
     fn compare_outside(

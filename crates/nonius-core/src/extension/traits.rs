@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::Module;
 use crate::compare::{ChangeReport, CompareContext};
 use crate::error::Result;
-use crate::meta::PartMeta;
+use crate::meta::{GeometrySummary, PartMeta};
 use crate::names::{PartName, VersionNumber};
 use crate::tree::FeatureTree;
 
@@ -49,6 +49,14 @@ pub trait Comparator: Module {
         after: &Snapshot,
         ctx: &CompareContext,
     ) -> Result<ChangeReport>;
+
+    /// Быстрое ли это сравнение: отвечает за доли секунды и годится там,
+    /// где сравнивают много пар подряд (разбор папки показывает, что
+    /// изменилось между найденными версиями). Сравнение, которое считает
+    /// разницу объёмов, быстрым не называется.
+    fn quick(&self) -> bool {
+        false
+    }
 }
 
 /// Отрисовка изменений: картинки, GIF, 3D-сцены.
@@ -61,6 +69,22 @@ pub trait Renderer: Module {
         report: &ChangeReport,
         out_dir: &Path,
     ) -> Result<Vec<PathBuf>>;
+
+    /// То же с параметрами сравнения (допуск проекта). Программа вызывает
+    /// именно этот метод. Модулю, чей рисунок зависит от допуска, стоит
+    /// его переопределить: тогда рисунок совпадёт с отчётом сравнения.
+    /// По умолчанию параметры не нужны — вызывается [`Renderer::render`].
+    fn render_with(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
+        report: &ChangeReport,
+        ctx: &CompareContext,
+        out_dir: &Path,
+    ) -> Result<Vec<PathBuf>> {
+        let _ = ctx;
+        self.render(before, after, report, out_dir)
+    }
 }
 
 /// Экспорт файлов из версии.
@@ -69,6 +93,44 @@ pub trait Exporter: Module {
     fn formats(&self) -> Vec<String>;
     /// Выгрузить версию в формате `format` в папку `out_dir`.
     fn export(&self, snapshot: &Snapshot, format: &str, out_dir: &Path) -> Result<PathBuf>;
+}
+
+/// Перевод файла CAD в STEP: родной файл (например `.sldprt`) Nonius хранит
+/// как есть, а форму, массу и сравнение считает по STEP. Модуль этой точки
+/// получает STEP сам — обычно просит об этом установленную CAD-систему, —
+/// чтобы человеку не выгружать его руками при каждом импорте.
+pub trait Converter: Module {
+    /// Умеет ли модуль перевести этот файл (обычно по расширению).
+    fn can_convert(&self, path: &Path) -> bool;
+    /// Записать STEP файла `source` в `target`. Сам `source` не меняется.
+    fn to_step(&self, source: &Path, target: &Path) -> Result<()>;
+}
+
+/// Связи файлов CAD: из каких деталей собрана сборка, к какой модели
+/// относится чертёж. По ним Nonius сам раскладывает папку с файлами: чертёж —
+/// к своей детали, детали — к своей сборке. Знает это CAD-система, поэтому
+/// модуль обычно спрашивает её (или аддин сообщает сам).
+pub trait LinkSource: Module {
+    /// Знает ли модуль связи таких файлов (обычно по расширению).
+    fn knows(&self, path: &Path) -> bool;
+    /// Для каждого файла из `files` — файлы, на которые он ссылается напрямую
+    /// (полные пути). Ответ той же длины и в том же порядке; у файла без
+    /// ссылок список пуст.
+    fn links(&self, files: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>>;
+}
+
+/// Беглый взгляд на форму: контрольные числа прямо из родного файла CAD,
+/// без CAD-системы и без STEP. Нужен там, где файлов много и ждать нельзя:
+/// разбор папки сверяет формой десятки деталей подряд. Числа приблизительные
+/// (обычно их считают по сетке показа, сохранённой в файле), поэтому в
+/// паспорт версии они не идут и с точными числами из STEP на равных не
+/// сравниваются.
+pub trait ShapeGlance: Module {
+    /// Берётся ли модуль за этот файл (обычно по расширению).
+    fn can_glance(&self, path: &Path) -> bool;
+    /// Объём, площадь, габариты и число граней. Ошибка — когда в файле нет
+    /// нужных данных или они устарели: тогда форму узнают обычным путём.
+    fn glance(&self, path: &Path) -> Result<GeometrySummary>;
 }
 
 /// Событие проекта.

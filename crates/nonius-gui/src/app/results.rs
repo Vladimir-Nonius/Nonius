@@ -188,6 +188,11 @@ impl App {
                     None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
                 Done::Batch(report) => self.batch_done(ctx, report),
+                Done::IntakeStudied(run, plan) | Done::IntakePlanned(run, plan) => {
+                    self.intake_planned(run, plan)
+                }
+                Done::IntakeApplied(run, outcome) => self.intake_applied(ctx, run, outcome),
+                Done::IntakeLooked(run, id, result) => self.intake_looked(run, id, result),
                 Done::Added(Ok(added)) => self.added(ctx, added),
                 Done::Added(Err(e)) => match self.tab.add.as_mut() {
                     Some(d) => d.failed(format!("{e:#}")),
@@ -287,7 +292,10 @@ impl App {
                         }
                     }
                 }
-                Done::Crashed => self.tab.message = Some(t.crashed.to_string()),
+                Done::Crashed => {
+                    self.tab.message = Some(t.crashed.to_string());
+                    self.tab.stop_waiting(t.crashed);
+                }
                 // Устарело: выбрали другое.
                 Done::ComparedOutside(..) => {}
                 Done::Versions(..)

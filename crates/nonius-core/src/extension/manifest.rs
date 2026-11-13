@@ -22,6 +22,14 @@ pub enum ExtensionPoint {
     Renderer,
     /// Файлы из версии: DXF, PDF, STL ([`Exporter`](super::Exporter)).
     Exporter,
+    /// Файл CAD → STEP ([`Converter`](super::Converter)).
+    Converter,
+    /// Связи файлов CAD: сборка → детали, чертёж → модель
+    /// ([`LinkSource`](super::LinkSource)).
+    Links,
+    /// Беглый взгляд на форму прямо из файла CAD
+    /// ([`ShapeGlance`](super::ShapeGlance)).
+    Glance,
     /// Реакция на события проекта ([`EventHandler`](super::EventHandler)).
     Events,
     /// Панели и вкладки интерфейса (подключаются веб-интерфейсом).

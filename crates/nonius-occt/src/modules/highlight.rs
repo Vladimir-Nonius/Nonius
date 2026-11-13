@@ -50,14 +50,26 @@ impl Renderer for HighlightRenderer {
         &self,
         before: &Snapshot,
         after: &Snapshot,
+        report: &ChangeReport,
+        out_dir: &Path,
+    ) -> Result<Vec<PathBuf>> {
+        self.render_with(before, after, report, &CompareContext::default(), out_dir)
+    }
+
+    /// С допуском проекта: та же разница, что в отчёте сравнения, — и она
+    /// не считается второй раз.
+    fn render_with(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
         _report: &ChangeReport,
+        ctx: &CompareContext,
         out_dir: &Path,
     ) -> Result<Vec<PathBuf>> {
         let Some((a, b)) = model_pair(before, after) else {
             return Ok(Vec::new());
         };
-        let diff = shared_diff(&a, &b, CompareContext::default().tolerance_mm)
-            .map_err(|e| module_err(Self::ID, e))?;
+        let diff = shared_diff(&a, &b, ctx.tolerance_mm).map_err(|e| module_err(Self::ID, e))?;
         let img = diff
             .render(&self.view)
             .map_err(|e| module_err(Self::ID, e))?;

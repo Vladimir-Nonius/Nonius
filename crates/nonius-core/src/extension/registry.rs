@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use super::{
-    Comparator, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource, Module,
-    ModuleManifest, Renderer, Snapshot, TreeSource,
+    Comparator, Converter, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource,
+    LinkSource, Module, ModuleManifest, Renderer, ShapeGlance, Snapshot, TreeSource,
 };
 use crate::compare::{ChangeReport, CompareContext};
 use crate::error::{Error, Result};
@@ -17,6 +17,9 @@ pub struct Registry {
     comparators: Vec<Box<dyn Comparator>>,
     renderers: Vec<Box<dyn Renderer>>,
     exporters: Vec<Box<dyn Exporter>>,
+    converters: Vec<Box<dyn Converter>>,
+    links: Vec<Box<dyn LinkSource>>,
+    glances: Vec<Box<dyn ShapeGlance>>,
     events: Vec<Box<dyn EventHandler>>,
 }
 
@@ -77,6 +80,31 @@ impl Registry {
         Ok(())
     }
 
+    /// Подключить перевод файлов CAD в STEP.
+    pub fn add_converter(&mut self, m: Box<dyn Converter>) -> Result<()> {
+        check(
+            m.manifest(),
+            ExtensionPoint::Converter,
+            ids(&self.converters),
+        )?;
+        self.converters.push(m);
+        Ok(())
+    }
+
+    /// Подключить источник связей файлов.
+    pub fn add_link_source(&mut self, m: Box<dyn LinkSource>) -> Result<()> {
+        check(m.manifest(), ExtensionPoint::Links, ids(&self.links))?;
+        self.links.push(m);
+        Ok(())
+    }
+
+    /// Подключить беглый взгляд на форму.
+    pub fn add_glance(&mut self, m: Box<dyn ShapeGlance>) -> Result<()> {
+        check(m.manifest(), ExtensionPoint::Glance, ids(&self.glances))?;
+        self.glances.push(m);
+        Ok(())
+    }
+
     /// Подключить обработчик событий.
     pub fn add_event_handler(&mut self, m: Box<dyn EventHandler>) -> Result<()> {
         check(m.manifest(), ExtensionPoint::Events, ids(&self.events))?;
@@ -126,6 +154,25 @@ impl Registry {
             .collect()
     }
 
+    /// Есть ли быстрое сравнение (см. [`Comparator::quick`]).
+    pub fn has_quick_comparator(&self) -> bool {
+        self.comparators.iter().any(|c| c.quick())
+    }
+
+    /// Прогнать только быстрые сравнения.
+    pub fn compare_quick(
+        &self,
+        before: &Snapshot,
+        after: &Snapshot,
+        ctx: &CompareContext,
+    ) -> Result<Vec<ChangeReport>> {
+        self.comparators
+            .iter()
+            .filter(|c| c.quick())
+            .map(|c| c.compare(before, after, ctx))
+            .collect()
+    }
+
     /// Разослать событие всем обработчикам. Ошибки обработчиков собираются,
     /// но не прерывают рассылку.
     pub fn emit(&self, event: &Event) -> Vec<Error> {
@@ -143,6 +190,27 @@ impl Registry {
             .map(|m| m.as_ref())
     }
 
+    /// Первый модуль, который умеет перевести файл в STEP.
+    pub fn converter_for(&self, path: &Path) -> Option<&dyn Converter> {
+        self.converters
+            .iter()
+            .find(|m| m.can_convert(path))
+            .map(|m| m.as_ref())
+    }
+
+    /// Первый модуль, который берётся взглянуть на форму этого файла.
+    pub fn glance_for(&self, path: &Path) -> Option<&dyn ShapeGlance> {
+        self.glances
+            .iter()
+            .find(|m| m.can_glance(path))
+            .map(|m| m.as_ref())
+    }
+
+    /// Все подключённые источники связей файлов.
+    pub fn link_sources(&self) -> impl Iterator<Item = &dyn LinkSource> + '_ {
+        self.links.iter().map(|m| m.as_ref())
+    }
+
     /// Все подключённые отрисовщики.
     pub fn renderers(&self) -> impl Iterator<Item = &dyn Renderer> + '_ {
         self.renderers.iter().map(|m| m.as_ref())
@@ -151,12 +219,15 @@ impl Registry {
     /// Манифесты всех подключённых модулей (модуль с несколькими точками — один раз).
     pub fn manifests(&self) -> Vec<&ModuleManifest> {
         let mut all: Vec<&ModuleManifest> = Vec::new();
-        let lists: [Vec<&ModuleManifest>; 6] = [
+        let lists: [Vec<&ModuleManifest>; 9] = [
             self.geometry.iter().map(|m| m.manifest()).collect(),
             self.trees.iter().map(|m| m.manifest()).collect(),
             self.comparators.iter().map(|m| m.manifest()).collect(),
             self.renderers.iter().map(|m| m.manifest()).collect(),
             self.exporters.iter().map(|m| m.manifest()).collect(),
+            self.converters.iter().map(|m| m.manifest()).collect(),
+            self.links.iter().map(|m| m.manifest()).collect(),
+            self.glances.iter().map(|m| m.manifest()).collect(),
             self.events.iter().map(|m| m.manifest()).collect(),
         ];
         for m in lists.into_iter().flatten() {

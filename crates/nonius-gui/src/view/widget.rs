@@ -51,6 +51,11 @@ impl Viewport {
         }
     }
 
+    /// Ещё один 3D-вид на том же устройстве: со своей моделью и камерой.
+    pub fn twin(&self) -> Self {
+        Self::new(self.render.clone())
+    }
+
     /// Работает ли 3D.
     pub fn has_gpu(&self) -> bool {
         self.gpu.is_some()

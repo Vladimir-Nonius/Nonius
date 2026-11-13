@@ -36,6 +36,7 @@ pub const COMMANDS: &[&str] = &[
     "agents",
     "modules",
     "import",
+    "intake",
     "status",
     "commit",
     "log",
@@ -188,6 +189,26 @@ fn data(cli: &Cli) -> Result<Option<Value>> {
         Command::Overview { changed } => overview(&app()?, *changed)?,
         Command::Agents => json!({ "updated": app()?.update_agents()? }),
         Command::Modules => modules(),
+        Command::Intake {
+            folder,
+            apply,
+            quick,
+            deep,
+            yes,
+            no,
+            ..
+        } => {
+            let app = app()?;
+            let check = super::intake::check(*quick, *deep);
+            let study = app.intake_study(folder, check, &NoProgress)?;
+            let plan = study.plan(&super::intake::answers(yes, no));
+            let done = if *apply {
+                Some(app.intake_apply(&plan, &NoProgress)?)
+            } else {
+                None
+            };
+            json!({ "plan": plan, "done": done })
+        }
         Command::Import { file, part } => {
             let done = app()?.import(file, part.as_deref())?;
             json!({

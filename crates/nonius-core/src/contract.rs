@@ -21,7 +21,8 @@ use std::path::Path;
 
 use crate::compare::CompareContext;
 use crate::extension::{
-    Comparator, Exporter, ExtensionPoint, GeometrySource, Module, Snapshot, TreeSource,
+    Comparator, Converter, Exporter, ExtensionPoint, GeometrySource, LinkSource, Module,
+    ShapeGlance, Snapshot, TreeSource,
 };
 use crate::schema::Versioned;
 use crate::{meta::PartMeta, tree::FeatureTree};
@@ -193,6 +194,112 @@ pub fn exporter<E: Exporter>(
             Ok(_) => {}
             Err(e) => v.push(format!("{f}: {e}")),
         }
+    }
+    finish(v)
+}
+
+/// Перевод в STEP: берёт образец, не берёт чужие файлы и готовый STEP,
+/// создаёт непустой STEP в `out_dir` и не трогает сам образец.
+pub fn converter<C: Converter>(conv: &C, sample: &Path, out_dir: &Path) -> Result<(), Violations> {
+    let mut v = manifest(conv, ExtensionPoint::Converter)
+        .err()
+        .unwrap_or_default();
+    if !conv.can_convert(sample) {
+        v.push(format!(
+            "не берётся переводить образец {}",
+            sample.display()
+        ));
+        return finish(v);
+    }
+    for foreign in [
+        "contract-check.nonius-unknown-format",
+        "contract-check.step",
+    ] {
+        if conv.can_convert(Path::new(foreign)) {
+            v.push(format!("берётся переводить {foreign}"));
+        }
+    }
+    let before = std::fs::read(sample).ok();
+    let target = out_dir.join("contract-check.step");
+    match conv.to_step(sample, &target) {
+        Ok(()) => match std::fs::read(&target) {
+            Ok(bytes) if bytes.starts_with(b"ISO-10303-21") => {}
+            Ok(_) => v.push("записанный файл — не STEP".into()),
+            Err(_) => v.push(format!("файл {} не создан", target.display())),
+        },
+        Err(e) => v.push(format!("ошибка перевода образца: {e}")),
+    }
+    if std::fs::read(sample).ok() != before {
+        v.push("образец изменился после перевода".into());
+    }
+    finish(v)
+}
+
+/// Связи файлов: берёт образец, не берёт чужие файлы, отвечает списком той
+/// же длины, что и вопрос, полными путями, и повторяемо.
+pub fn link_source<S: LinkSource>(src: &S, sample: &Path) -> Result<(), Violations> {
+    let mut v = manifest(src, ExtensionPoint::Links)
+        .err()
+        .unwrap_or_default();
+    if !src.knows(sample) {
+        v.push(format!("не знает связей образца {}", sample.display()));
+        return finish(v);
+    }
+    if src.knows(Path::new("contract-check.nonius-unknown-format")) {
+        v.push("берётся за файл неизвестного формата".into());
+    }
+    let ask = [sample.to_path_buf(), sample.to_path_buf()];
+    match (src.links(&ask), src.links(&ask)) {
+        (Ok(a), Ok(b)) => {
+            if a.len() != ask.len() {
+                v.push(format!(
+                    "спросили про {} файла, ответов {}",
+                    ask.len(),
+                    a.len()
+                ));
+            }
+            if a != b {
+                v.push("два одинаковых вопроса дали разный ответ".into());
+            }
+            if a.iter().flatten().any(|p| !p.is_absolute()) {
+                v.push("в ответе есть неполный путь".into());
+            }
+        }
+        (Err(e), _) | (_, Err(e)) => v.push(format!("ошибка на образце: {e}")),
+    }
+    finish(v)
+}
+
+/// Беглый взгляд на форму: берёт образец, не берёт чужие файлы, числа
+/// корректны (есть объём и габариты), повторяемы, образец не меняется.
+pub fn glance<G: ShapeGlance>(src: &G, sample: &Path) -> Result<(), Violations> {
+    let mut v = manifest(src, ExtensionPoint::Glance)
+        .err()
+        .unwrap_or_default();
+    if !src.can_glance(sample) {
+        v.push(format!("не берётся за образец {}", sample.display()));
+        return finish(v);
+    }
+    if src.can_glance(Path::new("contract-check.nonius-unknown-format")) {
+        v.push("берётся за файл неизвестного формата".into());
+    }
+    let before = std::fs::read(sample).ok();
+    match (src.glance(sample), src.glance(sample)) {
+        (Ok(a), Ok(b)) => {
+            if !a.is_valid() {
+                v.push("числа формы некорректны".into());
+            }
+            if a.volume_mm3.is_none_or(|x| x <= 0.0) || a.bbox.is_none() {
+                v.push("нет объёма или габаритов: сравнивать нечем".into());
+            }
+            if a != b {
+                v.push("два взгляда на один файл дали разные числа".into());
+            }
+        }
+        (Err(e), _) | (_, Err(e)) => v.push(format!("ошибка на образце: {e}")),
+    }
+    if std::fs::read(sample).ok() != before {
+        v.push("образец изменился".into());
     }
     finish(v)
 }

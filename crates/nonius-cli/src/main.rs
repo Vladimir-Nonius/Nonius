@@ -25,7 +25,9 @@ use nonius_core::extension::Registry;
 use nonius_step::StepHeaderSource;
 
 use args::{Cli, Command, FileCommand, FolderCommand, PartCommand};
-use commands::{compare, describe, files, history, import, json, layout, mcp, passport, project};
+use commands::{
+    compare, describe, files, history, import, intake, json, layout, mcp, passport, project,
+};
 
 fn main() -> ExitCode {
     // Без команды — скорее всего, двойной щелчок в Проводнике: открыть окно.
@@ -72,6 +74,12 @@ fn registry_with(occt: fn(&mut Registry) -> nonius_core::Result<()>) -> Registry
     occt(&mut r).expect("встроенный модуль должен проходить проверку");
     r.add_geometry_source(Box::new(StepHeaderSource::new()))
         .expect("встроенный модуль должен проходить проверку");
+    // Форма прямо из файла .sldprt: SolidWorks для этого не нужен.
+    nonius_sldprt::register(&mut r).expect("встроенный модуль должен проходить проверку");
+    // STEP из файлов SolidWorks — только там, где SolidWorks установлен.
+    // В тестах не подключаем: они не должны запускать чужую программу.
+    #[cfg(not(test))]
+    nonius_solidworks::register(&mut r).expect("встроенный модуль должен проходить проверку");
     r
 }
 
@@ -122,6 +130,24 @@ fn run(cli: Cli) -> Result<()> {
         Command::Mcp { write } => mcp::serve(&cli, *write)?,
         Command::Describe => println!("{}", describe::describe()),
         Command::Import { file, part } => import::import(&app()?, file, part.as_deref())?,
+        Command::Intake {
+            folder,
+            apply,
+            quick,
+            deep,
+            ask,
+            yes,
+            no,
+        } => {
+            let options = intake::Options {
+                apply: *apply,
+                check: intake::check(*quick, *deep),
+                ask: *ask,
+                yes,
+                no,
+            };
+            intake::intake(&app()?, folder, &options)?;
+        }
         Command::Status { part } => history::status(&app()?, part.as_deref())?,
         Command::Commit { part, message } => history::commit(&app()?, part, message)?,
         Command::Log { part } => history::log(&app()?, part)?,

@@ -25,7 +25,7 @@ impl nonius_app::Progress for Steps<'_> {
 }
 
 /// Прочитать сцену из файлов отрисовщиков.
-fn read_scene(files: &[PathBuf]) -> (Option<Scene>, Option<String>) {
+pub(super) fn read_scene(files: &[PathBuf]) -> (Option<Scene>, Option<String>) {
     let glb = files
         .iter()
         .find(|p| p.file_name().is_some_and(|n| n == nonius_occt::CHANGES_GLB));

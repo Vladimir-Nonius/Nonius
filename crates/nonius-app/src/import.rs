@@ -1,4 +1,11 @@
 //! Импорт файла модели: положить файл в деталь и обновить паспорт.
+//!
+//! Файл SolidWorks (`.sldprt`, `.sldasm`) хранится как есть, но форму, массу
+//! и сравнение Nonius считает по STEP. Если подключён модуль перевода
+//! (точка `Converter`, например `nonius-solidworks`), импорт сам получает
+//! свежий STEP и кладёт его рядом как `model.step`. Нет модуля или перевод
+//! не удался — файл всё равно импортируется, а в предупреждениях сказано,
+//! что STEP остался прежним.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +25,14 @@ pub const PREVIEW_FORMAT: &str = "preview";
 /// Файл SolidWorks заменён, а STEP рядом остался старый.
 const STEP_BEHIND: &str =
     "форма в 3D и масса — по прежнему STEP: чтобы обновить их, добавьте и новый STEP этой детали";
+
+/// STEP, полученный модулем перевода: лежит во временной папке до тех пор,
+/// пока импорт не положит его в деталь.
+pub(crate) struct Converted {
+    _dir: tempfile::TempDir,
+    pub(crate) step: PathBuf,
+    pub(crate) read: Option<PartMeta>,
+}
 
 /// Итог импорта.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,15 +81,26 @@ impl App {
         // Сначала прочитать, потом трогать проект: битый файл не создаёт
         // деталь и не портит рабочую модель.
         let mut warnings = Vec::new();
-        let read = self.read_geometry(file, &mut warnings)?;
+        let converted = if target == "model.step" {
+            None
+        } else {
+            self.convert(file, &mut warnings)
+        };
+        let read = match &converted {
+            Some(c) => c.read.clone(),
+            None => self.read_geometry(file, &mut warnings)?,
+        };
         let found = self.project.find_item(&name)?;
         let fresh = found.is_none();
         let item = match found {
             Some(i) => i,
             None => self.project.create_item(kind, &name)?,
         };
-        let dest = item.dir.join(target);
-        if let Err(e) = replace_file(file, &dest) {
+        let placed = replace_file(file, &item.dir.join(target)).and_then(|()| match &converted {
+            Some(c) => replace_file(&c.step, &item.dir.join("model.step")),
+            None => Ok(()),
+        });
+        if let Err(e) = placed {
             if fresh {
                 let _ = fs::remove_dir_all(&item.dir);
             }
@@ -82,7 +108,8 @@ impl App {
         }
 
         let mut meta = self.project.load_meta(&item)?;
-        if target != "model.step" && item.dir.join("model.step").is_file() {
+        let step_is_fresh = target == "model.step" || converted.is_some();
+        if !step_is_fresh && item.dir.join("model.step").is_file() {
             warnings.push(STEP_BEHIND.to_string());
         }
         if let Some(read) = read {
@@ -104,7 +131,7 @@ impl App {
         update_mass(&mut meta);
         schema::save(&meta, &item.dir.join(META_FILE))?;
 
-        let preview = if target == "model.step" {
+        let preview = if step_is_fresh {
             self.make_preview(&item, &mut warnings)
         } else {
             None
@@ -116,6 +143,33 @@ impl App {
             preview,
             warnings,
         })
+    }
+
+    /// Получить STEP файла CAD модулем перевода и прочитать его паспорт.
+    /// `None` — модуля нет или перевод не удался (причина — в предупреждениях):
+    /// импорт идёт дальше по-старому, без свежего STEP.
+    pub(crate) fn convert(&self, file: &Path, warnings: &mut Vec<String>) -> Option<Converted> {
+        let converter = self.registry.converter_for(file)?;
+        let failed = |why: String, warnings: &mut Vec<String>| {
+            warnings.push(format!("STEP не получен: {why}"));
+            None
+        };
+        let dir = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => return failed(format!("временная папка: {e}"), warnings),
+        };
+        let step = dir.path().join("model.step");
+        if let Err(e) = converter.to_step(file, &step) {
+            return failed(e.to_string(), warnings);
+        }
+        match self.read_geometry(&step, warnings) {
+            Ok(read) => Some(Converted {
+                _dir: dir,
+                step,
+                read,
+            }),
+            Err(e) => failed(e.to_string(), warnings),
+        }
     }
 
     /// Прочитать паспорт подходящим модулем. Если первый модуль не справился
