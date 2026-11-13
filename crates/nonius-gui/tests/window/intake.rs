@@ -363,6 +363,34 @@ fn rough_plan_is_refined_in_background() {
     wait_for(&mut h, "Разложено:");
 }
 
+/// «Остановить» посреди уточнения: план беглый, галочка стоит — сказано,
+/// что уточнение остановлено (а не «выключено»), и «Уточнить» продолжает.
+#[test]
+fn stopped_refining_can_be_resumed() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let project = fake(dir.path(), "Стенд");
+    *project.rough.lock().unwrap() = true;
+    let refines = project.refines.clone();
+    let gate = project.refine_gate.clone();
+    let held = gate.lock().unwrap();
+    let mut h = window_for_folder(dir.path(), project);
+    open_intake(&mut h);
+    wait_for(&mut h, "Уточняю через SolidWorks");
+
+    h.get_by_label("Остановить").click();
+    wait_for(&mut h, "Останавливаю");
+    drop(held);
+    wait_for(&mut h, "Уточнение остановлено");
+    assert!(h.query_by_label_contains("выключено").is_none());
+    assert_eq!(*refines.lock().unwrap(), [true]);
+
+    h.get_by_label("Уточнить").click();
+    wait_gone(&mut h, "Уточнение остановлено");
+    wait_gone(&mut h, "Уточняю через SolidWorks");
+    assert_eq!(*refines.lock().unwrap(), [true, false]);
+}
+
 #[test]
 fn refining_can_be_switched_off_and_on() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());

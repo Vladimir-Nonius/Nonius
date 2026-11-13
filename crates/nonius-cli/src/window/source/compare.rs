@@ -2,7 +2,6 @@
 //! OpenCascade читает STEP по одному, поэтому сравнения идут по очереди.
 
 use std::path::PathBuf;
-use std::sync::TryLockError;
 
 use anyhow::{bail, Result};
 use nonius_app::CompareOptions;
@@ -70,15 +69,9 @@ impl AppSource {
         if from.is_none() && before != after {
             bail!("«Было» — это сохранённая версия: сравнивать можно с ней");
         }
-        let _one_at_a_time = match self.busy.try_lock() {
-            Ok(g) => g,
-            Err(TryLockError::Poisoned(e)) => e.into_inner(),
-            // Прошлое (отменённое) сравнение доделывает свой шаг.
-            Err(TryLockError::WouldBlock) => {
-                progress.step("Жду, пока закончится прошлое сравнение…");
-                self.busy.lock().unwrap_or_else(|e| e.into_inner())
-            }
-        };
+        // Прошлое (отменённое) сравнение доделывает свой шаг.
+        let _one_at_a_time =
+            self.one_at_a_time(progress, "Жду, пока закончится прошлое сравнение…");
         let _files = self.reading();
         let steps = Steps(progress);
         // Сначала деталь: она готова за секунды, цвета считаются дольше.

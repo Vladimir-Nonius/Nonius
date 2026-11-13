@@ -122,7 +122,7 @@ impl AppSource {
         progress: &dyn Progress,
     ) -> Result<IntakePlan> {
         // Форму деталей читает OpenCascade: по одному чтению за раз.
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
         let study = self
             .app
             .intake_glance(folder, ShapeCheck::Names, &Steps(progress))
@@ -137,7 +137,7 @@ impl AppSource {
     /// начать разбирать другую папку — тогда уточнённое уже никому не нужно.
     pub(super) fn refine_folder(&self, progress: &dyn Progress) -> Result<()> {
         let rough = self.studied()?;
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
         let exact = self.app.intake_refine(&rough, &Steps(progress));
         if progress.cancelled() {
             return Ok(());
@@ -160,7 +160,7 @@ impl AppSource {
         progress: &dyn Progress,
     ) -> Result<IntakeOutcome> {
         let plan = self.studied()?.plan(answers);
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
         let _files = self.writing();
         let done = self
             .app

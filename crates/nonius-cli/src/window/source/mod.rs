@@ -17,7 +17,7 @@ pub(super) use words::plainly;
 use words::{in_words, mass_entry};
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use crate::format::short_date;
 use crate::window_lock::WindowLock;
@@ -79,7 +79,25 @@ impl AppSource {
     fn writing(&self) -> RwLockWriteGuard<'_, ()> {
         self.files.write().unwrap_or_else(|e| e.into_inner())
     }
+
+    /// Очередь к OpenCascade: одна тяжёлая работа за раз. Занято (например,
+    /// остановленное сравнение доделывает булеву операцию — её не прервать)
+    /// — человек видит `waiting` в строке хода, а не немую «работу».
+    fn one_at_a_time(&self, progress: &dyn Progress, waiting: &str) -> MutexGuard<'_, ()> {
+        match self.busy.try_lock() {
+            Ok(g) => g,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                progress.step(waiting);
+                self.busy.lock().unwrap_or_else(|e| e.into_inner())
+            }
+        }
+    }
 }
+
+/// Строка хода, пока ждём, когда OpenCascade освободится.
+const WAIT: &str =
+    "Жду, пока закончится прошлая работа (остановленное сравнение доделывает свой шаг)…";
 
 fn version(p: Pick) -> Result<Option<VersionNumber>> {
     Ok(match p {

@@ -3,7 +3,6 @@
 //! рядом и причина.
 
 use std::path::PathBuf;
-use std::sync::TryLockError;
 
 use anyhow::{bail, Result};
 use nonius_gui::source::{Comparison, Progress};
@@ -33,14 +32,7 @@ impl AppSource {
         progress: &dyn Progress,
     ) -> Result<Comparison> {
         // OpenCascade читает STEP по одному: ждём прошлую работу.
-        let _one_at_a_time = match self.busy.try_lock() {
-            Ok(g) => g,
-            Err(TryLockError::Poisoned(e)) => e.into_inner(),
-            Err(TryLockError::WouldBlock) => {
-                progress.step("Жду, пока закончится прошлая работа…");
-                self.busy.lock().unwrap_or_else(|e| e.into_inner())
-            }
-        };
+        let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
         let steps = Steps(progress);
         let compared = self.app.intake_compare(before, after, &steps);
         // Тела разницы освобождаются, пока OpenCascade занят этой работой.

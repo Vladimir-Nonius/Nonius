@@ -111,13 +111,15 @@ fn wanted(draft: &IntakePlan, check: ShapeCheck) -> Vec<Vec<Version<'_>>> {
         .collect()
 }
 
-/// Спорная группа: у версии нет формы или пара версий на грани ответа.
-fn disputed(shapes: &[Option<Shape>]) -> bool {
+/// Спорная группа: у версии нет формы (и неизвестно, что её не будет —
+/// `hopeless`) или пара версий на грани ответа.
+fn disputed(shapes: &[Option<Shape>], hopeless: &[bool]) -> bool {
     if shapes.len() < 2 {
         return false;
     }
     let known: Vec<&Shape> = shapes.iter().flatten().collect();
-    known.len() < shapes.len()
+    let missing = shapes.iter().zip(hopeless).any(|(s, &h)| s.is_none() && !h);
+    missing
         || known
             .iter()
             .enumerate()
@@ -139,6 +141,11 @@ impl App {
         let total: usize = groups.iter().map(Vec::len).sum();
         let mut seen = 0;
         let mut found: Vec<Vec<Option<Shape>>> = Vec::new();
+        // Версии, у которых точной формы не будет: SolidWorks уже пробовали.
+        let hopeless: Vec<Vec<bool>> = groups
+            .iter()
+            .map(|g| g.iter().map(|(_, m)| memory.failed(m)).collect())
+            .collect();
         for group in &groups {
             // Уже уточнённая раньше группа — сразу точная, если помнятся все.
             let exact: Vec<Option<Shape>> = group
@@ -172,7 +179,9 @@ impl App {
             found.push(shapes);
         }
         let mut pending = HashSet::new();
-        let disputes: Vec<usize> = (0..groups.len()).filter(|&g| disputed(&found[g])).collect();
+        let disputes: Vec<usize> = (0..groups.len())
+            .filter(|&g| disputed(&found[g], &hopeless[g]))
+            .collect();
         let refined: usize = disputes.iter().map(|&g| groups[g].len()).sum();
         let mut done = 0;
         for &g in &disputes {
@@ -226,6 +235,8 @@ impl App {
     /// Точная форма одной версии: из памяти; готовый STEP, если он не
     /// старше файла CAD рядом; иначе (если есть склад `exports`) STEP
     /// просим у модуля перевода, а не вышло — лучше старый STEP, чем ничего.
+    /// Если уже известно, что тела в STEP от модуля нет (`Memory::failed`),
+    /// модуль не зовётся.
     fn exact(
         &self,
         models: &[PathBuf],
@@ -249,17 +260,29 @@ impl App {
         };
         let shape = if fresh {
             read(step?, &mut ignored)
-        } else if let Some(exports) = exports {
-            cad.and_then(|c| exports.of(self, c, &mut ignored))
-                .and_then(|c| {
-                    c.read
-                        .as_ref()
-                        .and_then(|m| Shape::of(&m.geometry, Source::Exact))
-                })
-                .or_else(|| read(step?, &mut ignored))
+        } else if let Some(exports) = exports.filter(|_| !memory.failed(models)) {
+            let converted = cad.and_then(|c| exports.of(self, c, &mut ignored));
+            let got = converted
+                .as_ref()
+                .and_then(|c| c.read.as_ref())
+                .and_then(|m| Shape::of(&m.geometry, Source::Exact));
+            // STEP получен, а тела в нём нет (поверхности, пустая деталь):
+            // так будет и в следующий раз — запомнить и не просить снова.
+            // Не ответил SolidWorks — может, ответит потом: не запоминаем.
+            if converted.is_some() && got.is_none() {
+                memory.fail(models);
+            }
+            got.or_else(|| read(step?, &mut ignored))
         } else {
-            None
-        }?;
+            step.filter(|_| exports.is_some())
+                .and_then(|s| read(s, &mut ignored))
+        };
+        if std::env::var_os("NONIUS_TRACE").is_some() {
+            for why in &ignored {
+                eprintln!("точная форма {}: {why}", models[0].display());
+            }
+        }
+        let shape = shape?;
         memory.put(models, shape);
         Some(shape)
     }
@@ -283,24 +306,30 @@ mod tests {
     fn group_is_disputed_when_glance_cannot_tell() {
         use Source::{Exact, Glance};
         // Одна версия — сравнивать не с чем, спорить не о чем.
-        assert!(!disputed(&[None]));
+        let (no, two) = (&[false, false], &[false, false]);
+        assert!(!disputed(&[None], &[false]));
         // Беглой формы у версии нет — спорная.
-        assert!(disputed(&[shape(10_000.0, Glance), None]));
+        assert!(disputed(&[shape(10_000.0, Glance), None], two));
+        // …если только SolidWorks уже не сказал, что формы не будет.
+        assert!(!disputed(&[shape(10_000.0, Glance), None], &[false, true]));
         // Объём ушёл на 24 % — у порога «похожи / разные»: беглой не верим,
         // точной — верим.
-        assert!(disputed(&[
-            shape(10_000.0, Glance),
-            shape(13_100.0, Glance)
-        ]));
-        assert!(!disputed(&[shape(10_000.0, Exact), shape(13_100.0, Exact)]));
+        assert!(disputed(
+            &[shape(10_000.0, Glance), shape(13_100.0, Glance)],
+            no
+        ));
+        assert!(!disputed(
+            &[shape(10_000.0, Exact), shape(13_100.0, Exact)],
+            no
+        ));
         // Далеко от порогов — беглой достаточно.
-        assert!(!disputed(&[
-            shape(10_000.0, Glance),
-            shape(10_500.0, Glance)
-        ]));
-        assert!(!disputed(&[
-            shape(10_000.0, Glance),
-            shape(30_000.0, Glance)
-        ]));
+        assert!(!disputed(
+            &[shape(10_000.0, Glance), shape(10_500.0, Glance)],
+            no
+        ));
+        assert!(!disputed(
+            &[shape(10_000.0, Glance), shape(30_000.0, Glance)],
+            no
+        ));
     }
 }

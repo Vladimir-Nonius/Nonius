@@ -27,8 +27,8 @@ const TOUCHED: f64 = 0.10;
 /// Насколько может уйти третий габарит и объём у версий одной детали.
 const MAX_CHANGE: f64 = 0.25;
 /// Форма «другая», но два габарита из трёх те же: так выглядит и деталь,
-/// которую укоротили или утолщили. По этим словам вопрос человеку задаётся
-/// без мнения «похоже, нет» (см. `questions.rs`).
+/// которую укоротили или утолщили. Слова для человека; сам признак —
+/// поле `kept_two` у [`Likeness::Different`].
 pub(super) const TWO_KEPT: &str = "два габарита из трёх совпали";
 /// Копия: все числа совпали с точностью записи в файл.
 const COPY: f64 = 1e-4;
@@ -142,8 +142,14 @@ pub(super) enum Likeness {
     Same,
     /// Версии одной детали; внутри — что изменилось, словами.
     Similar(String),
-    /// Разные детали; внутри — чем отличаются, словами.
-    Different(String),
+    /// Разные детали.
+    Different {
+        /// Чем отличаются, словами.
+        how: String,
+        /// Два габарита из трёх те же: деталь могли просто укоротить или
+        /// утолщить — вопрос человеку идёт без мнения «похоже, нет».
+        kept_two: bool,
+    },
 }
 
 /// Число по-русски: с запятой.
@@ -211,14 +217,19 @@ fn judge(a: &Shape, b: &Shape, shift: f64) -> Likeness {
             let hit = free.iter().position(|&o| gap(d, o) <= SAME_SIZE);
             hit.map(|at| free.swap_remove(at)).is_some()
         });
-        return Likeness::Different(if same.count() >= 2 {
+        let kept_two = same.count() >= 2;
+        let how = if kept_two {
             format!("{sizes}; {TWO_KEPT}")
         } else {
             sizes
-        });
+        };
+        return Likeness::Different { how, kept_two };
     }
     if volume > max_change {
-        return Likeness::Different(percent);
+        return Likeness::Different {
+            how: percent,
+            kept_two: false,
+        };
     }
     Likeness::Similar(if kept == 3 {
         format!("{percent}, габариты те же")

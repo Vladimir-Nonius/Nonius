@@ -166,8 +166,7 @@ pub(super) fn ask(
         if let Some(rival) = p.rival {
             // Два габарита из трёх те же — деталь могли просто укоротить:
             // тут своего мнения у программы нет.
-            let close = p.notes.iter().any(|n| n.contains(super::shape::TWO_KEPT));
-            let opinion = if close { None } else { Some(false) };
+            let opinion = if p.rival_close { None } else { Some(false) };
             push(vec![rival, p.members[0]], p.notes.clone(), opinion);
         }
     }

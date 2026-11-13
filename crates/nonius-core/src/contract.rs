@@ -18,6 +18,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::compare::CompareContext;
 use crate::extension::{
@@ -134,15 +135,46 @@ pub fn tree_problems(tree: &FeatureTree) -> Violations {
     v
 }
 
+/// Сколько может идти одно сравнение модуля, который назвался быстрым
+/// (`Comparator::quick`), на образцах контрактного теста — маленьких
+/// деталях. Запас большой (тесты идут и в отладочной сборке): ловится не
+/// «медленно на большой детали», а обещание не по делу — например, булевы
+/// операции у модуля, который назвался быстрым.
+const QUICK_LIMIT: Duration = Duration::from_secs(5);
+
 /// Сравнение: версия сама с собой даёт пустой отчёт, результат повторяем,
-/// «есть ли изменения» не зависит от направления.
+/// «есть ли изменения» не зависит от направления. Назвался быстрым — каждое
+/// сравнение образцов укладывается в [`QUICK_LIMIT`].
 pub fn comparator<C: Comparator>(cmp: &C, a: &Snapshot, b: &Snapshot) -> Result<(), Violations> {
+    comparator_within(cmp, a, b, QUICK_LIMIT)
+}
+
+fn comparator_within<C: Comparator>(
+    cmp: &C,
+    a: &Snapshot,
+    b: &Snapshot,
+    quick_limit: Duration,
+) -> Result<(), Violations> {
     let mut v = manifest(cmp, ExtensionPoint::Comparator)
         .err()
         .unwrap_or_default();
     let ctx = CompareContext::default();
-    let run = |x: &Snapshot, y: &Snapshot| cmp.compare(x, y, &ctx);
-    match (run(a, a), run(a, b), run(a, b), run(b, a)) {
+    let slowest = std::cell::Cell::new(Duration::ZERO);
+    let run = |x: &Snapshot, y: &Snapshot| {
+        let started = Instant::now();
+        let report = cmp.compare(x, y, &ctx);
+        slowest.set(slowest.get().max(started.elapsed()));
+        report
+    };
+    let runs = (run(a, a), run(a, b), run(a, b), run(b, a));
+    if cmp.quick() && slowest.get() > quick_limit {
+        v.push(format!(
+            "назвался быстрым, а сравнение шло {:.2} с (можно не больше {:.2} с)",
+            slowest.get().as_secs_f64(),
+            quick_limit.as_secs_f64()
+        ));
+    }
+    match runs {
         (Ok(same), Ok(ab1), Ok(ab2), Ok(ba)) => {
             if !same.is_empty() {
                 v.push(format!(
@@ -328,6 +360,43 @@ mod tests {
         let mut m = PartMeta::new(ItemKind::Part);
         m.geometry.mass_kg = Some(2.0);
         contract_ok(comparator(&MetaComparator::new(), &a, &snap(m)));
+    }
+
+    /// Назвался быстрым, а сам медленный — нарушение; без обещания — нет.
+    #[test]
+    fn slow_comparator_cannot_claim_quick() {
+        struct Slow {
+            inner: MetaComparator,
+            quick: bool,
+        }
+        impl Module for Slow {
+            fn manifest(&self) -> &crate::extension::ModuleManifest {
+                self.inner.manifest()
+            }
+        }
+        impl Comparator for Slow {
+            fn compare(
+                &self,
+                a: &Snapshot,
+                b: &Snapshot,
+                ctx: &CompareContext,
+            ) -> crate::Result<crate::compare::ChangeReport> {
+                std::thread::sleep(Duration::from_millis(30));
+                self.inner.compare(a, b, ctx)
+            }
+            fn quick(&self) -> bool {
+                self.quick
+            }
+        }
+        let a = snap(PartMeta::new(ItemKind::Part));
+        let limit = Duration::from_millis(10);
+        let slow = |quick| Slow {
+            inner: MetaComparator::new(),
+            quick,
+        };
+        let broken = comparator_within(&slow(true), &a, &a, limit).unwrap_err();
+        assert!(broken[0].contains("назвался быстрым"), "{broken:?}");
+        contract_ok(comparator_within(&slow(false), &a, &a, limit));
     }
 
     #[test]

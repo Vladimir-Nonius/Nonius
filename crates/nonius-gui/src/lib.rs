@@ -53,6 +53,17 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
                 list.push("Hack".to_owned());
             }
+            // Знака диаметра «⌀» (в словах об изменениях) нет ни в одном
+            // встроенном шрифте — берём системный шрифт знаков, если он есть.
+            if let Some(bytes) = symbols_font() {
+                fonts.font_data.insert(
+                    "symbols".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+                );
+                for family in fonts.families.values_mut() {
+                    family.push("symbols".to_owned());
+                }
+            }
             cc.egui_ctx.set_fonts(fonts);
             let render = cc.wgpu_render_state.clone();
             Ok(Box::new(app::App::new(
@@ -64,4 +75,16 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         }),
     )
     .map_err(|e| anyhow::anyhow!("{} ({e})", t.window_failed))
+}
+
+/// Системный шрифт со знаками (Windows: Segoe UI Symbol). Нет — `None`:
+/// знак нарисуется квадратиком, но окно работает.
+fn symbols_font() -> Option<Vec<u8>> {
+    let windows = std::env::var_os("WINDIR")?;
+    std::fs::read(
+        std::path::Path::new(&windows)
+            .join("Fonts")
+            .join("seguisym.ttf"),
+    )
+    .ok()
 }

@@ -39,7 +39,7 @@ pub(super) fn hints(
                     pairs.push((a, b, how));
                     &mut alike
                 }
-                Likeness::Different(_) => continue,
+                Likeness::Different { .. } => continue,
             };
             lists[a].push(&parts[b].0);
             lists[b].push(&parts[a].0);

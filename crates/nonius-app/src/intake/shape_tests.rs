@@ -142,13 +142,19 @@ fn other_part_is_different() {
     let plate = shape(10_000.0, [5.0, 40.0, 50.0]);
     assert_eq!(
         compare(&shaft, &plate),
-        Likeness::Different("габариты 20×20×100 мм и 5,0×40×50 мм".into())
+        Likeness::Different {
+            how: "габариты 20×20×100 мм и 5,0×40×50 мм".into(),
+            kept_two: false,
+        }
     );
     // Габариты те же, а металла вдвое меньше: труба вместо прутка.
     let pipe = shape(5_000.0, [20.0, 20.0, 100.0]);
     assert_eq!(
         compare(&shaft, &pipe),
-        Likeness::Different("объём −50,0 %".into())
+        Likeness::Different {
+            how: "объём −50,0 %".into(),
+            kept_two: false,
+        }
     );
 }
 
@@ -284,12 +290,16 @@ fn shortened_part_is_marked_as_close() {
     let long = shape(100_000.0, [40.0, 40.0, 52.0]);
     let short = shape(48_000.0, [25.0, 40.0, 40.0]);
     match compare(&long, &short) {
-        Likeness::Different(how) => assert!(how.contains(TWO_KEPT), "{how}"),
+        Likeness::Different { how, kept_two } => {
+            assert!(kept_two && how.contains(TWO_KEPT), "{how}")
+        }
         other => panic!("ждал «другая», получил {other:?}"),
     }
     let other = shape(48_000.0, [25.0, 30.0, 70.0]);
     match compare(&long, &other) {
-        Likeness::Different(how) => assert!(!how.contains(TWO_KEPT), "{how}"),
+        Likeness::Different { how, kept_two } => {
+            assert!(!kept_two && !how.contains(TWO_KEPT), "{how}")
+        }
         other => panic!("ждал «другая», получил {other:?}"),
     }
 }

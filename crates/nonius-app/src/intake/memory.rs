@@ -10,9 +10,13 @@
 //! в конце строки. У одной версии могут быть обе записи: беглая — с
 //! первого разбора, точная — после уточнения через SolidWorks.
 //!
+//! Строка `failed` и подпись — точной формы у версии нет: SolidWorks
+//! выгрузил STEP, а тела в нём нет (пустая «Деталь1»). Такую версию не
+//! уточняют при каждом разборе заново, пока файл не изменится.
+//!
 //! Это кэш: его можно удалить, испорченная строка просто пропускается.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -21,11 +25,15 @@ use super::shape::{Shape, Source};
 
 /// Пометка в конце строки: форма снята бегло.
 const ROUGH: &str = "mesh";
+/// Начало строки: точной формы у версии нет.
+const FAILED: &str = "failed";
 
 /// Запомненные формы по подписи файлов модели.
 pub(super) struct Memory {
     file: PathBuf,
     shapes: HashMap<(String, Source), Shape>,
+    /// Подписи версий, у которых точной формы нет.
+    failed: HashSet<String>,
     changed: bool,
 }
 
@@ -70,9 +78,15 @@ impl Memory {
     pub fn load(dir: &Path) -> Self {
         let file = dir.join("intake-shapes.tsv");
         let text = std::fs::read_to_string(&file).unwrap_or_default();
+        let failed = text
+            .lines()
+            .filter_map(|l| l.strip_prefix(FAILED)?.strip_prefix('\t'))
+            .map(str::to_string)
+            .collect();
         Self {
             file,
             shapes: text.lines().filter_map(parse).collect(),
+            failed,
             changed: false,
         }
     }
@@ -87,6 +101,18 @@ impl Memory {
             self.shapes.insert((sign, shape.source), shape);
             self.changed = true;
         }
+    }
+
+    /// Точной формы у версии нет: STEP получен, а тела в нём нет.
+    pub fn fail(&mut self, models: &[PathBuf]) {
+        if let Some(sign) = sign(models) {
+            self.changed |= self.failed.insert(sign);
+        }
+    }
+
+    /// Уже известно, что точной формы у версии нет.
+    pub fn failed(&self, models: &[PathBuf]) -> bool {
+        sign(models).is_some_and(|s| self.failed.contains(&s))
     }
 
     /// Записать, если что-то добавилось. Не вышло — не беда: это кэш.
@@ -114,6 +140,7 @@ impl Memory {
                     },
                 )
             })
+            .chain(self.failed.iter().map(|sign| format!("{FAILED}\t{sign}\n")))
             .collect();
         lines.sort();
         // Только сама рабочая папка, не `.git` над ней: историю версий
@@ -167,9 +194,22 @@ mod tests {
         assert_eq!(memory.get(&models, Source::Glance), Some(rough));
         assert_eq!(memory.get(&models, Source::Exact), Some(shape));
 
+        // Неудача помнится, пока файл тот же.
+        let mut memory = memory;
+        memory.fail(&models);
+        memory.save();
+        let memory = Memory::load(tmp.path());
+        assert!(memory.failed(&models));
+        assert_eq!(
+            memory.get(&models, Source::Exact),
+            Some(shape),
+            "форма цела"
+        );
+
         // Файл изменился — старая запись не годится.
         std::fs::write(&model, "раз и два").unwrap();
         assert_eq!(memory.get(&models, Source::Exact), None);
+        assert!(!memory.failed(&models));
         // Испорченная строка пропускается.
         std::fs::write(tmp.path().join("intake-shapes.tsv"), "мусор\n").unwrap();
         assert_eq!(Memory::load(tmp.path()).get(&models, Source::Exact), None);

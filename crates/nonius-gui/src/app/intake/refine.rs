@@ -7,7 +7,8 @@
 //! план пересчитывается с ответами человека.
 //!
 //! «Остановить» или снятая галочка бросают уточнение: план остаётся
-//! беглым, а уточнить можно снова — уже посчитанное программа помнит.
+//! беглым, а уточнить можно снова — кнопкой «Уточнить» или галочкой; уже
+//! посчитанное программа помнит.
 
 use std::sync::atomic::Ordering;
 
@@ -25,6 +26,8 @@ pub(super) enum Pick {
     Switch(bool),
     /// «Остановить» уточнение.
     Stop,
+    /// «Уточнить» снова после остановки.
+    Again,
 }
 
 /// Полоса над планом: идёт уточнение — строка и «Остановить»; план беглый
@@ -51,10 +54,14 @@ pub(super) fn bar(ui: &mut egui::Ui, intake: &Intake, on: bool) -> Option<Pick> 
             } else if ui.button(t.stop).clicked() {
                 pick = Some(Pick::Stop);
             }
+        } else if on && ui.button(t.intake_refine_again).clicked() {
+            pick = Some(Pick::Again);
         }
     });
     let note = if intake.refining {
         t.intake_refining
+    } else if on {
+        t.intake_refined_partly
     } else {
         t.intake_rough_note
     };
@@ -138,6 +145,7 @@ impl App {
                     i.stop.store(true, Ordering::Relaxed);
                 }
             }
+            Pick::Again => self.intake_refine_start(ctx),
         }
     }
 }
