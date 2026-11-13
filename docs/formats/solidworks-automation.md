@@ -1,0 +1,176 @@
+# Работа с SolidWorks по COM: как надёжно и не мешая человеку
+
+Что известно о запуске SolidWorks из Nonius, о его вылетах и зависаниях, и
+о том, что вообще можно достать без него. Читать, прежде чем менять
+`crates/nonius-solidworks` (`run.rs`, `export_step.ps1`, `links.ps1`,
+`close.ps1`).
+
+Собрано 13.11.2026: исследование агента по открытым источникам (ссылки в
+конце) и проверка на файлах `.sldprt` / `.sldasm` с этой машины. Ничего из
+этого ещё не сделано в коде, если не сказано иное.
+
+## 1. Как сейчас
+
+- На каждую деталь — отдельный `powershell.exe` со скриптом
+  `export_step.ps1`: `New-Object -ComObject SldWorks.Application`,
+  `OpenDoc6`, `SaveAs3`, `CloseDoc`. Таймаут — 5 минут (`run.rs`, `TIMEOUT`).
+- Связи сборок и чертежей — `links.ps1`, один запуск на папку.
+- Сторож `close.ps1` (mutex `NoniusSolidWorksKeeper`, файл-отметка)
+  закрывает SolidWorks после 30 с простоя, если тот невидим, без человека и
+  без документов.
+- STEP запоминается только в памяти и на один проход (`Exports` в
+  `nonius-app/src/intake/measure.rs`). Уточнение, «Показать в 3D», раскладка
+  и слова «что изменилось» просят один и тот же STEP заново.
+- Скорость — около 11 деталей в минуту (≈ 5,5 с на деталь).
+
+**Главная опасность.** `SldWorks.Application` подключается к **уже
+открытому** SolidWorks, если он есть. Тогда выгрузка идёт в сеансе человека,
+и вылет SolidWorks на трудной детали отнимает у него несохранённую работу.
+
+## 2. Свой экземпляр SolidWorks
+
+Так делает библиотека xCAD (`SwApplicationStarter.cs`):
+
+1. Запустить `SLDWORKS.exe /r` самим (`Command::new`), запомнить PID.
+2. Взять COM-объект **этого** процесса из таблицы запущенных объектов
+   Windows (ROT) по имени `SolidWorks_PID_<pid>`.
+3. Дождаться `StartupProcessCompleted`.
+4. Поставить `Visible = false`, `UserControl = false`.
+
+Ключи командной строки:
+
+| Ключ | Смысл | Брать? |
+|---|---|---|
+| `/r` | без всплывающих сообщений и заставки; глобальных настроек не трогает | да |
+| `/SWSafeMode` | в обход «Сервис → Параметры»: STEP по заводским настройкам, одинаковый на всех машинах | проверить на 2025: не пишет ли настройки, грузятся ли надстройки |
+| `/SWDisableExitApp` | назначение нигде не описано | проверить |
+| `/b` | фон через планировщик, только Professional / Premium | не нужен |
+
+Свойства только своего сеанса (глобально ничего не меняют):
+
+- `UserControlBackground = true` — держать невидимый SolidWorks в фоне.
+- `CommandInProgress = true` на время пачки, в конце обязательно `false` —
+  меньше перерисовок; выигрыш, по отзывам, скромный.
+- `EnableBackgroundProcessing` — только для чертежей, для STEP бесполезен;
+  есть отзыв о зависании на больших чертежах.
+- `FrameState` **не трогать**: положение окна может уйти в реестр при выходе.
+
+**Нельзя — это глобальные настройки человека:**
+
+- отключать надстройки через `HKCU\Software\SolidWorks\AddInsStartup`
+  (так делает `DisableAllAddInsStartup` в xCAD);
+- включать программный OpenGL (общий параметр «Производительность»);
+- `SetUserPreference*`, в том числе параметры STEP (`swStepAP` и др.).
+  `SaveAs3` берёт формат STEP из настроек человека: их можно **читать** и
+  записывать в паспорт, но не менять.
+
+Вместо глобального отключения — `UnloadAddIn` уже после запуска, только в
+своём сеансе. Проверить, что флаг автозагрузки не меняется. На этой машине
+стоят надстройки CAM (в файлах видны потоки CAMWorks и MachineWorks).
+
+## 3. Вылет и зависание
+
+- **Свой — по PID** процесса, который мы запустили, плюс время старта
+  процесса (номера переиспользуются). Тогда сторож «невидим, без человека,
+  без документов» не нужен.
+- **Job Object** с `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: свой SolidWorks в
+  группе процессов Nonius. Упал Nonius — Windows закрывает и его. Процесс
+  человека в группу не попадает.
+- **Один долгоживущий рабочий процесс** вместо PowerShell на каждую деталь:
+  держит COM-объект и читает команды построчно из stdin (`step <src> <dst>`,
+  `deps <file>`, `ping`), отвечает `OK` / `ERROR`, как сейчас. Сначала
+  PowerShell (те же вызовы), позже можно Rust с крейтом `windows` через
+  `IDispatch`.
+- **Перезапуск каждые N деталей** или при росте памяти — так делает
+  DriveWorks («Restart SOLIDWORKS after»).
+- **Таймаут на каждую команду считать в Rust.** У COM-вызова своего таймаута
+  нет: зависший SolidWorks держит вызов вечно. Время вышло → снять рабочий
+  процесс и свой `SLDWORKS` по PID, поднять заново, пометить деталь
+  «SolidWorks не справился» (в том же кэше неудач, строка `failed` в
+  `.git/nonius/intake-shapes.tsv`), чтобы не зацикливаться. Срок можно брать
+  из `docProps/OpenTime.xml` — сколько файл открывался в прошлый раз.
+
+Коды ошибок COM:
+
+| Код | Имя | Смысл | Что делать |
+|---|---|---|---|
+| `0x80010108` | `RPC_E_DISCONNECTED` | умер | перезапуск |
+| `0x800706BA` | сервер RPC недоступен | умер | перезапуск |
+| `0x80010007` | `RPC_E_SERVER_DIED` | умер | перезапуск |
+| `0x80010001` | `RPC_E_CALL_REJECTED` | занят | `IMessageFilter` в своём потоке STA и повтор |
+| `0x8001010A` | `RPC_E_SERVERCALL_RETRYLATER` | занят | то же |
+
+Признаки зависания живого процесса:
+
+- время процессора (`GetProcessTimes`) не растёт, а ответа нет дольше X с.
+  Если растёт — SolidWorks просто считает;
+- окно отчёта об ошибке SolidWorks у своего PID (`EnumWindows`): после
+  вылета процесс часто висит живым с этим окном;
+- COM-«пинг» (`RevisionNumber`, как `IsAlive` в xCAD) годится только между
+  командами: во время долгой операции встанет и он.
+
+## 4. Скорость
+
+- Пачка в одном сеансе экономит запуск PowerShell, подключение к COM и
+  ожидание старта — по оценке 1–2 с из ≈ 5,5 с на деталь.
+- Два своих экземпляра параллельно — возможно; проверить память и правила
+  лицензии.
+- **Главный выигрыш — склад STEP на диске** по ключу «sha256 содержимого +
+  версия SolidWorks + параметры STEP». Запоминать и отказы («тела нет»).
+- Многопоточность: SolidWorks не распараллеливать; OpenCascade — только там,
+  где вызовы потокобезопасны.
+
+## 5. Что не подходит
+
+- **Document Manager API.** Ключ выдают только владельцам действующей
+  подписки, на каждый крупный выпуск; передавать его вместе с программой
+  нельзя — каждому пользователю Nonius пришлось бы получать свой. Даёт
+  свойства, конфигурации, ссылки, превью и сетку, но не точную геометрию — то
+  есть то, что и так читается из файла без ключа.
+- **eDrawings API.** STL пишется из той же сетки показа, асинхронно, нужен
+  ActiveX-элемент с окном. Выигрыша нет.
+
+## 6. Без SolidWorks
+
+Многое читается прямо из файла: сетка показа, превью, сохранённая масса,
+дерево построения с размерами, состав сборки, признаки «спорной» детали, а
+Parasolid даёт точный B-rep. Подробности — в соседних файлах этой папки,
+список — в [README.md](README.md).
+
+Признаки, что беглому взгляду верить нельзя и SolidWorks нужен:
+
+- `swConfigurationNeedsUpdate="YES"`;
+- внешние ссылки (детали «в контексте» сборки);
+- таблица параметров;
+- файл сохранён в версии старше установленной (`swVersion`,
+  `_MO_VERSION_*`) — SolidWorks его переведёт и может перестроить;
+- конфигураций больше одной: сетка снята только с активной.
+
+## 7. Порядок работ, который предлагался
+
+1. Склад STEP на диске.
+2. Свой экземпляр SolidWorks + Job Object.
+3. Долгоживущий рабочий процесс с таймаутом на команду и перезапуском.
+4. Новые куски файла в `nonius-sldprt`; SolidWorks будить только для спорного.
+5. Проверки на SolidWorks 2025: `/SWSafeMode`, `UnloadAddIn`, два экземпляра.
+6. Parasolid из файла — отдельный опыт (см. [sldprt-parasolid.md](sldprt-parasolid.md)).
+
+## Источники
+
+- xCAD:
+  [SwApplicationFactory.cs](https://github.com/xarial/xcad/blob/master/src/SolidWorks/SwApplicationFactory.cs),
+  [SwApplicationStarter.cs](https://github.com/xarial/xcad/blob/master/src/SolidWorks/Utils/SwApplicationStarter.cs),
+  [SwApplication.cs](https://github.com/xarial/xcad/blob/master/src/SolidWorks/SwApplication.cs)
+- Справка SolidWorks API:
+  [GetProcessID](https://help.solidworks.com/2019/english/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ISldWorks~GetProcessID.html),
+  [CommandInProgress](https://help.solidworks.com/2010/English/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ISldWorks~CommandInProgress.html),
+  [UserControlBackground](https://help.solidworks.com/2016/English/api/sldworksapi/SolidWorks.Interop.sldworks~SolidWorks.Interop.sldworks.ISldWorks~UserControlBackground.html),
+  [EnableBackgroundProcessing](https://help.solidworks.com/2019/English/api/sldworksapi/SOLIDWORKS.Interop.sldworks~SOLIDWORKS.Interop.sldworks.ISldWorks~EnableBackgroundProcessing.html)
+- [DriveWorks: перезапуск SolidWorks после N моделей](https://docs.driveworkspro.com/Topic/HowToTroubleshootSolidWorks)
+- Document Manager:
+  [справка](https://help.solidworks.com/2025/English/api/swdocmgrapi/GettingStarted-swdocmgrapi.html),
+  [о ключе](https://www.goengineer.com/blog/request-solidworks-document-manager-api-key)
+- [eDrawings Save](https://help.solidworks.com/2022/English/api/emodelapi/eDrawings.Interop.EModelViewControl~eDrawings.Interop.EModelViewControl.IEModelViewControl~Save.html)
+- Microsoft (по памяти, не открывались):
+  [IMessageFilter](https://learn.microsoft.com/en-us/windows/win32/api/objidl/nn-objidl-imessagefilter),
+  [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
