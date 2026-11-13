@@ -53,6 +53,9 @@ impl StepHeader {
     }
 
     /// Разобрать текст начала файла.
+    ///
+    /// Ограничение: вложенные списки в `FILE_SCHEMA` (`(('a','b'))`) читаются
+    /// как одна схема — на определение протокола это не влияет.
     pub fn parse(text: &str) -> Option<Self> {
         let start = text.find("ISO-10303-21")?;
         let text = &text[start..];
@@ -197,4 +200,90 @@ fn decode(s: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Полный заголовок SolidWorks: все поля `FILE_NAME`, кириллица в `\X2\`.
+    const SAMPLE_FULL: &str = "ISO-10303-21;\nHEADER;\n\
+        FILE_DESCRIPTION(('SolidWorks 2020 - Part'),'2;1');\n\
+        FILE_NAME('\\X2\\043A0440043E043D0448044204350439043D\\X0\\.STEP','2026-10-26T12:00:00',\
+        ('\\X2\\0412043B0430043404380441043B04300432\\X0\\'),('Workshop'),'SwSTEP 2.0','SolidWorks 2020','');\n\
+        FILE_SCHEMA (('AUTOMOTIVE_DESIGN { 1 0 10303 214 3 1 1 }'));\nENDSEC;\nDATA;\nENDSEC;\n\
+        END-ISO-10303-21;\n";
+
+    /// Латиница с акцентом через `\X\e9` (Latin-1).
+    const SAMPLE_LATIN1: &str = "ISO-10303-21;\nHEADER;\n\
+        FILE_NAME('pi\\X\\e9ce.stp','2026-01-01',(''),(''),'','DemoCAD','');\n\
+        FILE_SCHEMA (('AP203'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
+
+    /// В DATA есть запись, чья строка содержит слово «FILE_NAME» — помеха поиску.
+    const SAMPLE_DATA_NOISE: &str = concat!(
+        "ISO-10303-21;\nHEADER;\n",
+        "FILE_NAME('x.step','2026-01-01',(''),(''),'tr','AP 214 IS','');\n",
+        "FILE_SCHEMA (('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n",
+        "#1=PROPERTY_LIST_VALUE('FILE_NAME','мусор');\nENDSEC;\nEND-ISO-10303-21;\n"
+    );
+
+    /// Несколько схем в списке.
+    const SAMPLE_MULTI_SCHEMA: &str = concat!(
+        "ISO-10303-21;\nHEADER;\n",
+        "FILE_NAME('m.stp','2026-01-01',(''),(''),'','CAD','');\n",
+        "FILE_SCHEMA (('AP242_IS_MANAGED','AP203'));\n",
+        "ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+    );
+
+    #[test]
+    fn reads_full_header_fields() {
+        let h = StepHeader::parse(SAMPLE_FULL).unwrap();
+        assert_eq!(h.name, "кронштейн.STEP");
+        assert_eq!(h.timestamp, "2026-10-26T12:00:00");
+        assert_eq!(h.authors, ["Владислав"]);
+        assert_eq!(h.organizations, ["Workshop"]);
+        assert_eq!(h.preprocessor, "SwSTEP 2.0");
+        assert_eq!(h.originating_system, "SolidWorks 2020");
+    }
+
+    #[test]
+    fn decodes_latin1_escapes() {
+        // \X\e9 — «é» в Latin-1.
+        let h = StepHeader::parse(SAMPLE_LATIN1).unwrap();
+        assert_eq!(h.name, "piéce.stp");
+    }
+
+    #[test]
+    fn finds_entities_after_data_with_same_names() {
+        // В DATA есть строка с текстом "FILE_NAME" — заголовок всё равно читается.
+        let h = StepHeader::parse(SAMPLE_DATA_NOISE).unwrap();
+        assert_eq!(h.originating_system, "AP 214 IS");
+    }
+
+    #[test]
+    fn parses_multiple_schemas() {
+        let h = StepHeader::parse(SAMPLE_MULTI_SCHEMA).unwrap();
+        assert_eq!(h.schemas.len(), 2);
+        assert_eq!(h.protocol(), Some("AP242"));
+    }
+
+    #[test]
+    fn read_reports_error_for_missing_file() {
+        let err = StepHeader::read(Path::new("/nonius/нет-такого-файла.step")).unwrap_err();
+        assert!(err.to_string().contains("нет-такого-файла.step"));
+    }
+
+    #[test]
+    fn decode_leaves_plain_text_and_unknown_escapes() {
+        assert_eq!(decode("обычный текст"), "обычный текст");
+        assert_eq!(decode("\\X\\zz"), "\\X\\zz");
+        assert_eq!(decode("a\\\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn string_value_handles_dollar_and_star() {
+        assert_eq!(string_value("$"), "");
+        assert_eq!(string_value("*"), "");
+        assert_eq!(string_value("'ok'"), "ok");
+    }
 }
