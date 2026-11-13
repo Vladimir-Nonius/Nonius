@@ -35,6 +35,11 @@ pub struct IntakeItem {
     pub docs: Vec<String>,
     /// Догадка, которую форма деталей не подтвердила: стоит проверить.
     pub unsure: bool,
+    /// Версии, которые можно сравнить в 3D, от старой к новой. Пусто —
+    /// сравнивать нечего (одна версия, сборка).
+    pub sides: Vec<IntakeSide>,
+    /// Что изменилось словами между соседними `sides`.
+    pub changed: Vec<Vec<String>>,
 }
 
 /// Вопрос человеку.
@@ -48,6 +53,20 @@ pub struct IntakeQuestion {
     pub facts: Vec<String>,
     /// Что думает программа; `None` — мнения нет.
     pub suggested: Option<bool>,
+    /// О каких моделях вопрос, от старой к новой: их можно сравнить в 3D.
+    /// Пусто — сравнивать нечем (сборки).
+    pub sides: Vec<IntakeSide>,
+    /// Что изменилось словами между соседними `sides`.
+    pub changed: Vec<Vec<String>>,
+}
+
+/// Одна сторона сравнения в 3D: модель из разбираемой папки.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IntakeSide {
+    /// Подпись для человека: имя файла, при нужде с папкой.
+    pub label: String,
+    /// Файлы модели: `вал.sldprt` и `вал.step`, если есть оба.
+    pub models: Vec<PathBuf>,
 }
 
 /// Что получилось после раскладки.

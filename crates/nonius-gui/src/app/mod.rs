@@ -96,6 +96,9 @@ pub struct App {
     tabs: Vec<ProjectTab>,
     at: usize,
     viewport: Viewport,
+    /// 3D-вид экрана разбора папки («Показать в 3D»): создаётся при первом
+    /// показе, у него своя модель и камера.
+    intake_view: Option<Viewport>,
     mode: Mode,
     look: Look,
     settings: Settings,
@@ -146,6 +149,7 @@ impl App {
             tabs: vec![ProjectTab::default()],
             at: 0,
             viewport: Viewport::new(render),
+            intake_view: None,
             mode: Mode::Changes,
             look,
             path_input: String::new(),

@@ -213,6 +213,18 @@ pub trait ProjectSource: Send + Sync {
         let _ = (answers, progress);
         anyhow::bail!("разбор папки здесь не поддержан")
     }
+    /// «Показать в 3D»: сравнить две модели разбираемой папки (файлы одной
+    /// стороны — [`IntakeSide::models`]). Ничего не сохраняет. Для файла
+    /// SolidWorks STEP делает SolidWorks: может идти минуту.
+    fn intake_compare(
+        &self,
+        before: &[PathBuf],
+        after: &[PathBuf],
+        progress: &dyn Progress,
+    ) -> anyhow::Result<Comparison> {
+        let _ = (before, after, progress);
+        anyhow::bail!("разбор папки здесь не поддержан")
+    }
     /// Сравнить деталь с файлом или другой деталью, ничего не сохраняя.
     fn compare_outside(
         &self,

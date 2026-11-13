@@ -9,7 +9,9 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use nonius_app::{IntakeStudy, ShapeCheck, NOT_OURS};
 use nonius_core::meta::ItemKind;
-use nonius_gui::source::{IntakeItem, IntakeOutcome, IntakePlan, IntakeQuestion, Progress};
+use nonius_gui::source::{
+    IntakeItem, IntakeOutcome, IntakePlan, IntakeQuestion, IntakeSide, Progress,
+};
 
 use super::{in_words, AppSource};
 use crate::commands::intake::unsure;
@@ -33,6 +35,26 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Версии ядра → стороны сравнения в 3D. Сборки не сравниваются: пусто.
+fn sides(versions: &[nonius_app::PlannedVersion]) -> Vec<IntakeSide> {
+    let assembly = |v: &nonius_app::PlannedVersion| {
+        v.models.iter().any(|m| {
+            m.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("sldasm"))
+        })
+    };
+    if versions.len() < 2 || versions.iter().any(assembly) {
+        return Vec::new();
+    }
+    versions
+        .iter()
+        .map(|v| IntakeSide {
+            label: v.label.clone(),
+            models: v.models.clone(),
+        })
+        .collect()
+}
+
 /// План ядра → план для окна.
 fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
     let items = plan
@@ -46,6 +68,12 @@ fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
             why: item.why.clone(),
             docs: item.docs.iter().map(|d| file_name(d)).collect(),
             unsure: unsure(item),
+            sides: if item.kind == ItemKind::Assembly {
+                Vec::new()
+            } else {
+                sides(&item.versions)
+            },
+            changed: item.changed.clone(),
         })
         .collect();
     let questions = plan
@@ -56,6 +84,8 @@ fn entry(plan: nonius_app::IntakePlan) -> IntakePlan {
             text: q.text,
             facts: q.facts,
             suggested: q.suggested,
+            sides: sides(&q.versions),
+            changed: q.changed,
         })
         .collect();
     let (junk, papers): (Vec<_>, Vec<_>) = plan.left.iter().partition(|l| l.why == NOT_OURS);

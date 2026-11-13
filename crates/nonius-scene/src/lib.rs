@@ -212,4 +212,60 @@ impl Scene {
             .filter_map(|r| r.mesh.bounds())
             .reduce(Bounds::union)
     }
+
+    /// Две детали рядом, без разницы между ними: `right` сдвинута вдоль X
+    /// правее `left` с зазором в пятую часть большей ширины. Так показывают
+    /// две модели, когда разницу посчитать нельзя. Берутся только целые
+    /// детали (роль «стало»): места изменений здесь ничего бы не значили.
+    pub fn beside(left: &Scene, right: &Scene) -> Scene {
+        let whole = |s: &Scene| -> Vec<Region> { s.regions_of(Role::After).cloned().collect() };
+        let (mut out, mut moved) = (whole(left), whole(right));
+        let bounds = |r: &[Region]| {
+            r.iter()
+                .filter_map(|r| r.mesh.bounds())
+                .reduce(Bounds::union)
+        };
+        if let (Some(a), Some(b)) = (bounds(&out), bounds(&moved)) {
+            let width = (a.max[0] - a.min[0]).max(b.max[0] - b.min[0]);
+            let shift = a.max[0] - b.min[0] + width * 0.2;
+            for p in moved.iter_mut().flat_map(|r| r.mesh.positions.iter_mut()) {
+                p[0] += shift;
+            }
+        }
+        out.extend(moved);
+        Scene { regions: out }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block(x: f32, role: Role) -> Region {
+        Region {
+            role,
+            volume_mm3: 1.0,
+            mesh: Mesh {
+                positions: vec![[x, 0.0, 0.0], [x + 10.0, 5.0, 5.0], [x, 5.0, 0.0]],
+                triangles: vec![[0, 1, 2]],
+            },
+        }
+    }
+
+    #[test]
+    fn two_parts_side_by_side() {
+        let left = Scene {
+            regions: vec![block(0.0, Role::After), block(3.0, Role::Added)],
+        };
+        let right = Scene {
+            regions: vec![block(0.0, Role::After)],
+        };
+        let both = Scene::beside(&left, &right);
+        assert_eq!(both.regions.len(), 2, "только целые детали");
+        assert!(!both.has_changes());
+        let b = both.regions[1].mesh.bounds().unwrap();
+        // Ширина 10, зазор 2: правая начинается с 12.
+        assert_eq!(b.min[0], 12.0);
+        assert_eq!(both.regions[0].mesh.bounds().unwrap().min[0], 0.0);
+    }
 }

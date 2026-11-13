@@ -54,7 +54,7 @@ pub use items::{ItemState, ItemStatus};
 pub use layout::{MapItem, ProjectMap};
 pub use materials::{find_material, similar_materials, Material, MATERIALS};
 pub use moving::move_project;
-pub use outside::{Other, Outside};
+pub use outside::{FilesCompared, Other, Outside};
 pub use passport::{Mass, MaterialChoice, Passport};
 pub use settings::{ProjectSettings, MAX_TOLERANCE_MM};
 pub use system::{programs_for, OpenWay, Program};

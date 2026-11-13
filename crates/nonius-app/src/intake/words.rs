@@ -82,8 +82,11 @@ impl Words {
 
 /// STEP одной версии в своей временной папке под именем `model.step` —
 /// так его ищут модули сравнения. Папка живёт, пока жив этот объект.
-struct Step {
-    dir: PathBuf,
+pub(super) struct Step {
+    pub dir: PathBuf,
+    /// STEP старше файла SolidWorks, а свежий получить не вышло: форма
+    /// может быть прежней.
+    pub stale: bool,
     _keep: Box<dyn std::any::Any>,
 }
 
@@ -133,7 +136,9 @@ impl App {
     }
 
     fn compare_words(&self, before: &[PathBuf], after: &[PathBuf]) -> Option<Vec<String>> {
-        let (was, now) = (self.step_of(before)?, self.step_of(after)?);
+        let mut warnings = Vec::new();
+        let was = self.step_of(before, &mut warnings)?;
+        let now = self.step_of(after, &mut warnings)?;
         let snapshot = |step: &Step| {
             Some(Snapshot {
                 item: PartName::new("разбор").ok()?,
@@ -164,8 +169,8 @@ impl App {
     }
 
     /// STEP версии: готовый, если он не старше файла SolidWorks рядом,
-    /// иначе — от модуля перевода.
-    fn step_of(&self, models: &[PathBuf]) -> Option<Step> {
+    /// иначе — от модуля перевода (почему не вышло — в `warnings`).
+    pub(super) fn step_of(&self, models: &[PathBuf], warnings: &mut Vec<String>) -> Option<Step> {
         let step = models.iter().find(|m| is_step(m));
         let cad = models.iter().find(|m| !is_step(m));
         let fresh = match (step, cad) {
@@ -173,25 +178,27 @@ impl App {
             (Some(_), None) => true,
             _ => false,
         };
-        let copied = |file: &Path| {
+        let copied = |file: &Path, stale| {
             let dir = tempfile::tempdir().ok()?;
             std::fs::copy(file, dir.path().join("model.step")).ok()?;
             Some(Step {
                 dir: dir.path().to_path_buf(),
+                stale,
                 _keep: Box::new(dir),
             })
         };
         if fresh {
-            return copied(step?);
+            return copied(step?, false);
         }
-        let converted = cad.and_then(|c| self.convert(c, &mut Vec::new()));
+        let converted = cad.and_then(|c| self.convert(c, warnings));
         match converted {
             Some(c) => Some(Step {
                 dir: c.step.parent()?.to_path_buf(),
+                stale: false,
                 _keep: Box::new(c),
             }),
             // SolidWorks не помог — лучше старый STEP, чем ничего.
-            None => copied(step?),
+            None => copied(step?, true),
         }
     }
 }

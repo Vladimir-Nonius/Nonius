@@ -14,7 +14,7 @@
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Задумано, но не сделано: сравнение в отдельном процессе | раздел «Задумано» в `docs/ARCHITECTURE.md`; идеи по интерфейсу — `docs/proposals/interface-next.md` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
-| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма: сначала из самого файла — `nonius-sldprt`, потом STEP, потом SolidWorks); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
+| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма: сначала из самого файла — `nonius-sldprt`, потом STEP, потом SolidWorks); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`, «Показать в 3D» — `sight.rs`; в ядре — `intake/look.rs` и `compare_files` в `outside.rs`, в мосте — `window/source/look.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
 | Форма детали прямо из файла `.sldprt`, без SolidWorks (сетка показа, превью) | контейнер файла — `nonius-sldprt/src/container.rs`, сетка и числа по ней — `mesh.rs`, модуль и отказы — `lib.rs`; точка `ShapeGlance` — `nonius-core/src/extension/traits.rs`; где разбор папки это зовёт — `nonius-app/src/intake/measure.rs` |
 | Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
@@ -23,7 +23,7 @@
 | Версии, фиксация, откат | `nonius-store/src/history.rs` |
 | Удалить, вернуть, переименовать деталь, убрать версию с карты | `nonius-store/src/items.rs`, чьи версии — `lineage.rs`, отметки в истории — `message.rs` |
 | Папки проекта: где детали, папки-группы, перенос детали, обновление старого проекта | обход — `nonius-core/src/project/layout.rs`; перенос и `upgrade` — `nonius-store/src/layout.rs`; действия и карта — `nonius-app/src/layout.rs`; команды `map`, `folder new`, `part move`, `upgrade` — `nonius-cli/src/commands/layout.rs`; окошко и полоса — `nonius-gui/src/app/upgrade.rs`; дерево с папками и перетаскивание в окне — `app/tree_folders.rs`, окошко «Новая папка» — `app/new_folder.rs`, перенос — `app/command.rs` → очередь `app/batch.rs` |
-| Сравнить с файлом или другой деталью | `nonius-app/src/outside.rs`; в окне — `compare_with` в `nonius-gui/src/app/part_actions.rs` |
+| Сравнить с файлом или другой деталью; два файла с диска без проекта (`compare_files`) | `nonius-app/src/outside.rs`; в окне — `compare_with` в `nonius-gui/src/app/part_actions.rs` |
 | Файлы версии, кэш, снимки для модулей | `nonius-store/src/files.rs` |
 | Разница файлов между версиями, открыть файл | `nonius-store/src/diff.rs`, `nonius-app/src/files.rs` |
 | Свой файл детали: добавить, убрать, прочитать текст | `nonius-app/src/files.rs`; в окне — `add_files` в `nonius-gui/src/app/part_actions.rs`, вкладка `app/files.rs` |
@@ -171,7 +171,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 
 | Файл | Что внутри |
 |---|---|
-| `lib.rs` | `Scene`, `Region` (место), `Role`, `Mesh`, `Bounds`, `FORMAT_VERSION` |
+| `lib.rs` | `Scene`, `Region` (место), `Role`, `Mesh`, `Bounds`, `FORMAT_VERSION`; `Scene::beside` — две детали рядом |
 | `glb/mod.rs` | ошибки чтения, единицы, номер формата |
 | `glb/write.rs` | сцена → `.glb` (старая версия — во второй сцене glTF) |
 | `glb/read.rs` | `.glb` → сцена, через библиотеку `gltf` |
@@ -184,7 +184,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `lib.rs` | `run` — открыть окно, `show_error` — сообщение без консоли |
 | `source/mod.rs` | `ProjectSource`: детали, папки, версии, сравнение, сохранение, материал и масса — всё, что окно берёт у программы; `Progress` (ход и отмена) |
 | `source/entries.rs` | что приходит в окно: `PartEntry` (с папкой), `Listing` (детали и папки), версии, файлы, массы |
-| `source/intake.rs` | разбор папки для окна: `IntakePlan` (детали, вопросы, остатки), `IntakeItem`, `IntakeQuestion`, итог `IntakeOutcome` |
+| `source/intake.rs` | разбор папки для окна: `IntakePlan` (детали, вопросы, остатки), `IntakeItem`, `IntakeQuestion`, стороны для 3D `IntakeSide`, итог `IntakeOutcome` |
 | `texts.rs` | все надписи окна (русский) |
 | `app/mod.rs` | `App`: состояние окна, раскладка панелей (`draw`); `raw_input_hook` забирает стрелки ↑/↓ у открытого меню |
 | `app/actions.rs` | действия: открыть проект, выбрать деталь и версии, сравнить, отменить, сохранить, назначить материал |
@@ -209,7 +209,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `app/command.rs` | одна команда для клавиш, меню и перетаскивания (`Command`, `App::command`); клавиши выделенного: Delete, Ctrl+A, Esc, F2, Enter |
 | `app/choice.rs` | выбор с клавиатуры: в окошке главная кнопка сразу в фокусе, ←/→ — на соседнюю; в меню ↑/↓ по пунктам по кругу; Enter нажимает |
 | `app/batch.rs` | очередь: перенести или удалить несколько одной фоновой работой, своя строка хода, «Остановить», итог «Перенесено 3 из 5»; сбой предмета останавливает очередь с итогом |
-| `app/intake/` | «Разобрать папку…»: изучение папки в фоне со своей строкой хода и «Остановить», ответы «Да / Нет / Потом» с пересчётом плана, «Разложить в проект», итог; после раскладки дерево перечитывается (`mod.rs`); экран в центре окна: вопрос в рамке, план по папкам, «почему», пометка `(?)`, остатки (`screen.rs`) |
+| `app/intake/` | «Разобрать папку…»: изучение папки в фоне со своей строкой хода и «Остановить», ответы «Да / Нет / Потом» с пересчётом плана, «Разложить в проект», итог; после раскладки дерево перечитывается (`mod.rs`); экран в центре окна: вопрос в рамке, план по папкам, «почему», пометка `(?)`, остатки, кнопки «Показать в 3D» (`screen.rs`); две модели в своём 3D-виде в фоне со строкой хода и «Остановить», режимы «Было / Изменения / Стало», слова «что изменилось» под картинкой (`sight.rs`) |
 | `app/marquee.rs` | рамка мышью с пустого места дерева и «Структуры»: что задела, то выделено (с Ctrl — добавлено) |
 | `app/settings_window.rs` | окно «Настройки»: «Проект» (название, допуск — `project.yaml`), «Программа» (вид на этом компьютере) |
 | `app/tree_folders.rs` | папки в дереве: строки папок и файлов, кнопки «+ деталь», «+ папка», «свернуть всё», перетаскивание детали на папку или в корень; исполнение щелчков, порядок строк для Shift и Ctrl+A |
@@ -231,7 +231,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `app/jobs.rs` | фоновая работа, ход выполнения, отмена сравнения, живые потоки (перед переносом черновика) |
 | `app/settings.rs` | что окно помнит между запусками (`window.txt`) |
 | `app/numbers.rs` | числа для человека: разряды, округление, масса, плотность |
-| `view/widget.rs` | 3D-вид в окне: ввод, кадр, оси в углу |
+| `view/widget.rs` | 3D-вид в окне: ввод, кадр, оси в углу; `twin` — второй вид на том же устройстве (экран разбора) |
 | `view/controls.rs` | мышь и клавиши как в SolidWorks → движения камеры |
 | `view/camera.rs` | ортогональная камера, виды, вращение, масштаб к курсору |
 | `view/model.rs` | режимы «Было / Изменения / Стало», цвета, выбранное место |
@@ -265,10 +265,11 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `intake/split.rs` | деление группы тёзок на настоящие детали: чему верить (`Evidence`: сборка → человек → форма → имя), копии из других папок (`dupes`) |
 | `intake/shape.rs` | форма детали: отпечаток (`Shape`), `compare` (та же / похожая / разная), итог `ShapeVerdict` |
 | `intake/measure.rs` | откуда берётся форма: паспорт STEP, для файла SolidWorks — STEP через модуль перевода |
-| `intake/words.rs` | что изменилось между версиями словами («отверстие ⌀8 → ⌀10»): быстрые модули сравнения на STEP обеих версий, память `intake-words.tsv`; `Words` — готовые слова и список недостающих пар |
+| `intake/words.rs` | что изменилось между версиями словами («отверстие ⌀8 → ⌀10»): быстрые модули сравнения на STEP обеих версий, память `intake-words.tsv`; `Words` — готовые слова и список недостающих пар; `step_of` — STEP версии (рядом или от SolidWorks) |
+| `intake/look.rs` | «Показать в 3D»: `intake_compare` — STEP обеих моделей и `compare_files` |
 | `intake/memory.rs` | память о форме между разборами (`.git/nonius/intake-shapes.tsv`): второй разбор не ждёт SolidWorks |
 | `intake/hints.rs` | похожие и одинаковые формой детали с разными именами: строки-подсказки и пары для вопросов |
-| `intake/questions.rs` | диалог: `Question` (вопрос, улики, мнение программы), `Decisions` (ответы по парам моделей), `ask` (о чём спросить) |
+| `intake/questions.rs` | диалог: `Question` (вопрос, улики, мнение программы, файлы сторон и слова для 3D), `Decisions` (ответы по парам моделей), `ask` (о чём спросить) |
 | `intake/plan.rs` | сборка плана: `Facts` (всё, что известно о файлах), папки по сборкам, «почему», вопросы |
 | `intake/apply.rs` | `intake_apply`: копии файлов в проект, версии в историю, итог |
 | `import.rs` | `import`: файл модели в деталь, паспорт, превью; для файла SolidWorks — свежий STEP через модуль перевода (`convert`) |
@@ -291,6 +292,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `window/source/mod.rs` | мост от `nonius-app` к окну (`AppSource`), замки чтения и записи |
 | `window/source/compare.rs`, `files.rs` | сравнение для окна; файлы детали |
 | `window/source/intake.rs` | разбор папки для окна: `intake_study` один раз (изученное помнит `AppSource`), план по ответам, раскладка под замком записи |
+| `window/source/look.rs` | «Показать в 3D» для разбора: сцена сравнения двух файлов, не вышло — две модели рядом |
 | `window/source/machine.rs`, `words.rs` | git и имя автора; ошибки и масса словами |
 | `window/scenarios.rs` | сценарии человека: настоящее окно и настоящий проект на git |
 | `window_lock.rs` | один проект в одном окне |
@@ -320,7 +322,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `nonius-occt/tests/scene.rs` | сцена изменений на настоящем OpenCascade |
 | `nonius-scene/tests/scene.rs`, `fixtures/scene-v*.glb` | формат сцены, контракт, чтение старых версий формата |
 | `nonius-gui/tests/window.rs` | окно без экрана: детали → сравнение → места изменений, история и масса, сохранение первой версии, меню «Файл», смена проекта, новая деталь, окошко «Добавить модель», очередь файлов, битый файл, полоса ошибки, «Считаю…», возврат в окно, первый запуск, дерево, карта, выделение (Ctrl, Shift, рамка), удаление нескольких и «Остановить», ход очереди рядом со сравнением, сбой работы освобождает окошки и очередь, клавиши выделенного, стрелки в окошке и меню |
-| `nonius-gui/tests/window/intake.rs` | часть `window.rs`: «Разобрать папку» — план, вопрос «Потом / Нет», раскладка и итог; остановка изучения |
+| `nonius-gui/tests/window/intake.rs` | часть `window.rs`: «Разобрать папку» — план, вопрос «Потом / Нет», раскладка и итог; остановка изучения; «Показать в 3D»: строка хода, цвета и слова, «К плану», «Остановить», сбой расчёта |
 | `nonius-gui/tests/render.rs` | 3D-отрисовка в память: цвета режимов |
 | `nonius-occt/tests/shared_faces.rs` | сравнение почти одинаковых версий, местная разница против разницы целиком, кэш STEP |
 | `nonius-occt/tests/honest.rs` | маленькое отверстие в большой детали не теряется, слой тоньше допуска — шум, файл без твёрдых тел |

@@ -5,8 +5,12 @@
 //!
 //! Изучение идёт минуты (форму деталей даёт SolidWorks), поэтому у него своя
 //! строка хода и «Остановить»: план тогда строится из того, что успели.
+//!
+//! «Показать в 3D» у вопроса и у детали с версиями — `sight.rs`: две модели
+//! из папки в 3D, тоже в фоне со своей строкой хода.
 
 mod screen;
+mod sight;
 
 pub use screen::show;
 
@@ -49,6 +53,9 @@ pub(in crate::app) struct Intake {
     stop: Arc<AtomicBool>,
     /// Своя строка хода: сравнение её не трогает.
     line: Arc<Mutex<String>>,
+    /// Открытое «Показать в 3D» и счётчик показов.
+    sight: Option<sight::Sight>,
+    sights: u64,
 }
 
 impl Intake {
@@ -64,9 +71,12 @@ impl Intake {
     }
 
     /// Попросить остановиться: изучение отдаст план из того, что успело,
-    /// раскладка закончит текущую деталь.
+    /// раскладка закончит текущую деталь, сравнение в 3D бросит расчёт.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(sight) = &self.sight {
+            sight.stop();
+        }
     }
 
     fn stopping(&self) -> bool {
@@ -136,6 +146,8 @@ impl App {
             recounting: false,
             stop: stop.clone(),
             line: line.clone(),
+            sight: None,
+            sights: 0,
         });
         let steps = Steps {
             ctx: ctx.clone(),
@@ -240,6 +252,12 @@ impl App {
 impl super::project_tab::ProjectTab {
     /// Фоновая работа упала: экран разбора не ждёт её вечно.
     pub(super) fn intake_crashed(&mut self) {
+        // Сравнение в 3D, которое ещё считалось, закрывается: снова план.
+        if let Some(i) = self.intake.as_mut() {
+            if i.sight.as_ref().is_some_and(sight::Sight::waiting) {
+                i.sight = None;
+            }
+        }
         match self.intake.as_mut().map(|i| (i.working(), &mut i.stage)) {
             Some((true, stage @ Stage::Applying)) => *stage = Stage::Plan,
             Some((true, _)) => self.intake = None,

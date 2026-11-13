@@ -77,3 +77,40 @@ fn folder_goes_into_the_project_from_the_window() {
     // Исходная папка цела.
     assert!(pile.join("вал v2.step").is_file());
 }
+
+/// «Показать в 3D»: два файла с диска, которых нет в проекте, — сцена с
+/// разницей. Без OpenCascade — только отчёты, сцены нет.
+#[test]
+fn two_files_from_the_folder_in_3d() {
+    for (k, v) in [
+        ("GIT_AUTHOR_NAME", "Тестировщик"),
+        ("GIT_AUTHOR_EMAIL", "test@example.com"),
+        ("GIT_COMMITTER_NAME", "Тестировщик"),
+        ("GIT_COMMITTER_EMAIL", "test@example.com"),
+    ] {
+        std::env::set_var(k, v);
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("проект");
+    nonius_app::create_project(&project, Some("Станок")).unwrap();
+    let smoke = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/smoke");
+    let (v1, v2) = (smoke.join("plate-v1.step"), smoke.join("plate-v2.step"));
+    let src = AppSource::open(&project).unwrap();
+
+    let c = src
+        .intake_compare(std::slice::from_ref(&v1), &[v2], &Quiet)
+        .unwrap();
+    if nonius_occt::available() {
+        let scene = c.scene.expect("сцена сравнения");
+        assert!(scene.has_changes(), "разница видна цветом");
+        assert!(c.scene_problem.is_none(), "{:?}", c.scene_problem);
+    }
+    // Кэш сравнений не тронут: деталей в проекте нет.
+    let cache = nonius_app::work_dir(&project).join("cache");
+    assert!(!cache.exists() || std::fs::read_dir(&cache).unwrap().next().is_none());
+
+    // Файла нет — ошибка словами, а не паника.
+    let gone = tmp.path().join("нет.step");
+    let err = src.intake_compare(&[v1], &[gone], &Quiet).unwrap_err();
+    assert!(format!("{err:#}").contains("нет.step"), "{err:#}");
+}

@@ -1,11 +1,12 @@
 //! Экран разбора папки в центре окна: ход изучения, вопрос с кнопками
-//! «Да / Нет / Потом», план по папкам проекта, «Разложить» и итог.
+//! «Да / Нет / Потом», план по папкам проекта, «Разложить» и итог. У вопроса
+//! и у детали с версиями — «Показать в 3D» (сам показ — `sight.rs`).
 
 use eframe::egui::{self, RichText};
 
 use super::{Intake, Stage};
 use crate::app::App;
-use crate::source::{IntakeItem, IntakeOutcome, IntakePlan, IntakeQuestion};
+use crate::source::{IntakeItem, IntakeOutcome, IntakePlan, IntakeQuestion, IntakeSide};
 use crate::texts::texts;
 
 /// Что человек нажал на экране в этом кадре.
@@ -16,10 +17,15 @@ enum Act {
     Later(String),
     AskAgain,
     Apply,
+    /// Показать две модели в 3D и слова, что изменилось.
+    Look(IntakeSide, IntakeSide, Vec<String>),
 }
 
 /// Нарисовать экран; `false` — экран не открыт, центр окна свободен.
 pub fn show(app: &mut App, ui: &mut egui::Ui) -> bool {
+    if super::sight::show(app, ui) {
+        return true;
+    }
     let Some(intake) = app.tab.intake.as_ref() else {
         return false;
     };
@@ -54,6 +60,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) -> bool {
             }
         }
         Some(Act::Apply) => app.intake_apply(&ctx),
+        Some(Act::Look(before, after, words)) => app.intake_look(&ctx, before, after, words),
     }
     true
 }
@@ -153,7 +160,7 @@ fn plan(ui: &mut egui::Ui, intake: &Intake, act: &mut Option<Act>) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            items(ui, &plan.items);
+            items(ui, &plan.items, act);
             leftovers(ui, plan);
         });
 }
@@ -174,6 +181,7 @@ fn question(ui: &mut egui::Ui, q: &IntakeQuestion, left: usize, act: &mut Option
             Some(false) => ui.label(RichText::new(t.intake_think_no).italics()),
             None => ui.label(RichText::new(t.intake_think_none).italics()),
         };
+        look(ui, &q.sides, &q.changed, act);
         ui.horizontal(|ui| {
             if ui.button(t.intake_yes).clicked() {
                 *act = Some(Act::Answer(q.id.clone(), true));
@@ -206,8 +214,15 @@ pub(super) fn item_line(item: &IntakeItem) -> String {
     line
 }
 
+/// Кнопки «Показать в 3D» (`sight.rs`): нажатая — в действие экрана.
+fn look(ui: &mut egui::Ui, sides: &[IntakeSide], changed: &[Vec<String>], act: &mut Option<Act>) {
+    if let Some((before, after, words)) = super::sight::buttons(ui, sides, changed) {
+        *act = Some(Act::Look(before, after, words));
+    }
+}
+
 /// Детали и сборки по папкам проекта, под каждой — «почему» и бумаги.
-fn items(ui: &mut egui::Ui, items: &[IntakeItem]) {
+fn items(ui: &mut egui::Ui, items: &[IntakeItem], act: &mut Option<Act>) {
     let t = texts();
     let warn = ui.visuals().warn_fg_color;
     let mut folder = None;
@@ -231,6 +246,7 @@ fn items(ui: &mut egui::Ui, items: &[IntakeItem]) {
             for doc in &item.docs {
                 ui.label(RichText::new(format!("+ {doc}")).weak());
             }
+            look(ui, &item.sides, &item.changed, act);
         });
     }
     if items.iter().any(|i| i.unsure) {

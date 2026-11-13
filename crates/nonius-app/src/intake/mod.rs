@@ -37,12 +37,14 @@
 //! файла SolidWorks — через модуль перевода), `memory.rs` — память о форме
 //! между разборами, `hints.rs` — похожие детали
 //! с разными именами, `words.rs` — что изменилось между версиями словами,
+//! `look.rs` — две модели в 3D («Показать в 3D»),
 //! `questions.rs` — вопросы и ответы, `plan.rs` — сам
 //! план, `apply.rs` — выполнение.
 
 mod apply;
 mod grouping;
 mod hints;
+mod look;
 mod measure;
 mod memory;
 mod names;
@@ -113,6 +115,9 @@ pub struct PlannedItem {
     pub guessed: bool,
     /// Что о догадке сказала форма деталей; `None` — не проверялось.
     pub shape: Option<ShapeVerdict>,
+    /// Что изменилось словами между соседними версиями (на одну строку
+    /// меньше, чем версий; пусто — слов нет).
+    pub changed: Vec<Vec<String>>,
 }
 
 /// Одна версия будущей детали.

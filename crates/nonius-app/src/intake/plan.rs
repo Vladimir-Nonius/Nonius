@@ -175,8 +175,12 @@ pub(super) fn build(source: PathBuf, files: Vec<Found>, facts: Facts) -> IntakeP
             ));
         }
         why.extend(proto.notes.iter().cloned());
-        for pair in proto.members.windows(2) {
-            let lines = changed(pair[0], pair[1]);
+        let words: Vec<Vec<String>> = proto
+            .members
+            .windows(2)
+            .map(|pair| changed(pair[0], pair[1]))
+            .collect();
+        for (pair, lines) in proto.members.windows(2).zip(&words) {
             if !lines.is_empty() {
                 why.push(format!(
                     "что изменилось, «{}» → «{}»: {}",
@@ -217,6 +221,7 @@ pub(super) fn build(source: PathBuf, files: Vec<Found>, facts: Facts) -> IntakeP
             why,
             guessed: proto.guessed,
             shape: proto.shape,
+            changed: words,
         });
     }
     items.sort_by(|a, b| (&a.folder, &a.name).cmp(&(&b.folder, &b.name)));

@@ -26,7 +26,8 @@ use serde::Serialize;
 
 use super::grouping::{label, Proto};
 use super::shape::ShapeVerdict;
-use super::units::Unit;
+use super::units::{ordered, Unit};
+use super::PlannedVersion;
 
 /// Вопрос человеку. Ответ — «да» или «нет».
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -39,6 +40,11 @@ pub struct Question {
     pub facts: Vec<String>,
     /// Что думает программа, если у неё есть мнение.
     pub suggested: Option<bool>,
+    /// О каких файлах вопрос — от старого к новому: их можно сравнить в 3D.
+    pub versions: Vec<PlannedVersion>,
+    /// Что изменилось словами между соседними `versions` (на одну строку
+    /// меньше, чем версий; пусто — слов нет).
+    pub changed: Vec<Vec<String>>,
 }
 
 /// Ответы человека: про каждую пару моделей — одна это деталь или нет.
@@ -103,11 +109,12 @@ pub(super) fn ask(
     let mut push = |mut members: Vec<usize>, mut facts: Vec<String>, suggested| {
         members.sort_by_key(|&m| units[m].newest());
         // Главная улика — что изменилось, словами.
-        for pair in members.windows(2) {
-            let lines = changed(pair[0], pair[1]);
-            if !lines.is_empty() {
-                facts.push(format!("что изменилось: {}", lines.join("; ")));
-            }
+        let words: Vec<Vec<String>> = members
+            .windows(2)
+            .map(|pair| changed(pair[0], pair[1]))
+            .collect();
+        for lines in words.iter().filter(|l| !l.is_empty()) {
+            facts.push(format!("что изменилось: {}", lines.join("; ")));
         }
         // В `id` имена по алфавиту: он не должен зависеть от времени файлов,
         // иначе один вопрос про два одновременных файла задали бы дважды.
@@ -126,11 +133,20 @@ pub(super) fn ask(
         }));
         let id = ids.join("|");
         if !out.iter().any(|q| q.id == id) {
+            let versions = members
+                .iter()
+                .map(|&m| PlannedVersion {
+                    label: label(units, &members, m),
+                    models: ordered(&units[m].models),
+                })
+                .collect();
             out.push(Question {
                 id,
                 text: format!("Это версии одной детали: {}?", names.join(" → ")),
                 facts,
                 suggested,
+                versions,
+                changed: words,
             });
         }
     };

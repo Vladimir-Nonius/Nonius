@@ -93,6 +93,8 @@ pub enum Done {
     IntakePlanned(u64, anyhow::Result<IntakePlan>),
     /// Папка разложена в проект.
     IntakeApplied(u64, anyhow::Result<IntakeOutcome>),
+    /// «Показать в 3D»: номер разбора, номер показа, сравнение двух моделей.
+    IntakeLooked(u64, u64, anyhow::Result<Comparison>),
     /// Работа упала с внутренней ошибкой.
     Crashed,
 }

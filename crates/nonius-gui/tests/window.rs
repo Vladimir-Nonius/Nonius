@@ -332,6 +332,14 @@ impl ProjectSource for Fake {
     ) -> anyhow::Result<nonius_gui::source::IntakeOutcome> {
         self.apply(answers)
     }
+    fn intake_compare(
+        &self,
+        before: &[PathBuf],
+        after: &[PathBuf],
+        progress: &dyn Progress,
+    ) -> anyhow::Result<Comparison> {
+        self.look(before, after, progress)
+    }
     fn new_folder(&self, folder: &str) -> anyhow::Result<()> {
         let mut folders = self.folders.lock().unwrap();
         if folders.iter().any(|f| f == folder) {

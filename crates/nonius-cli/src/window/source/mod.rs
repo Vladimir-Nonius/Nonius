@@ -2,12 +2,13 @@
 //! OpenCascade, а сравнения берёт из того же кэша, что и команды.
 //!
 //! Здесь — проект и замки чтения и записи; `compare.rs` — сравнение,
-//! `files.rs` — файлы детали, `intake.rs` — разбор папки, `machine.rs` — git и имя автора, `words.rs` —
+//! `files.rs` — файлы детали, `intake.rs` — разбор папки, `look.rs` — две модели разбора в 3D, `machine.rs` — git и имя автора, `words.rs` —
 //! ошибки и масса словами.
 
 mod compare;
 mod files;
 mod intake;
+mod look;
 mod machine;
 mod words;
 
@@ -401,6 +402,15 @@ impl ProjectSource for AppSource {
         progress: &dyn Progress,
     ) -> Result<IntakeOutcome> {
         self.apply_folder(answers, progress)
+    }
+
+    fn intake_compare(
+        &self,
+        before: &[PathBuf],
+        after: &[PathBuf],
+        progress: &dyn Progress,
+    ) -> Result<Comparison> {
+        self.look_pair(before, after, progress)
     }
 
     fn settings(&self) -> ProjectSettings {
