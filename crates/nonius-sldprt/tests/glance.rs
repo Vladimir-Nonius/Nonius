@@ -153,9 +153,15 @@ fn refuses_instead_of_guessing() {
     std::fs::write(&junk, b"\x14\x00\x06\x00\x08\x00 not a part").unwrap();
     assert!(fingerprint(&junk).is_err());
     let whole = std::fs::read(part(tmp.path(), Some(&block()), 7, 7)).unwrap();
-    std::fs::write(&junk, &whole[..whole.len() - 40]).unwrap();
+    std::fs::write(&junk, &whole[..whole.len() / 2]).unwrap();
     assert!(fingerprint(&junk).is_err());
     assert!(SldprtGlance::new().glance(&junk).is_err());
+    // Обрезан только хвост с каталогом: сетка цела и проверена — читаем.
+    std::fs::write(&junk, &whole[..whole.len() - 40]).unwrap();
+    assert!(fingerprint(&junk).is_ok());
+    // Старый формат называется прямо.
+    std::fs::write(&junk, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 old file").unwrap();
+    assert!(fingerprint(&junk).unwrap_err().contains("старом формате"));
 }
 
 #[test]

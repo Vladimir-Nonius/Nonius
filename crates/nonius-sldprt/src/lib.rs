@@ -13,7 +13,7 @@
 //! версии: при импорте форму по-прежнему считают по STEP.
 //!
 //! Модуль отказывается, а не гадает, когда:
-//! - файл старого формата (до SolidWorks 2015) или не SolidWorks;
+//! - файл старого формата (контейнер OLE) или не SolidWorks;
 //! - сетки в файле нет (так сохраняют «без данных показа»);
 //! - сетка старее модели — файл изменили, а сетку не обновили: метка в
 //!   куске `…/DLUpdateStamp` не равна метке модели в `ModelStamps`;
@@ -21,7 +21,7 @@
 //!
 //! После отказа форму узнают обычным путём — через STEP.
 //!
-//! Файлы: `container.rs` — куски файла, `mesh.rs` — сетка и числа по ней.
+//! Файлы: `container/` — секции файла, `mesh.rs` — сетка и числа по ней.
 //! Ещё модуль отдаёт картинку-превью, сохранённую в файле
 //! ([`preview_png`]).
 
@@ -36,7 +36,7 @@ use nonius_core::extension::{
 use nonius_core::meta::{BoundingBox, GeometrySummary};
 use nonius_core::{Error, Result};
 
-pub use container::Container;
+pub use container::{Budget, Container, Listing, Refusal, Section, Unreadable};
 pub use mesh::{measure, Measured};
 
 const PNG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
@@ -56,21 +56,22 @@ fn mesh_is_fresh(file: &Container) -> bool {
 
 /// Числа формы из файла `.sldprt`. Ошибка — словами, почему не вышло.
 pub fn fingerprint(path: &Path) -> std::result::Result<Measured, String> {
-    let file = Container::open(path).map_err(|e| format!("файл не читается: {e}"))?;
+    let file = Container::open(path).map_err(|e| e.to_string())?;
     let Some(lists) = file.chunk("Contents/DisplayLists") else {
-        return Err("в файле нет сетки показа (старый формат или сохранён без неё)".into());
+        return Err("в файле нет сетки показа (сохранён без неё)".into());
     };
     if !mesh_is_fresh(&file) {
         return Err("сетка показа в файле старее самой модели".into());
     }
-    measure(&lists).ok_or_else(|| "сетка показа пуста или не замкнута".into())
+    measure(lists).ok_or_else(|| "сетка показа пуста или не замкнута".into())
 }
 
 /// Картинка-превью, которую SolidWorks сохранил в файле (PNG). `None` —
 /// картинки нет.
 pub fn preview_png(path: &Path) -> Option<Vec<u8>> {
-    let png = Container::open(path).ok()?.chunk("PreviewPNG")?;
-    png.starts_with(&PNG).then_some(png)
+    let file = Container::open(path).ok()?;
+    let png = file.chunk("PreviewPNG")?;
+    png.starts_with(&PNG).then(|| png.to_vec())
 }
 
 /// Модуль: беглый взгляд на форму файла `.sldprt`.
