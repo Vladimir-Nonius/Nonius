@@ -169,3 +169,50 @@ fn real_file_design_summary() {
         design.doubts()
     );
 }
+
+/// Сравнение двух настоящих версий (`NONIUS_TEST_SLDPRT_PAIR=старая;новая`):
+/// что добавлено, удалено, переименовано, какой размер изменился.
+#[test]
+fn real_pair_is_compared() {
+    use nonius_core::design::{diff, Change};
+    use nonius_sldprt::{to_core, Design};
+
+    let Some(pair) = std::env::var_os("NONIUS_TEST_SLDPRT_PAIR") else {
+        return;
+    };
+    let files: Vec<PathBuf> = std::env::split_paths(&pair).collect();
+    let read = |path: &Path| to_core(&Design::open(path).unwrap());
+    let (before, after) = (read(&files[0]), read(&files[1]));
+    assert!(before.is_whole() && after.is_whole());
+    let changes = diff(&before.value, &after.value);
+    for change in changes.iter().filter(|c| !c.is_service()) {
+        match change {
+            Change::Added { id, name, kind, .. } => println!("добавлено: {name} ({kind}, id {id})"),
+            Change::Removed { id, name, kind, .. } => println!("удалено: {name} ({kind}, id {id})"),
+            Change::Renamed {
+                id, before, after, ..
+            } => {
+                println!("переименовано: {before} -> {after} (id {id})")
+            }
+            Change::Resized {
+                operation,
+                size,
+                before,
+                after,
+                ..
+            } => {
+                let shown = |s: &Option<nonius_core::design::Size>| {
+                    s.as_ref().map_or("нет".to_string(), |s| s.shown.clone())
+                };
+                println!(
+                    "размер: {operation} {size}: {} -> {}",
+                    shown(before),
+                    shown(after)
+                );
+            }
+        }
+    }
+    let service = changes.iter().filter(|c| c.is_service()).count();
+    println!("изменений {}, из них служебных {service}", changes.len());
+    assert!(diff(&before.value, &before.value).is_empty());
+}

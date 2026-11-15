@@ -12,9 +12,15 @@
 //! Здесь же — третий исход чтения ([`Partial`]): не «всё или ошибка», а
 //! «прочитано вот это, а вот это — нет» ([`Gap`]).
 //!
+//! Файлы: здесь — данные, `diff.rs` — сравнение двух замыслов.
+//!
 //! [`FeatureTree`]: crate::tree::FeatureTree
 
+mod diff;
+
 use std::collections::BTreeMap;
+
+pub use diff::{diff, Change};
 
 /// Пропуск: что не удалось прочитать.
 #[derive(Debug, Clone, PartialEq, Eq)]

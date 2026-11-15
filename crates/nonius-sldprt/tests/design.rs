@@ -335,3 +335,65 @@ fn module_passes_contract_and_speaks_core_types() {
     assert!(registry.design_source_for(&file).is_some());
     assert!(registry.glance_for(&file).is_some());
 }
+
+/// Две версии одной детали: сравнение по постоянным номерам операций.
+#[test]
+fn two_versions_are_compared_by_stable_id() {
+    use nonius_core::design::{diff, Change};
+    use nonius_sldprt::to_core;
+
+    let newer = KEYWORDS
+        .replace(r#"<Dimension Name="D1">8</Dimension>"#, r#"<Dimension Name="D1">12</Dimension>"#)
+        .replace(r#"Name="Фаска1""#, r#"Name="Фаска кромки""#)
+        .replace(
+            r#"<Feature id="34""#,
+            r#"<Extrusion id="2151" Name="Бобышка-Вытянуть6" Type="Бобышка-Вытянуть"/><Feature id="2160" Name="History2" Type="История"/><Feature id="34""#,
+        )
+        .replace(r#"<Sketch id="5""#, r#"<Sketch id="2142" Name="Эскиз49" Dissectable="true"/><Sketch id="5""#)
+        .replace(r#"<Extrusion id="53" Name="Бобышка-Вытянуть1" Type="Бобышка-Вытянуть"><Dimension Name="D1">15</Dimension></Extrusion>"#, "");
+    let read = |xml: &str| to_core(&Design::read(&part(&keywords(xml), &features("NO", "")))).value;
+    let (before, after) = (read(KEYWORDS), read(&newer));
+    assert_eq!(diff(&before, &before), []);
+    let seen: Vec<String> = diff(&before, &after)
+        .iter()
+        .filter(|c| !c.is_service())
+        .map(|c| match c {
+            Change::Added { name, .. } => format!("+ {name}"),
+            Change::Removed { name, .. } => format!("- {name}"),
+            Change::Renamed { before, after, .. } => format!("{before} => {after}"),
+            Change::Resized {
+                operation,
+                size,
+                before,
+                after,
+                ..
+            } => {
+                let shown =
+                    |s: &Option<nonius_core::design::Size>| s.as_ref().map(|s| s.shown.clone());
+                format!(
+                    "{operation} {size}: {:?} => {:?}",
+                    shown(before),
+                    shown(after)
+                )
+            }
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            r#"Скругление20 D1: Some("8") => Some("12")"#,
+            "Фаска1 => Фаска кромки",
+            "+ Эскиз49",
+            "+ Бобышка-Вытянуть6",
+            "- Бобышка-Вытянуть1",
+        ]
+    );
+    // Служебная папка добавилась тоже — и помечена служебной.
+    assert_eq!(
+        diff(&before, &after)
+            .iter()
+            .filter(|c| c.is_service())
+            .count(),
+        1
+    );
+}
