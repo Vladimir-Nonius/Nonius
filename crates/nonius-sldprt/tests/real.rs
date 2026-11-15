@@ -77,3 +77,95 @@ fn real_containers_are_read_whole() {
     );
     assert_eq!(bad, 0);
 }
+
+/// Замысел читается из каждого настоящего файла; в вывод — счёт по кодам
+/// пропусков и признаков спорности.
+#[test]
+fn real_designs_are_read() {
+    use nonius_sldprt::design::DocKind;
+    use nonius_sldprt::Design;
+    use std::collections::BTreeMap;
+
+    let files = real_files();
+    if files.is_empty() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let mut count: BTreeMap<String, usize> = BTreeMap::new();
+    let mut add = |key: String| *count.entry(key).or_default() += 1;
+    for path in &files {
+        let design = Design::open(path).expect("файл открывается");
+        add(format!("вид: {:?}", design.kind));
+        if design.gaps.is_empty() {
+            add("прочитано целиком".into());
+        }
+        for gap in &design.gaps {
+            add(format!("пропуск: {}", gap.code()));
+        }
+        for doubt in design.doubts() {
+            add(format!("спорно: {}", doubt.code()));
+        }
+        let tree = design
+            .tree
+            .as_ref()
+            .expect("список операций есть в каждом файле");
+        add(format!(
+            "операций: {}",
+            if tree.operations.is_empty() {
+                "нет"
+            } else {
+                "есть"
+            }
+        ));
+        if tree.skipped > 0 {
+            add("есть узлы без номера".into());
+        }
+        if design.kind == Some(DocKind::Part) {
+            let manifest = design.manifest.as_ref().expect("манифест детали");
+            // Номер корня списка операций — время создания файла.
+            assert_eq!(tree.root_id, manifest.documents[0].created);
+            assert!(design.active_config().is_some());
+            if design.material().is_some() {
+                add("материал назван".into());
+            }
+            if design.saved_mass().is_some() {
+                add("масса сохранена".into());
+            }
+        }
+        if design.kind == Some(DocKind::Assembly) {
+            let manifest = design.manifest.as_ref().expect("манифест сборки");
+            add(format!(
+                "сборка: компонентов {}",
+                if manifest.components.is_empty() {
+                    "нет"
+                } else {
+                    "есть"
+                }
+            ));
+        }
+        if design.kind == Some(DocKind::Drawing) && !design.props.drawing_models.is_empty() {
+            add("чертёж: модель названа".into());
+        }
+    }
+    for (key, n) in &count {
+        println!("{n:>5}  {key}");
+    }
+    println!("файлов {}; {:.1?}", files.len(), started.elapsed());
+}
+
+/// Замысел одного файла (`NONIUS_TEST_SLDPRT=путь`): числа и коды.
+#[test]
+fn real_file_design_summary() {
+    let Some(file) = std::env::var_os("NONIUS_TEST_SLDPRT") else {
+        return;
+    };
+    let design = nonius_sldprt::Design::open(Path::new(&file)).unwrap();
+    let tree = design.tree.as_ref().unwrap();
+    let real = tree.operations.iter().filter(|o| !o.service).count();
+    println!(
+        "операций {} (не служебных {real}), пропуски {:?}, спорно {:?}",
+        tree.operations.len(),
+        design.gaps.iter().map(|g| g.code()).collect::<Vec<_>>(),
+        design.doubts()
+    );
+}

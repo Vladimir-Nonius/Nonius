@@ -21,12 +21,19 @@
 //!
 //! После отказа форму узнают обычным путём — через STEP.
 //!
-//! Файлы: `container/` — секции файла, `mesh.rs` — сетка и числа по ней.
+//! Кроме формы, из файла читается замысел конструктора ([`Design`]): список
+//! операций с размерами, конфигурации, свойства, состав сборки, модель
+//! чертежа и признаки «спорной» детали — см. модуль [`design`].
+//!
+//! Файлы: `container/` — секции файла, `mesh.rs` — сетка и числа по ней,
+//! `xml.rs` — терпимое чтение XML, `design/` — замысел.
 //! Ещё модуль отдаёт картинку-превью, сохранённую в файле
 //! ([`preview_png`]).
 
 mod container;
+pub mod design;
 mod mesh;
+pub mod xml;
 
 use std::path::Path;
 
@@ -37,6 +44,7 @@ use nonius_core::meta::{BoundingBox, GeometrySummary};
 use nonius_core::{Error, Result};
 
 pub use container::{Budget, Container, Listing, Refusal, Section, Unreadable};
+pub use design::{Design, Doubt, Gap};
 pub use mesh::{measure, Measured};
 
 const PNG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
