@@ -47,6 +47,66 @@ fn real_solidworks_passes_contract() {
     }
 }
 
+/// Номера процессов SolidWorks на этом компьютере.
+fn solidworks_processes() -> Vec<u32> {
+    let listed = std::process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"])
+        .output();
+    let text = listed.map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    text.unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split(',').nth(1)?.trim_matches('"').parse().ok())
+        .collect()
+}
+
+/// Свой экземпляр: один на все просьбы, не тот, что открыт человеком, и
+/// SolidWorks человека после работы на месте. Путь — с кириллицей и
+/// пробелом. Чтобы проверить «человека», откройте SolidWorks перед тестом.
+#[test]
+fn real_solidworks_is_our_own_instance() {
+    let Some(sample) = std::env::var_os("NONIUS_TEST_SOLIDWORKS") else {
+        return;
+    };
+    let before = solidworks_processes();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("КТМ 640");
+    std::fs::create_dir(&folder).unwrap();
+    let part = folder.join("вал копия.SLDPRT");
+    std::fs::copy(&sample, &part).unwrap();
+
+    let own = nonius_solidworks::ping().unwrap();
+    assert!(own.pid != 0 && own.started != 0, "{own:?}");
+    assert!(own.fenced, "свой SolidWorks должен быть в группе процессов");
+    assert!(
+        !before.contains(&own.pid),
+        "это SolidWorks человека: {own:?}, были {before:?}"
+    );
+    assert_eq!(nonius_solidworks::status(), nonius_solidworks::Status::Idle);
+
+    let c = SolidWorksConverter::new();
+    assert!(c.stamp(&part).is_some(), "условия перевода известны");
+    let step = folder.join("вал копия.step");
+    c.to_step(&part, &step).unwrap();
+    assert!(std::fs::metadata(&step).unwrap().len() > 100);
+    use nonius_core::extension::LinkSource;
+    SolidWorksLinks::new()
+        .links(std::slice::from_ref(&part))
+        .unwrap();
+    // Все просьбы обслужил один и тот же экземпляр.
+    assert_eq!(nonius_solidworks::own(), Some(own.clone()));
+
+    // SolidWorks человека никто не закрыл, а наш к ним не прибавился дважды.
+    let after = solidworks_processes();
+    for human in &before {
+        assert!(after.contains(human), "закрыт SolidWorks человека {human}");
+    }
+    assert_eq!(after.len(), before.len() + 1, "{before:?} → {after:?}");
+    println!(
+        "свой SolidWorks: процесс {}, версия {}; у человека: {before:?}",
+        own.pid, own.revision
+    );
+}
+
 #[test]
 fn links_manifest_and_file_kinds() {
     let l = SolidWorksLinks::new();
