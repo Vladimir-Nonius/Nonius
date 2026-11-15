@@ -11,7 +11,7 @@
 # SolidWorks отвечает по самому файлу на диске, не открывая его: это быстро
 # (миллисекунды на файл) и ничего не меняет ни в файлах, ни в открытом окне.
 # Правила вежливости те же, что в export_step.ps1: открытый человеком
-# SolidWorks не закрываем, свой невидимый закрывает close.ps1.
+# SolidWorks не закрываем, свой невидимый закрываем за собой в конце.
 param(
     [Parameter(Mandatory = $true)][string]$List
 )
@@ -67,4 +67,13 @@ try {
     Write-Output 'OK'
 } catch {
     Fail "SolidWorks: $($_.Exception.Message)"
+} finally {
+    # Сторожа больше нет: SolidWorks, который запустили мы (невидимый, без
+    # человека и без документов), закрываем за собой сами.
+    try {
+        if (-not (Read $sw 'Visible') -and -not (Read $sw 'UserControl') -and
+            (Call $sw 'GetDocumentCount') -eq 0) {
+            Call $sw 'ExitApp' | Out-Null
+        }
+    } catch { }
 }

@@ -28,6 +28,10 @@
 mod links;
 mod run;
 mod stamp;
+// Часть слов (ping, deps, коды COM) понадобится долгоживущему процессу.
+#[allow(dead_code)]
+mod wire;
+mod worker;
 
 use std::path::Path;
 

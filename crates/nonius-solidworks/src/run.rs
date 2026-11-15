@@ -1,27 +1,20 @@
-//! Запуск скриптов PowerShell, которые разговаривают с SolidWorks, и разбор
-//! их ответа.
+//! Просьбы к SolidWorks: есть ли он, выгрузка STEP, запуск скриптов.
 //!
-//! Скрипты зашиты в программу и на время работы пишутся во временную папку.
-//! PowerShell запускается без окна; последняя строка его вывода — `OK` или
-//! `ERROR: причина`, всё до неё — данные ответа.
+//! STEP выгружает **свой** экземпляр SolidWorks: его запускает рабочий
+//! процесс (`worker.ps1`, труба к нему — `worker.rs`, слова — `wire.rs`).
+//! К SolidWorks, открытому человеком, Nonius не подключается.
 //!
-//! SolidWorks, запущенный нами, после ответа не закрывается сразу: его
-//! держит открытым и закрывает после полуминуты простоя сторож `close.ps1`
-//! (см. `keep_open`).
+//! Скрипт связей (`links.ps1`) пока запускается по-старому, отдельным
+//! PowerShell: последняя строка его вывода — `OK` или `ERROR: причина`.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
-/// Выгрузка STEP (см. пояснения в начале скрипта).
-#[cfg(any(windows, test))]
-const EXPORT_STEP: &str = include_str!("export_step.ps1");
-
-/// Закрытие своего SolidWorks после простоя (см. пояснения в скрипте).
-#[cfg(any(windows, test))]
-const CLOSE: &str = include_str!("close.ps1");
+use crate::wire::{parse, Command, Line, QUIT};
+use crate::worker::{Got, Launch, PowerShell, Worker};
 
 /// Сколько ждать SolidWorks: холодный запуск и большая сборка — это минуты.
-#[cfg(windows)]
-const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+const TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Установлен ли SolidWorks: записан ли он в реестре Windows как программа,
 /// которой можно давать команды. Не будить его при разборе папки — это
@@ -50,14 +43,57 @@ pub fn export_step(source: &Path, target: &Path) -> Result<(), String> {
     if !source.is_file() {
         return Err(format!("файл не найден: {}", source.display()));
     }
-    #[cfg(windows)]
-    {
-        script(EXPORT_STEP, &[("-Source", &source), ("-Target", &target)]).map(|_| ())
+    let step = Command::Step {
+        source: &source,
+        target: &target,
+    };
+    through_worker(&PowerShell::default(), &step).map(|_| ())
+}
+
+/// Выполнить одну команду в своём SolidWorks: запустить рабочий процесс,
+/// дождаться ответа и вежливо закрыть. Возвращает строки данных ответа.
+fn through_worker(launch: &dyn Launch, command: &Command) -> Result<Vec<String>, String> {
+    let line = command.line()?;
+    let mut worker = launch.launch()?;
+    let deadline = Instant::now() + TIMEOUT;
+    let mut data = Vec::new();
+    let answer = loop {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break Err("SolidWorks не ответил за 5 минут".to_string());
+        };
+        match worker.next(left) {
+            Got::Quiet => {}
+            Got::Closed => break Err("рабочий процесс SolidWorks закрылся".into()),
+            Got::Line(text) => match parse(&text) {
+                // Свой SolidWorks готов — теперь команда.
+                Line::Ready(_) => {
+                    if !worker.send(&line) {
+                        break Err("рабочий процесс SolidWorks закрылся".into());
+                    }
+                }
+                Line::Ok => break Ok(data),
+                Line::Error { why, .. } => break Err(why),
+                Line::Dep(file) => data.push(file),
+                Line::Gone => break Err("SolidWorks закрылся".into()),
+                Line::Beat { .. } | Line::Other => {}
+            },
+        }
+    };
+    farewell(worker);
+    answer
+}
+
+/// Попросить рабочий процесс закрыть свой SolidWorks и подождать, пока он
+/// уйдёт: снятый силой SolidWorks оставляет за собой мусор.
+fn farewell(mut worker: Box<dyn Worker>) {
+    if !worker.send(QUIT) {
+        return;
     }
-    #[cfg(not(windows))]
-    {
-        let _ = target;
-        Err("SolidWorks есть только в Windows".into())
+    let deadline = Instant::now() + Duration::from_secs(25);
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        if worker.next(left) == Got::Closed {
+            return;
+        }
     }
 }
 
@@ -68,7 +104,6 @@ pub(crate) fn script(text: &str, args: &[(&str, &Path)]) -> Result<Vec<String>, 
     use std::io::Read;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
-    use std::time::Instant;
 
     /// Не открывать чёрное окно консоли поверх окна Nonius.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -76,9 +111,6 @@ pub(crate) fn script(text: &str, args: &[(&str, &Path)]) -> Result<Vec<String>, 
     if !available() {
         return Err("SolidWorks не установлен".into());
     }
-    // Сначала сторож: он запустит SolidWorks (или подключится к открытому)
-    // и не даст ему закрыться между нашими скриптами.
-    keep_open();
     let dir = tempfile::tempdir().map_err(|e| format!("временная папка: {e}"))?;
     let file = dir.path().join("nonius-solidworks.ps1");
     // Метка в начале файла (BOM): без неё Windows PowerShell читает русские
@@ -123,64 +155,12 @@ pub(crate) fn script(text: &str, args: &[(&str, &Path)]) -> Result<Vec<String>, 
                 let _ = child.wait();
                 return Err("SolidWorks не ответил за 5 минут".into());
             }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
             Err(e) => return Err(format!("PowerShell: {e}")),
         }
     }
     let output = reader.join().unwrap_or_default();
-    touch_stamp();
     answer(&String::from_utf8_lossy(&output))
-}
-
-/// Файл-отметка «SolidWorks только что был нужен»: по ней сторож считает
-/// простой.
-#[cfg(windows)]
-fn stamp_file() -> std::path::PathBuf {
-    std::env::temp_dir().join("nonius-solidworks.stamp")
-}
-
-/// Обновить отметку. В неё пишем текст: пустой файл поверх пустого Windows
-/// за новую запись не считает и время не обновляет.
-#[cfg(windows)]
-fn touch_stamp() -> bool {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis());
-    std::fs::write(stamp_file(), now.to_string()).is_ok()
-}
-
-/// Оставить сторожа (`close.ps1`): он держит SolidWorks запущенным, пока
-/// Nonius к нему обращается, и закрывает наш невидимый SolidWorks после
-/// полуминуты простоя. Сторож — отдельный процесс: он переживёт и короткую
-/// команду `nonius import`. Уже есть один — второй сразу уходит сам. Не
-/// вышло его запустить — не беда: работа пойдёт, только медленнее.
-#[cfg(windows)]
-fn keep_open() {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let stamp = stamp_file();
-    let script = std::env::temp_dir().join("nonius-solidworks-close.ps1");
-    if !touch_stamp() || std::fs::write(&script, format!("\u{feff}{CLOSE}")).is_err() {
-        return;
-    }
-    let _ = Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-        ])
-        .arg("-File")
-        .arg(&script)
-        .arg("-Stamp")
-        .arg(&stamp)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn();
 }
 
 /// Разобрать ответ скрипта: последняя непустая строка — `OK` или
@@ -218,21 +198,6 @@ mod tests {
         assert!(answer("что-то пошло не так")
             .unwrap_err()
             .contains("что-то"));
-    }
-
-    #[test]
-    fn script_keeps_its_promises() {
-        // Ответ, который разбирает `answer`, и правила вежливости на месте.
-        assert!(EXPORT_STEP.contains("Write-Output 'OK'"));
-        assert!(EXPORT_STEP.contains("Write-Output \"ERROR: $why\""));
-        assert!(EXPORT_STEP.contains("GetSaveFlag"));
-        // Закрывается только свой SolidWorks: невидимый, без человека и документов.
-        assert!(!EXPORT_STEP.contains("ExitApp"));
-        assert!(CLOSE.contains("UserControl") && CLOSE.contains("GetDocumentCount"));
-        assert!(
-            CLOSE.contains("NoniusSolidWorksKeeper"),
-            "сторож один на компьютер"
-        );
     }
 
     #[test]

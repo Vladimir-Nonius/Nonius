@@ -143,6 +143,5 @@ mod tests {
     fn script_answers_in_the_agreed_words() {
         assert!(LINKS.contains("\"FILE`t$file\""));
         assert!(LINKS.contains("\"DEP`t$($pairs[$i])\""));
-        assert!(!LINKS.contains("ExitApp"));
     }
 }
