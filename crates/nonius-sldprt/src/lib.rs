@@ -1,149 +1,56 @@
-//! Модуль Nonius: форма детали прямо из файла `.sldprt`, без SolidWorks.
+//! Модули Nonius, которые читают файл SolidWorks напрямую, без SolidWorks.
 //!
-//! Разбор папки сверяет формой десятки деталей подряд. Просить STEP у
-//! SolidWorks — секунды на деталь, а зависший SolidWorks — минуты. Но в
-//! самом файле уже лежит сетка, которой SolidWorks рисует деталь на экране.
-//! По ней считаются объём, площадь, габариты и число граней — за доли
-//! секунды и без чужой программы.
+//! SolidWorks будят редко — ради точной формы и спорных деталей. Всё
+//! остальное лежит в самом файле `.sldprt` / `.sldasm` / `.slddrw`:
 //!
-//! Числа приблизительные (сетка — многогранник): на настоящих деталях
-//! объём расходится с точным не больше чем на 1–2 %, габариты — до 0,6 %,
-//! а граней меньше, чем в STEP (там круглые грани разрезаны пополам).
-//! Поэтому это «беглый взгляд» (точка [`ShapeGlance`]), а не паспорт
-//! версии: при импорте форму по-прежнему считают по STEP.
+//! - **Форма** (`glance.rs`, `mesh.rs`, точка [`ShapeGlance`]). В файле
+//!   сохранена сетка, которой SolidWorks рисует деталь на экране. По ней
+//!   считаются объём, площадь, габариты и число граней — за миллисекунды.
+//!   Числа приблизительные (сетка — многогранник): на настоящих деталях
+//!   объём расходится с точным не больше чем на 1–2 %, габариты — до
+//!   0,6 %, а граней меньше, чем в STEP. Поэтому это «беглый взгляд», а не
+//!   паспорт версии: при импорте форму по-прежнему считают по STEP.
+//! - **Замысел** (`design/`, `source.rs`, точка [`DesignSource`]): список
+//!   операций с размерами, конфигурации, свойства (масса, материал, ЕСКД),
+//!   состав сборки, модель чертежа, признаки «спорной» детали.
+//! - **Картинка** — готовое превью из файла ([`preview_png`]).
 //!
-//! Модуль отказывается, а не гадает, когда:
-//! - файл старого формата (контейнер OLE) или не SolidWorks;
-//! - сетки в файле нет (так сохраняют «без данных показа»);
-//! - сетка старее модели — файл изменили, а сетку не обновили: метка в
-//!   куске `…/DLUpdateStamp` не равна метке модели в `ModelStamps`;
-//! - сетка не замкнута (поверхности, а не тело).
+//! Модули не гадают. Беглый взгляд отказывает, когда файл старого формата
+//! (контейнер OLE) или не SolidWorks, сетки в файле нет или она старее
+//! модели; а когда числа сняты с оговорками (сетка не замкнута, деталь
+//! производная от другой) — отдаёт их только как «прочитано частично»,
+//! с перечнем оговорок. Замысел читается так же: что прочиталось — то и
+//! отдано, а рядом список пропусков.
 //!
-//! После отказа форму узнают обычным путём — через STEP.
+//! Формат разобран по настоящим файлам; что известно о нём — в базе
+//! знаний `docs/formats/`.
 //!
-//! Кроме формы, из файла читается замысел конструктора ([`Design`]): список
-//! операций с размерами, конфигурации, свойства, состав сборки, модель
-//! чертежа и признаки «спорной» детали — см. модуль [`design`].
+//! Файлы: `container/` — секции файла, `xml.rs` — терпимое чтение XML,
+//! `mesh.rs` — сетка и числа по ней, `glance.rs` — модуль формы,
+//! `design/` — замысел, `source.rs` — модуль замысла.
 //!
-//! Файлы: `container/` — секции файла, `mesh.rs` — сетка и числа по ней,
-//! `xml.rs` — терпимое чтение XML, `design/` — замысел.
-//! Ещё модуль отдаёт картинку-превью, сохранённую в файле
-//! ([`preview_png`]).
+//! [`ShapeGlance`]: nonius_core::extension::ShapeGlance
+//! [`DesignSource`]: nonius_core::extension::DesignSource
 
 mod container;
 pub mod design;
+mod glance;
 mod mesh;
+mod source;
 pub mod xml;
 
-use std::path::Path;
-
-use nonius_core::extension::{
-    ExtensionPoint, Module, ModuleManifest, Registry, ShapeGlance, API_VERSION,
-};
-use nonius_core::meta::{BoundingBox, GeometrySummary};
-use nonius_core::{Error, Result};
+use nonius_core::extension::Registry;
+use nonius_core::Result;
 
 pub use container::{Budget, Container, Listing, Refusal, Section, Unreadable};
 pub use design::{Design, Doubt, Gap};
-pub use mesh::{measure, Measured};
+pub use glance::{fingerprint, look, preview_png, SldprtGlance, GAP_CUT, GAP_DERIVED, GAP_OPEN};
+pub use mesh::{measure, survey, Measured, Survey};
+pub use source::{to_core, SldprtDesign};
 
-const PNG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-
-/// Метка сетки (первые 4 байта `…/DLUpdateStamp`) и метка модели (байты
-/// 4–8 `ModelStamps`) совпадают — сетка снята с того, что сейчас в файле.
-fn mesh_is_fresh(file: &Container) -> bool {
-    let mesh = file.chunk_by(|n| n.ends_with("/DLUpdateStamp"));
-    let model = file.chunk("ModelStamps");
-    match (mesh, model) {
-        (Some(mesh), Some(model)) => {
-            mesh.len() >= 4 && model.len() >= 8 && mesh[..4] == model[4..8]
-        }
-        _ => false,
-    }
-}
-
-/// Числа формы из файла `.sldprt`. Ошибка — словами, почему не вышло.
-pub fn fingerprint(path: &Path) -> std::result::Result<Measured, String> {
-    let file = Container::open(path).map_err(|e| e.to_string())?;
-    let Some(lists) = file.chunk("Contents/DisplayLists") else {
-        return Err("в файле нет сетки показа (сохранён без неё)".into());
-    };
-    if !mesh_is_fresh(&file) {
-        return Err("сетка показа в файле старее самой модели".into());
-    }
-    measure(lists).ok_or_else(|| "сетка показа пуста или не замкнута".into())
-}
-
-/// Картинка-превью, которую SolidWorks сохранил в файле (PNG). `None` —
-/// картинки нет.
-pub fn preview_png(path: &Path) -> Option<Vec<u8>> {
-    let file = Container::open(path).ok()?;
-    let png = file.chunk("PreviewPNG")?;
-    png.starts_with(&PNG).then(|| png.to_vec())
-}
-
-/// Модуль: беглый взгляд на форму файла `.sldprt`.
-pub struct SldprtGlance {
-    manifest: ModuleManifest,
-}
-
-impl SldprtGlance {
-    /// Идентификатор модуля.
-    pub const ID: &'static str = "sldprt-glance";
-
-    /// Создать модуль.
-    pub fn new() -> Self {
-        Self {
-            manifest: ModuleManifest {
-                id: Self::ID.into(),
-                name: "Форма из файла SolidWorks".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                api: API_VERSION,
-                points: vec![ExtensionPoint::Glance],
-                permissions: vec![],
-            },
-        }
-    }
-}
-
-impl Default for SldprtGlance {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Module for SldprtGlance {
-    fn manifest(&self) -> &ModuleManifest {
-        &self.manifest
-    }
-}
-
-impl ShapeGlance for SldprtGlance {
-    fn can_glance(&self, path: &Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("sldprt"))
-    }
-
-    fn glance(&self, path: &Path) -> Result<GeometrySummary> {
-        let shape = fingerprint(path).map_err(|message| Error::Module {
-            module: Self::ID.into(),
-            message,
-        })?;
-        Ok(GeometrySummary {
-            volume_mm3: Some(shape.volume),
-            area_mm2: Some(shape.area),
-            bbox: Some(BoundingBox {
-                min: shape.min,
-                max: shape.max,
-            }),
-            faces: Some(shape.faces),
-            ..GeometrySummary::default()
-        })
-    }
-}
-
-/// Подключить модуль. SolidWorks ему не нужен.
+/// Подключить модули: беглый взгляд на форму и замысел из файла.
+/// SolidWorks им не нужен.
 pub fn register(registry: &mut Registry) -> Result<()> {
-    registry.add_glance(Box::new(SldprtGlance::new()))
+    registry.add_glance(Box::new(SldprtGlance::new()))?;
+    registry.add_design_source(Box::new(SldprtDesign::new()))
 }

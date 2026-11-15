@@ -195,9 +195,26 @@ impl Sum {
     }
 }
 
-/// Числа формы по куску `Contents/DisplayLists`. `None` — сетки нет, она
+/// Числа формы по секции `Contents/DisplayLists`. `None` — сетки нет, она
 /// не замкнута или вывернута: объём по такой не посчитать.
 pub fn measure(display_lists: &[u8]) -> Option<Measured> {
+    survey(display_lists)
+        .filter(|found| found.closed)
+        .map(|found| found.shape)
+}
+
+/// Всё, что удалось снять с сетки, даже если она не замкнута.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Survey {
+    /// Числа формы. Объёму можно верить, только если сетка замкнута.
+    pub shape: Measured,
+    /// Сетка замкнута и не вывернута: объём посчитан честно.
+    pub closed: bool,
+}
+
+/// Числа по сетке без требования замкнутости: у незамкнутой сетки
+/// габариты, площадь и число граней всё равно верны. `None` — сетки нет.
+pub fn survey(display_lists: &[u8]) -> Option<Survey> {
     let faces = faces(display_lists);
     let mut sum = Sum::default();
     let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
@@ -223,15 +240,19 @@ pub fn measure(display_lists: &[u8]) -> Option<Measured> {
     let finite = sum.volume.is_finite()
         && sum.area.is_finite()
         && min.iter().chain(&max).all(|x| x.is_finite());
-    if faces.is_empty() || !finite || !closed || sum.volume <= 0.0 {
+    if faces.is_empty() || !finite {
         return None;
     }
     // В файле метры; у Nonius — миллиметры.
-    Some(Measured {
+    let shape = Measured {
         volume: sum.volume * 1e9,
         area: sum.area * 1e6,
         min: min.map(|x| x * 1e3),
         max: max.map(|x| x * 1e3),
         faces: u32::try_from(faces.len()).ok()?,
+    };
+    Some(Survey {
+        shape,
+        closed: closed && sum.volume > 0.0,
     })
 }

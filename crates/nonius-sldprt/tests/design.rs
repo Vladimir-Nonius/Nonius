@@ -1,8 +1,10 @@
 //! Замысел из файла: файлы собираются прямо в тесте, по образцу настоящих
 //! (`docs/formats/sldprt-design.md`). Имена и пути в них выдуманные.
 
+use nonius_core::contract;
+use nonius_core::extension::{DesignSource, Registry};
 use nonius_sldprt::design::{DocKind, Mark, Piece, Tag, Why};
-use nonius_sldprt::{Container, Design, Doubt};
+use nonius_sldprt::{Container, Design, Doubt, SldprtDesign};
 
 const KEYWORDS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Keywords id="1706104060" Name="Вал"><Configuration id="0" Name="По умолчанию" Description="По_умолчанию" Type="ConfigurationManager" Material="2024-T3"/><Extrusion id="1910" Name="Бобышка-Вытянуть2" Dissectable="true" DissectableChildren="610" DissectableRoot="true"><Dimension Name="D1">5</Dimension></Extrusion><Extrusion id="53" Name="Бобышка-Вытянуть1" Type="Бобышка-Вытянуть"><Dimension Name="D1">15</Dimension></Extrusion><Feature id="-1" Name="" Type="Sheet-Metal Master"/><Feature id="-1" Name="{0F2B6F1A-3C4D-4E5F-8A9B-0C1D2E3F4A5B}" Type="Атрибут"/><Feature id="1" Name="Примечания" Type="Примечания"/><Feature id="2" Name="Спереди" Type="Плоскость"/><Feature id="2127" Name="Скругление20" Type="Скругление"><Dimension Name="D1">8</Dimension><Dimension Name="D2">14.5</Dimension></Feature><Feature id="2130" Name="Фаска1" Type="Фаска"><Dimension Name="D1">R2</Dimension><Dimension Name="D2">45°</Dimension><Dimension Name="D3">17/32"</Dimension></Feature><Feature id="34" Name="Уравнения" Type="Уравнения"/><Sketch id="5" Name="Исходная точка" Type="Исходная точка"/><Sketch id="610" Name="Эскиз28" Dissectable="true"><Dimension Name="D1">&lt;MOD-DIAM&gt;42</Dimension></Sketch></Keywords>"#;
@@ -273,4 +275,63 @@ fn drawing_names_its_model() {
     assert_eq!(models[1].path, r"C:\work\вал.SLDPRT");
     assert_eq!(models[1].view, "Разрез A-A");
     assert_eq!(design.doubts(), []);
+}
+
+/// Модуль точки `DesignSource`: контракт и то, что видит ядро.
+#[test]
+fn module_passes_contract_and_speaks_core_types() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("вал.SLDPRT");
+    let external = r#"<swExtFeature id="4" swName="заготовка" swFeatureType="Stock" swModelRef="6" swID="59"/>"#;
+    let bytes = Container::pack(&[
+        ("swXmlContents/KeyWords", &keywords(KEYWORDS)[..]),
+        (
+            "swXmlContents/Features",
+            features("NO", external).as_bytes(),
+        ),
+        (
+            "docProps/ISolidWorksInformation.xml",
+            INFORMATION.as_bytes(),
+        ),
+        ("docProps/Config-0-Properties.xml", CONFIG.as_bytes()),
+    ]);
+    std::fs::write(&file, bytes).unwrap();
+    let module = SldprtDesign::new();
+    if let Err(v) = contract::design_source(&module, &file) {
+        panic!("нарушения контракта:\n- {}", v.join("\n- "));
+    }
+    assert!(module.can_read(std::path::Path::new("сборка.sldasm")));
+    assert!(!module.can_read(std::path::Path::new("вал.step")));
+
+    let read = module.read_design(&file).unwrap();
+    let codes: Vec<&str> = read.gaps.iter().map(|g| g.code.as_str()).collect();
+    assert_eq!(codes, ["document_props.missing"]);
+    let design = read.value;
+    let fillet = design.operation("2127").unwrap();
+    assert_eq!(
+        (fillet.name.as_str(), fillet.kind.as_str()),
+        ("Скругление20", "Скругление")
+    );
+    assert_eq!(fillet.sizes["D1"].shown, "8");
+    assert_eq!(fillet.sizes["D1"].value, Some(8.0));
+    // Тип не записан — берётся по тегу.
+    assert_eq!(design.operation("1910").unwrap().kind, "Extrusion");
+    assert!(design.operation("1").unwrap().service);
+    assert_eq!(design.configurations, ["По умолчанию"]);
+    assert_eq!(design.active_configuration.as_deref(), Some("По умолчанию"));
+    assert_eq!(design.material.as_deref(), Some("2024-T3"));
+    assert_eq!(design.saved_mass_kg, Some(1.213_169_135_242_455_6));
+    assert_eq!(design.properties["Масса"], "1.21");
+    let doubts: Vec<&str> = design.doubts.iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(doubts, ["derived", "not_whole"]);
+
+    // Не файл SolidWorks — ошибка, а не пустой замысел.
+    let junk = tmp.path().join("мусор.sldprt");
+    std::fs::write(&junk, b"not a part").unwrap();
+    assert!(module.read_design(&junk).is_err());
+
+    let mut registry = Registry::new();
+    nonius_sldprt::register(&mut registry).unwrap();
+    assert!(registry.design_source_for(&file).is_some());
+    assert!(registry.glance_for(&file).is_some());
 }

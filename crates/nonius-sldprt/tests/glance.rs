@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 use nonius_core::contract;
 use nonius_core::extension::ShapeGlance;
-use nonius_sldprt::{fingerprint, preview_png, Container, SldprtGlance};
+use nonius_sldprt::{
+    fingerprint, look, preview_png, Container, SldprtGlance, GAP_DERIVED, GAP_OPEN,
+};
 
 type V = [f32; 3];
 
@@ -87,6 +89,17 @@ fn cylinder() -> Vec<u8> {
 
 /// Файл детали с сеткой `lists`; метки сетки и модели — `mesh` и `model`.
 fn part(dir: &Path, lists: Option<&[u8]>, mesh: u32, model: u32) -> PathBuf {
+    part_with(dir, lists, mesh, model, &[])
+}
+
+/// То же, с дополнительными секциями.
+fn part_with(
+    dir: &Path,
+    lists: Option<&[u8]>,
+    mesh: u32,
+    model: u32,
+    more: &[(&str, &[u8])],
+) -> PathBuf {
     let stamps = [[0; 4], model.to_le_bytes(), [0; 4]].concat();
     let stamp = [mesh.to_le_bytes().as_slice(), &[0, 0]].concat();
     let mut chunks: Vec<(&str, &[u8])> = vec![
@@ -94,6 +107,7 @@ fn part(dir: &Path, lists: Option<&[u8]>, mesh: u32, model: u32) -> PathBuf {
         ("_DL_VERSION_16000/DLUpdateStamp", &stamp),
         ("PreviewPNG", b"\x89PNG\r\n\x1a\npicture"),
     ];
+    chunks.extend(more);
     if let Some(lists) = lists {
         chunks.push(("Contents/DisplayLists", lists));
     }
@@ -162,6 +176,55 @@ fn refuses_instead_of_guessing() {
     // Старый формат называется прямо.
     std::fs::write(&junk, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 old file").unwrap();
     assert!(fingerprint(&junk).unwrap_err().contains("старом формате"));
+}
+
+/// Третий исход: числа сняты, но с оговорками — и каждая записана.
+#[test]
+fn partial_answer_names_what_is_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let glance = SldprtGlance::new();
+    // Без одной стенки: объёма нет, а габариты, площадь и грани верны.
+    let open = &block()[..block().len() / 6 * 5];
+    let file = part(tmp.path(), Some(open), 7, 7);
+    assert!(glance.glance(&file).is_err());
+    let seen = glance.glance_partial(&file).unwrap();
+    assert_eq!(seen.value.volume_mm3, None);
+    assert_eq!(seen.value.faces, Some(5));
+    let size = seen.value.bbox.unwrap().size();
+    assert!(close(size[0], 10.0, 1e-5) && close(size[1], 20.0, 1e-5) && close(size[2], 30.0, 1e-5));
+    assert_eq!(seen.gaps.len(), 1);
+    assert_eq!(seen.gaps[0].code, GAP_OPEN);
+    assert_eq!(
+        contract::partial_glance_problems(&glance, &file),
+        Vec::<String>::new()
+    );
+
+    // Производная деталь: числа есть, но строгий ответ им не верит.
+    let stock = br#"<swSolidWorks swVersion="16000"><swExtFeatureList><swExtFeature swName="gear" swFeatureType="Stock" swID="59"/></swExtFeatureList></swSolidWorks>"#;
+    let more: [(&str, &[u8]); 1] = [("swXmlContents/Features", stock)];
+    let file = part_with(tmp.path(), Some(&block()), 7, 7, &more);
+    let why = fingerprint(&file).unwrap_err();
+    assert!(why.contains("из другой детали"), "{why}");
+    let seen = look(&file).unwrap();
+    assert!(seen.value.closed && close(seen.value.shape.volume, 6000.0, 1e-5));
+    assert_eq!(seen.gaps[0].code, GAP_DERIVED);
+    assert_eq!(
+        contract::partial_glance_problems(&glance, &file),
+        Vec::<String>::new()
+    );
+
+    // Целый файл: пропусков нет, числа те же, что у строгого ответа.
+    let file = part(tmp.path(), Some(&block()), 7, 7);
+    let seen = glance.glance_partial(&file).unwrap();
+    assert!(seen.is_whole());
+    assert_eq!(seen.value, glance.glance(&file).unwrap());
+    // Снять нечего — отказ и у частичного ответа.
+    assert!(glance
+        .glance_partial(&part(tmp.path(), None, 7, 7))
+        .is_err());
+    assert!(glance
+        .glance_partial(&part(tmp.path(), Some(&block()), 7, 8))
+        .is_err());
 }
 
 #[test]

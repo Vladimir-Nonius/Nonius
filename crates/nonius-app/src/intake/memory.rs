@@ -6,9 +6,16 @@
 //! узнаётся по файлам модели: путь, размер и время изменения; файл
 //! поменяли — запись не подойдёт, и форму снимут заново.
 //!
-//! Форму, снятую бегло (по сетке из самого файла), помечает слово `mesh`
+//! Форму, снятую бегло (по сетке из самого файла), помечает слово `mesh2`
 //! в конце строки. У одной версии могут быть обе записи: беглая — с
 //! первого разбора, точная — после уточнения через SolidWorks.
+//!
+//! Цифра в пометке — поколение беглого взгляда. Когда он начинает
+//! отказывать там, где раньше отвечал (так стало с производными деталями:
+//! в их сетке лишние тела), цифру повышают, и строки прежних поколений —
+//! у первого пометка была просто `mesh` — перестают читаться: форму снимут
+//! заново. Строка с незнакомой пометкой пропускается, а не принимается за
+//! точную.
 //!
 //! Строка `failed` и подпись — точной формы у версии нет: SolidWorks
 //! выгрузил STEP, а тела в нём нет (пустая «Деталь1»). Такую версию не
@@ -24,7 +31,7 @@ use super::key;
 use super::shape::{Shape, Source};
 
 /// Пометка в конце строки: форма снята бегло.
-const ROUGH: &str = "mesh";
+const ROUGH: &str = "mesh2";
 /// Начало строки: точной формы у версии нет.
 const FAILED: &str = "failed";
 
@@ -58,10 +65,11 @@ fn parse(line: &str) -> Option<((String, Source), Shape)> {
     let dims = [number()?, number()?, number()?];
     let faces = cells.next()?.parse::<u32>().ok();
     let sign = cells.next()?.to_string();
-    let source = if cells.next() == Some(ROUGH) {
-        Source::Glance
-    } else {
-        Source::Exact
+    let source = match cells.next() {
+        None => Source::Exact,
+        Some(ROUGH) => Source::Glance,
+        // Пометка другого поколения: этой строке верить нельзя.
+        Some(_) => return None,
     };
     let shape = Shape {
         volume,
@@ -213,5 +221,29 @@ mod tests {
         // Испорченная строка пропускается.
         std::fs::write(tmp.path().join("intake-shapes.tsv"), "мусор\n").unwrap();
         assert_eq!(Memory::load(tmp.path()).get(&models, Source::Exact), None);
+    }
+
+    /// Беглая форма прежнего поколения (пометка `mesh`) не читается ни как
+    /// беглая, ни как точная.
+    #[test]
+    fn rough_shape_of_an_older_generation_is_forgotten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let model = tmp.path().join("вал.sldprt");
+        std::fs::write(&model, "раз").unwrap();
+        let models = [model];
+        let line = |mark: &str| format!("100\t-\t1\t2\t3\t-\t{}{mark}\n", sign(&models).unwrap());
+        let file = tmp.path().join("intake-shapes.tsv");
+        std::fs::write(&file, line("\tmesh")).unwrap();
+        let memory = Memory::load(tmp.path());
+        assert_eq!(memory.get(&models, Source::Glance), None);
+        assert_eq!(memory.get(&models, Source::Exact), None);
+        std::fs::write(&file, line("\tmesh2")).unwrap();
+        assert!(Memory::load(tmp.path())
+            .get(&models, Source::Glance)
+            .is_some());
+        std::fs::write(&file, line("")).unwrap();
+        assert!(Memory::load(tmp.path())
+            .get(&models, Source::Exact)
+            .is_some());
     }
 }
