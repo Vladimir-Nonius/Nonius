@@ -140,10 +140,10 @@ pub(crate) fn quick() -> Limits {
     }
 }
 
-fn hooks<'a>(notes: &'a Mutex<Vec<String>>, stop: &'a dyn Fn() -> bool) -> Hooks<'a> {
+fn hooks<'a>(notes: &'a Mutex<Vec<String>>, stop: &'a (dyn Fn() -> bool + Sync)) -> Hooks<'a> {
     // Строки хода складываются в `notes` через «утечку» замыкания: в тесте
     // это проще, чем тащить время жизни.
-    let notify: &'a dyn Fn(&str) = Box::leak(Box::new(move |s: &str| {
+    let notify: &'a (dyn Fn(&str) + Sync) = Box::leak(Box::new(move |s: &str| {
         notes.lock().unwrap().push(s.to_string())
     }));
     Hooks {

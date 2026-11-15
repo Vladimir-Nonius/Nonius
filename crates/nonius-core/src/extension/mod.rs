@@ -27,6 +27,6 @@ pub use manifest::{
 };
 pub use registry::Registry;
 pub use traits::{
-    Comparator, Converter, DesignSource, Event, EventHandler, Exporter, GeometrySource, LinkSource,
-    Renderer, ShapeGlance, Snapshot, TreeSource,
+    Comparator, ConvertAsk, Converter, DesignSource, Event, EventHandler, Exporter, GeometrySource,
+    LinkSource, Renderer, ShapeGlance, Snapshot, TreeSource,
 };

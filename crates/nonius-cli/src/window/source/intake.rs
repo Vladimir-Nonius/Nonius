@@ -17,19 +17,6 @@ use nonius_gui::source::{
 use super::{in_words, AppSource};
 use crate::commands::intake::unsure;
 
-/// Ход разбора → строка окна; «Остановить» в окне → остановка разбора.
-struct Steps<'a>(&'a dyn Progress);
-
-impl nonius_app::Progress for Steps<'_> {
-    fn step(&self, what: &str) {
-        self.0.step(what);
-    }
-
-    fn cancelled(&self) -> bool {
-        self.0.cancelled()
-    }
-}
-
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -125,7 +112,7 @@ impl AppSource {
         let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
         let study = self
             .app
-            .intake_glance(folder, ShapeCheck::Names, &Steps(progress))
+            .intake_glance(folder, ShapeCheck::Names, &self.steps(progress, ""))
             .map_err(in_words)?;
         let plan = entry(&study, &[]);
         *self.study.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(study));
@@ -138,7 +125,7 @@ impl AppSource {
     pub(super) fn refine_folder(&self, progress: &dyn Progress) -> Result<()> {
         let rough = self.studied()?;
         let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
-        let exact = self.app.intake_refine(&rough, &Steps(progress));
+        let exact = self.app.intake_refine(&rough, &self.steps(progress, ""));
         if progress.cancelled() {
             return Ok(());
         }
@@ -164,7 +151,7 @@ impl AppSource {
         let _files = self.writing();
         let done = self
             .app
-            .intake_apply(&plan, &Steps(progress))
+            .intake_apply(&plan, &self.steps(progress, ""))
             .map_err(in_words)?;
         // Разложенное в проекте уже есть: второй раз тот же план не пройдёт.
         *self.study.lock().unwrap_or_else(|e| e.into_inner()) = None;

@@ -5,34 +5,71 @@
 //! просят его у SolidWorks один раз — и в этом проходе, и в следующем
 //! разборе.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::key;
 use super::memory::Memory;
 use super::shape::{Shape, Source};
-use crate::import::Converted;
+use crate::import::{Converted, Wish};
 use crate::steps::Stored;
-use crate::App;
+use crate::{App, Progress};
 
 /// Разрешение будить модуль перевода: без него (`None` там, где его ждут)
 /// модуль не зовётся вовсе. Здесь помнятся только неудачи «сейчас не вышло»
 /// (SolidWorks не ответил): за один проход вторая попытка ждала бы столько
 /// же. Удачи и окончательные отказы помнит склад.
-#[derive(Default)]
-pub(super) struct Exports(RefCell<HashSet<String>>);
+///
+/// Отсюда же модуль узнаёт, кто просит: человек ждёт («Показать в 3D») или
+/// это фоновое уточнение разбора, какая это деталь по счёту, куда писать
+/// строку хода («SolidWorks перезапускается») и не пора ли остановиться.
+pub(super) struct Exports<'a> {
+    failed: RefCell<HashSet<String>>,
+    urgent: bool,
+    place: Cell<Option<(usize, usize)>>,
+    progress: &'a dyn Progress,
+}
 
-impl Exports {
+impl<'a> Exports<'a> {
+    /// Фоновая работа: уточнение разбора папки.
+    pub fn background(progress: &'a dyn Progress) -> Self {
+        Self {
+            failed: RefCell::default(),
+            urgent: false,
+            place: Cell::new(None),
+            progress,
+        }
+    }
+
+    /// STEP ждёт человек: в очереди к SolidWorks — вперёд фонового.
+    pub fn urgent(progress: &'a dyn Progress) -> Self {
+        Self {
+            urgent: true,
+            ..Self::background(progress)
+        }
+    }
+
+    /// Следующие просьбы — деталь `done` из `total` (для состояния
+    /// SolidWorks наружу).
+    pub fn at(&self, done: usize, total: usize) {
+        self.place.set(Some((done, total)));
+    }
+
     /// STEP файла CAD `cad`; не вышло — почему, в `warnings` (только в
     /// первый раз).
     pub fn of(&self, app: &App, cad: &Path, warnings: &mut Vec<String>) -> Option<Converted> {
-        if self.0.borrow().contains(&key(cad)) {
+        if self.failed.borrow().contains(&key(cad)) {
             return None;
         }
-        let got = app.convert(cad, warnings);
+        let wish = Wish {
+            urgent: self.urgent,
+            place: self.place.get(),
+            progress: self.progress,
+        };
+        let got = app.convert(cad, &wish, warnings);
         if got.is_none() {
-            self.0.borrow_mut().insert(key(cad));
+            self.failed.borrow_mut().insert(key(cad));
         }
         got
     }

@@ -130,7 +130,7 @@ impl AppSource {
         other: &Other,
         progress: &dyn Progress,
     ) -> Result<Comparison> {
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _one_at_a_time = self.busy.take();
         let _files = self.reading();
         let steps = Steps(progress);
         let (model, model_problem) = self.model_scene(part, pick, &steps);

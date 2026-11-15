@@ -10,7 +10,8 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::session::{Failed, Hooks};
+use crate::hub::Ask;
+use crate::session::Failed;
 use crate::wire::Command;
 
 /// Сколько ждать SolidWorks: холодный запуск и большая сборка — это минуты.
@@ -37,14 +38,14 @@ pub fn available() -> bool {
 /// Попросить SolidWorks записать STEP файла `source` в `target`.
 /// Ошибка — причина по-русски, её можно показать человеку.
 pub fn export_step(source: &Path, target: &Path) -> Result<(), String> {
-    step(source, target).map_err(|failed| match failed {
+    step(source, target, &Ask::plain()).map_err(|failed| match failed {
         Failed::Refused(why) | Failed::Later(why) => why,
         Failed::Cancelled => "остановлено".into(),
     })
 }
 
-/// То же, но видно, окончателен ли отказ.
-pub(crate) fn step(source: &Path, target: &Path) -> Result<(), Failed> {
+/// То же с пожеланиями просящего; видно, окончателен ли отказ.
+pub(crate) fn step(source: &Path, target: &Path, ask: &Ask) -> Result<(), Failed> {
     // SolidWorks ищет открытую деталь по полному пути.
     let full = |p: &Path| {
         std::path::absolute(p).map_err(|e| Failed::Later(format!("{}: {e}", p.display())))
@@ -60,12 +61,7 @@ pub(crate) fn step(source: &Path, target: &Path) -> Result<(), Failed> {
         source: &source,
         target: &target,
     };
-    let quiet = Hooks {
-        notify: &|_| {},
-        cancelled: &|| false,
-        phase: &|_| {},
-    };
-    crate::hub::hub().run(&step, &quiet).map(|_| ())
+    crate::hub::hub().run(&step, ask).map(|_| ())
 }
 /// Выполнить скрипт с параметрами-путями. Возвращает строки его ответа без
 /// последней (`OK`); `ERROR: причина` и всё непонятное — ошибка.

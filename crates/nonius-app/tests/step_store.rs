@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use nonius_app::{App, GitOptions};
+use nonius_app::{App, GitOptions, Progress};
 use nonius_core::extension::{
-    Converter, ExtensionPoint, GeometrySource, Module, ModuleManifest, Registry, API_VERSION,
+    ConvertAsk, Converter, ExtensionPoint, GeometrySource, Module, ModuleManifest, Registry,
+    API_VERSION,
 };
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::Project;
@@ -77,8 +78,39 @@ impl Converter for Counting {
         std::fs::write(target, text).unwrap();
         Ok(())
     }
+    fn to_step_asked(
+        &self,
+        source: &Path,
+        target: &Path,
+        ask: &ConvertAsk,
+    ) -> nonius_core::Result<()> {
+        // Как модуль с очередью: говорит человеку, что происходит.
+        (ask.notify)(if ask.urgent {
+            "срочная просьба"
+        } else {
+            "фоновая просьба"
+        });
+        self.to_step(source, target)
+    }
     fn stamp(&self, _source: &Path) -> Option<String> {
         self.stamp.lock().unwrap().clone()
+    }
+}
+
+/// Ход: что сказано человеку и сколько раз работа ждала чужую программу.
+#[derive(Default)]
+struct Told {
+    steps: Mutex<Vec<String>>,
+    outside: AtomicUsize,
+}
+
+impl Progress for Told {
+    fn step(&self, what: &str) {
+        self.steps.lock().unwrap().push(what.to_string());
+    }
+    fn outside(&self, wait: &mut dyn FnMut()) {
+        self.outside.fetch_add(1, Ordering::SeqCst);
+        wait();
     }
 }
 
@@ -222,4 +254,20 @@ fn conditions_of_conversion_are_part_of_the_key() {
     b.app.import(&file, None).unwrap();
     b.app.import(&file, None).unwrap();
     assert_eq!(b.calls(), 4);
+}
+
+#[test]
+fn module_hears_who_asks_and_answers_through_progress() {
+    let b = bench();
+    let file = b.file("вал.sldprt", "1000");
+    let told = Told::default();
+    b.app.import_with(&file, None, &told).unwrap();
+    // Импорта ждёт человек; строка модуля дошла до хода работы.
+    assert_eq!(*told.steps.lock().unwrap(), ["срочная просьба"]);
+    // Пока модуль работал, вызывающий мог отпустить свою очередь.
+    assert_eq!(told.outside.load(Ordering::SeqCst), 1);
+    // Со склада — без модуля и без ожидания.
+    b.app.import_with(&file, None, &told).unwrap();
+    assert_eq!(told.outside.load(Ordering::SeqCst), 1);
+    assert_eq!(b.calls(), 1);
 }

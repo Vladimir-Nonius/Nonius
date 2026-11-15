@@ -171,6 +171,7 @@ impl App {
             for (v, (label, models)) in groups[g].iter().enumerate() {
                 done += 1;
                 progress.step(&format!("Уточняю форму {done} из {refined}: {label}"));
+                exports.at(done, refined);
                 if let Some(shape) = self.exact(models, Some(exports), &mut memory) {
                     found[g][v] = Some(shape);
                 }

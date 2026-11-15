@@ -140,11 +140,11 @@ impl App {
         progress: &dyn Progress,
     ) -> IntakeStudy {
         let wake = pass == Pass::Exact;
-        let store = Exports::default();
+        let store = Exports::background(progress);
         let exports = wake.then_some(&store);
         let mut study = IntakeStudy {
             links: if wake {
-                self.links_of(&files)
+                self.links_of(&files, progress)
             } else {
                 HashMap::new()
             },
@@ -201,7 +201,7 @@ impl App {
 
     /// Связи файлов от подключённых модулей. Нет модуля или он не ответил —
     /// разбор идёт по одним именам.
-    fn links_of(&self, files: &[Found]) -> HashMap<String, Vec<String>> {
+    fn links_of(&self, files: &[Found], progress: &dyn Progress) -> HashMap<String, Vec<String>> {
         let mut links = HashMap::new();
         for source in self.registry.link_sources() {
             let ask: Vec<PathBuf> = files
@@ -209,7 +209,9 @@ impl App {
                 .filter(|f| source.knows(&f.path))
                 .map(|f| f.path.clone())
                 .collect();
-            let Ok(answers) = source.links(&ask) else {
+            let mut answers = None;
+            progress.outside(&mut || answers = Some(source.links(&ask)));
+            let Some(Ok(answers)) = answers else {
                 continue;
             };
             for (file, targets) in ask.iter().zip(answers) {

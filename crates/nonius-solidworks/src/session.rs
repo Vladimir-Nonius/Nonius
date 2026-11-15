@@ -24,7 +24,7 @@ use crate::wire::{crash_report, fault, parse, Command, Fault, Line, Own, QUIT};
 use crate::worker::{Got, Launch, Worker};
 
 /// Строка хода, пока свой SolidWorks поднимается заново.
-pub(crate) const RESTARTING: &str = "SolidWorks перезапускается…";
+pub(crate) const RESTARTING: &str = "SolidWorks перезапускается";
 
 /// Сроки и счётчики надзора.
 #[derive(Debug, Clone)]
@@ -94,9 +94,9 @@ pub(crate) enum Phase {
 /// Связь с тем, кто просит: строка хода, «Остановить», состояние.
 pub(crate) struct Hooks<'a> {
     /// Строка хода для человека.
-    pub notify: &'a dyn Fn(&str),
+    pub notify: &'a (dyn Fn(&str) + Sync),
     /// Попросили ли остановить.
-    pub cancelled: &'a dyn Fn() -> bool,
+    pub cancelled: &'a (dyn Fn() -> bool + Sync),
     /// Сеанс сменил занятие.
     pub phase: &'a dyn Fn(Phase),
 }
@@ -143,7 +143,6 @@ impl Session {
     }
 
     /// Свой SolidWorks, если он сейчас запущен.
-    #[allow(dead_code)] // понадобится состоянию наружу
     pub fn own(&self) -> Option<&Own> {
         self.worker.as_ref().and(self.own.as_ref())
     }
@@ -397,4 +396,4 @@ impl Session {
 
 #[cfg(test)]
 #[path = "session_tests.rs"]
-mod tests;
+pub(crate) mod tests;

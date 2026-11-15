@@ -96,6 +96,38 @@ pub trait Exporter: Module {
     fn export(&self, snapshot: &Snapshot, format: &str, out_dir: &Path) -> Result<PathBuf>;
 }
 
+/// Пожелания к переводу файла в STEP: кто просит и как ему отвечать, пока
+/// CAD-система работает (секунды, а то и минуты).
+#[derive(Clone, Copy)]
+pub struct ConvertAsk<'a> {
+    /// STEP ждёт человек (импорт, «Показать в 3D»): в очереди к CAD-системе
+    /// такая просьба идёт вперёд фоновых (уточнение разбора папки).
+    pub urgent: bool,
+    /// Какая это просьба по счёту в своей пачке: «3 из 27». Для
+    /// состояния, которое модуль показывает наружу.
+    pub place: Option<(usize, usize)>,
+    /// Строка хода для человека: «SolidWorks перезапускается».
+    pub notify: &'a (dyn Fn(&str) + Sync),
+    /// Попросили ли остановить. Модуль проверяет это, пока ждёт.
+    pub cancelled: &'a (dyn Fn() -> bool + Sync),
+}
+
+impl ConvertAsk<'static> {
+    /// Срочно, молча и без отмены: так просит тот, у кого пожеланий нет.
+    pub fn plain() -> Self {
+        fn silent(_: &str) {}
+        fn never() -> bool {
+            false
+        }
+        Self {
+            urgent: true,
+            place: None,
+            notify: &silent,
+            cancelled: &never,
+        }
+    }
+}
+
 /// Перевод файла CAD в STEP: родной файл (например `.sldprt`) Nonius хранит
 /// как есть, а форму, массу и сравнение считает по STEP. Модуль этой точки
 /// получает STEP сам — обычно просит об этом установленную CAD-систему, —
@@ -110,6 +142,16 @@ pub trait Converter: Module {
     /// повторять бессмысленно, и программа запомнит его. Любая другая
     /// ошибка — «сейчас не вышло»: в следующий раз попробуют снова.
     fn to_step(&self, source: &Path, target: &Path) -> Result<()>;
+
+    /// То же с пожеланиями того, кто просит ([`ConvertAsk`]): срочно ли,
+    /// куда писать строку хода, не пора ли остановиться. Программа зовёт
+    /// именно этот метод. Модулю с очередью к CAD-системе стоит его
+    /// переопределить; по умолчанию пожелания не нужны — вызывается
+    /// [`Converter::to_step`].
+    fn to_step_asked(&self, source: &Path, target: &Path, ask: &ConvertAsk) -> Result<()> {
+        let _ = ask;
+        self.to_step(source, target)
+    }
 
     /// Отпечаток условий перевода: всё, от чего зависит STEP файла `source`,
     /// кроме его собственного содержимого, — версия CAD-системы, её

@@ -11,19 +11,6 @@ use nonius_scene::Scene;
 use super::compare::read_scene;
 use super::{in_words, AppSource};
 
-/// Ход работы → строка экрана разбора; «Остановить» → отмена.
-struct Steps<'a>(&'a dyn Progress);
-
-impl nonius_app::Progress for Steps<'_> {
-    fn step(&self, what: &str) {
-        self.0.step(&format!("{what}…"));
-    }
-
-    fn cancelled(&self) -> bool {
-        self.0.cancelled()
-    }
-}
-
 impl AppSource {
     pub(super) fn look_pair(
         &self,
@@ -33,7 +20,7 @@ impl AppSource {
     ) -> Result<Comparison> {
         // OpenCascade читает STEP по одному: ждём прошлую работу.
         let _one_at_a_time = self.one_at_a_time(progress, super::WAIT);
-        let steps = Steps(progress);
+        let steps = self.steps(progress, "…");
         let compared = self.app.intake_compare(before, after, &steps);
         // Тела разницы освобождаются, пока OpenCascade занят этой работой.
         nonius_occt::forget_diff();

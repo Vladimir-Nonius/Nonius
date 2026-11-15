@@ -39,13 +39,16 @@ mod worker;
 use std::path::Path;
 
 use nonius_core::extension::{
-    Converter, ExtensionPoint, Module, ModuleManifest, Registry, API_VERSION,
+    ConvertAsk, Converter, ExtensionPoint, Module, ModuleManifest, Registry, API_VERSION,
 };
 use nonius_core::{Error, Result};
 
+use hub::Ask;
+pub use hub::{own, status, Status};
 pub use links::SolidWorksLinks;
 pub use run::{available, export_step};
 use session::Failed;
+pub use wire::Own;
 
 /// Модуль: STEP из `.sldprt` и `.sldasm` силами установленного SolidWorks.
 pub struct SolidWorksConverter {
@@ -91,8 +94,18 @@ impl Converter for SolidWorksConverter {
     }
 
     fn to_step(&self, source: &Path, target: &Path) -> Result<()> {
+        self.to_step_asked(source, target, &ConvertAsk::plain())
+    }
+
+    fn to_step_asked(&self, source: &Path, target: &Path, ask: &ConvertAsk) -> Result<()> {
         let module = Self::ID.to_string();
-        run::step(source, target).map_err(|failed| match failed {
+        let ask = Ask {
+            urgent: ask.urgent,
+            place: ask.place,
+            notify: ask.notify,
+            cancelled: ask.cancelled,
+        };
+        run::step(source, target, &ask).map_err(|failed| match failed {
             Failed::Refused(message) => Error::Refused { module, message },
             Failed::Later(message) => Error::Module { module, message },
             Failed::Cancelled => Error::Module {

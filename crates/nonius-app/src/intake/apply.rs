@@ -36,6 +36,20 @@ pub struct IntakeFailure {
     pub saved: u32,
 }
 
+/// Ход для одной детали: строки идут человеку, а «Остановить» действует
+/// только между деталями — начатую деталь докладываем целиком, со STEP.
+struct Patient<'a>(&'a dyn Progress);
+
+impl Progress for Patient<'_> {
+    fn step(&self, what: &str) {
+        self.0.step(what);
+    }
+
+    fn outside(&self, wait: &mut dyn FnMut()) {
+        self.0.outside(wait);
+    }
+}
+
 impl App {
     /// Выполнить план: разложить файлы и сохранить версии. `progress`
     /// получает строку хода на каждую деталь; «Остановить» действует между
@@ -51,7 +65,8 @@ impl App {
             }
             progress.step(&format!("Раскладываю {} из {total}: {}", n + 1, item.name));
             let mut saved = 0;
-            match self.intake_item(item, &mut saved, &mut done.warnings) {
+            let patient = Patient(progress);
+            match self.intake_item(item, &mut saved, &mut done.warnings, &patient) {
                 Ok(()) => done.saved.push((item.name.clone(), saved)),
                 Err(e) => done.failed.push(IntakeFailure {
                     name: item.name.clone(),
@@ -68,6 +83,7 @@ impl App {
         plan: &PlannedItem,
         saved: &mut u32,
         warnings: &mut Vec<String>,
+        progress: &dyn Progress,
     ) -> Result<()> {
         let folder = Path::new(&plan.folder);
         if !plan.folder.is_empty() && !self.project.root().join(folder).is_dir() {
@@ -77,7 +93,7 @@ impl App {
         let filled = (|| -> Result<()> {
             for (n, version) in plan.versions.iter().enumerate() {
                 for model in &version.models {
-                    let imported = self.import(model, Some(&plan.name))?;
+                    let imported = self.import_with(model, Some(&plan.name), progress)?;
                     warnings.extend(
                         imported
                             .warnings
