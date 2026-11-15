@@ -25,18 +25,16 @@
 //! Ничего не вышло (нет модуля, SolidWorks не ответил) — не беда: у детали
 //! просто не будет отпечатка, и догадка останется непроверенной.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::time::SystemTime;
 
 use nonius_core::meta::ItemKind;
 
+use super::exports::Exports;
 use super::memory::Memory;
 use super::shape::{doubtful, Shape, Source};
 use super::{key, IntakePlan, ShapeCheck};
-use crate::import::Converted;
 use crate::{App, Progress};
 
 pub(super) fn is_step(path: &Path) -> bool {
@@ -66,25 +64,6 @@ pub(super) struct Shapes {
     /// Файлы моделей спорных групп, которые второй проход ещё уточнит.
     /// После второго прохода пусто.
     pub pending: HashSet<String>,
-}
-
-/// STEP от модуля перевода за один точный проход: форма и слова одной
-/// версии просят его у SolidWorks один раз. Без этого склада (`None` там,
-/// где его ждут) модуль перевода не зовётся вовсе.
-#[derive(Default)]
-pub(super) struct Exports(RefCell<HashMap<String, Option<Rc<Converted>>>>);
-
-impl Exports {
-    /// STEP файла CAD `cad`; не вышло — почему, в `warnings` (только в
-    /// первый раз).
-    pub fn of(&self, app: &App, cad: &Path, warnings: &mut Vec<String>) -> Option<Rc<Converted>> {
-        if let Some(known) = self.0.borrow().get(&key(cad)) {
-            return known.clone();
-        }
-        let got = app.convert(cad, warnings).map(Rc::new);
-        self.0.borrow_mut().insert(key(cad), got.clone());
-        got
-    }
 }
 
 /// Версия: подпись для строки хода и файлы модели.
@@ -261,17 +240,7 @@ impl App {
         let shape = if fresh {
             read(step?, &mut ignored)
         } else if let Some(exports) = exports.filter(|_| !memory.failed(models)) {
-            let converted = cad.and_then(|c| exports.of(self, c, &mut ignored));
-            let got = converted
-                .as_ref()
-                .and_then(|c| c.read.as_ref())
-                .and_then(|m| Shape::of(&m.geometry, Source::Exact));
-            // STEP получен, а тела в нём нет (поверхности, пустая деталь):
-            // так будет и в следующий раз — запомнить и не просить снова.
-            // Не ответил SolidWorks — может, ответит потом: не запоминаем.
-            if converted.is_some() && got.is_none() {
-                memory.fail(models);
-            }
+            let got = cad.and_then(|c| self.exported(c, exports, models, memory, &mut ignored));
             got.or_else(|| read(step?, &mut ignored))
         } else {
             step.filter(|_| exports.is_some())

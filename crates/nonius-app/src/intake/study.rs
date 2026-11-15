@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use nonius_core::PartName;
 
 use super::disk::{digests, walk};
-use super::measure::{Exports, Pass};
+use super::exports::Exports;
+use super::measure::Pass;
 use super::plan::Facts;
 use super::questions::Decisions;
 use super::shape::Shape;

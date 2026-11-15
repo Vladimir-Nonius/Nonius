@@ -10,6 +10,8 @@ authors.workspace = true
 
 [dependencies]
 nonius-core.workspace = true
+nonius-sldprt.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]

@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::measure::Exports;
+use super::exports::Exports;
 use crate::{App, Error, FilesCompared, Progress, Result};
 
 impl App {

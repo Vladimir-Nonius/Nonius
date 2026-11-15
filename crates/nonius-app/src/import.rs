@@ -16,6 +16,7 @@ use nonius_core::{schema, PartName};
 
 use crate::materials::find_material;
 use crate::passport::update_mass;
+use crate::steps::{StepKey, Stored};
 use crate::{App, Error, Result};
 
 /// Формат экспорта «превью детали»: модуль, который его объявляет, рисует
@@ -32,6 +33,8 @@ pub(crate) struct Converted {
     _dir: tempfile::TempDir,
     pub(crate) step: PathBuf,
     pub(crate) read: Option<PartMeta>,
+    /// Ключ записи на складе STEP, если STEP туда лёг.
+    pub(crate) key: Option<StepKey>,
 }
 
 /// Итог импорта.
@@ -148,6 +151,10 @@ impl App {
     /// Получить STEP файла CAD модулем перевода и прочитать его паспорт.
     /// `None` — модуля нет или перевод не удался (причина — в предупреждениях):
     /// импорт идёт дальше по-старому, без свежего STEP.
+    ///
+    /// Сначала — склад STEP (`steps.rs`): готовый STEP того же содержимого
+    /// модуль второй раз не просят, а запомненный отказ («SolidWorks не
+    /// справился») сразу становится предупреждением.
     pub(crate) fn convert(&self, file: &Path, warnings: &mut Vec<String>) -> Option<Converted> {
         let converter = self.registry.converter_for(file)?;
         let failed = |why: String, warnings: &mut Vec<String>| {
@@ -159,14 +166,38 @@ impl App {
             Err(e) => return failed(format!("временная папка: {e}"), warnings),
         };
         let step = dir.path().join("model.step");
-        if let Err(e) = converter.to_step(file, &step) {
-            return failed(e.to_string(), warnings);
+        let store = self.steps();
+        let key = self.step_key(file);
+        let stored = match key.as_ref().and_then(|k| store.get(k)) {
+            Some(Stored::Refused(why)) => {
+                let kept = "так было и в прошлый раз, а файл с тех пор не менялся";
+                return failed(format!("{why} ({kept})"), warnings);
+            }
+            // Со склада — копией: запись могут убрать, пока STEP в работе.
+            Some(Stored::Step(found)) => fs::copy(found, &step).is_ok(),
+            None => false,
+        };
+        if !stored {
+            match converter.to_step(file, &step) {
+                Ok(()) => {
+                    if let Some(key) = &key {
+                        store.put(key, &step);
+                    }
+                }
+                Err(e) => {
+                    if let (nonius_core::Error::Refused { message, .. }, Some(key)) = (&e, &key) {
+                        store.refuse(key, message);
+                    }
+                    return failed(e.to_string(), warnings);
+                }
+            }
         }
         match self.read_geometry(&step, warnings) {
             Ok(read) => Some(Converted {
                 _dir: dir,
                 step,
                 read,
+                key,
             }),
             Err(e) => failed(e.to_string(), warnings),
         }

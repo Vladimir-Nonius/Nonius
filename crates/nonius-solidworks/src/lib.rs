@@ -27,6 +27,7 @@
 
 mod links;
 mod run;
+mod stamp;
 
 use std::path::Path;
 
@@ -86,6 +87,10 @@ impl Converter for SolidWorksConverter {
             module: Self::ID.into(),
             message,
         })
+    }
+
+    fn stamp(&self, source: &Path) -> Option<String> {
+        stamp::stamp(source)
     }
 }
 

@@ -80,6 +80,17 @@ pub enum Error {
         /// Описание.
         message: String,
     },
+
+    /// Модуль отказался окончательно: пока файл тот же, повторять
+    /// бессмысленно (деталь роняет CAD-систему, файл не открывается).
+    /// Такой отказ программа запоминает и модуль зря не будит.
+    #[error("модуль {module}: {message}")]
+    Refused {
+        /// Идентификатор модуля.
+        module: String,
+        /// Причина словами.
+        message: String,
+    },
 }
 
 impl Error {
@@ -95,6 +106,7 @@ impl Error {
             Self::OldLayout(_) => "old_layout",
             Self::InsideItem(_) => "inside_item",
             Self::Module { .. } => "module",
+            Self::Refused { .. } => "refused",
         }
     }
 

@@ -17,13 +17,16 @@
 //! заново. Строка с незнакомой пометкой пропускается, а не принимается за
 //! точную.
 //!
-//! Строка `failed` и подпись — точной формы у версии нет: SolidWorks
-//! выгрузил STEP, а тела в нём нет (пустая «Деталь1»). Такую версию не
-//! уточняют при каждом разборе заново, пока файл не изменится.
+//! Строка `failed`, подпись и причина — точной формы у версии нет:
+//! SolidWorks выгрузил STEP, а тела в нём нет (пустая «Деталь1»), или
+//! SolidWorks с деталью не справился (завис, упал два раза подряд, не
+//! открыл файл — причину словами даёт склад STEP, `steps.rs`). Такую
+//! версию не уточняют при каждом разборе заново, пока файл не изменится.
+//! Причина видна с `NONIUS_TRACE=1`.
 //!
 //! Это кэш: его можно удалить, испорченная строка просто пропускается.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -39,8 +42,8 @@ const FAILED: &str = "failed";
 pub(super) struct Memory {
     file: PathBuf,
     shapes: HashMap<(String, Source), Shape>,
-    /// Подписи версий, у которых точной формы нет.
-    failed: HashSet<String>,
+    /// Подписи версий, у которых точной формы нет, и почему.
+    failed: HashMap<String, String>,
     changed: bool,
 }
 
@@ -86,10 +89,14 @@ impl Memory {
     pub fn load(dir: &Path) -> Self {
         let file = dir.join("intake-shapes.tsv");
         let text = std::fs::read_to_string(&file).unwrap_or_default();
+        // Причины в старых строках нет — это «тела нет».
         let failed = text
             .lines()
             .filter_map(|l| l.strip_prefix(FAILED)?.strip_prefix('\t'))
-            .map(str::to_string)
+            .map(|l| match l.split_once('\t') {
+                Some((sign, why)) => (sign.to_string(), why.to_string()),
+                None => (l.to_string(), "тела нет".to_string()),
+            })
             .collect();
         Self {
             file,
@@ -111,16 +118,27 @@ impl Memory {
         }
     }
 
-    /// Точной формы у версии нет: STEP получен, а тела в нём нет.
-    pub fn fail(&mut self, models: &[PathBuf]) {
+    /// Точной формы у версии нет и не будет, пока файл тот же: `why` —
+    /// причина словами («тела нет», «SolidWorks дважды не справился»).
+    pub fn fail(&mut self, models: &[PathBuf], why: &str) {
         if let Some(sign) = sign(models) {
-            self.changed |= self.failed.insert(sign);
+            if std::env::var_os("NONIUS_TRACE").is_some() {
+                eprintln!("точной формы не будет ({why}): {}", models[0].display());
+            }
+            let why = why.replace(['\t', '\n', '\r'], " ");
+            self.changed |= self.failed.insert(sign, why.clone()) != Some(why);
         }
     }
 
     /// Уже известно, что точной формы у версии нет.
     pub fn failed(&self, models: &[PathBuf]) -> bool {
-        sign(models).is_some_and(|s| self.failed.contains(&s))
+        sign(models).is_some_and(|s| self.failed.contains_key(&s))
+    }
+
+    /// Почему точной формы у версии нет.
+    #[cfg(test)]
+    pub fn why_failed(&self, models: &[PathBuf]) -> Option<&str> {
+        self.failed.get(&sign(models)?).map(String::as_str)
     }
 
     /// Записать, если что-то добавилось. Не вышло — не беда: это кэш.
@@ -148,7 +166,11 @@ impl Memory {
                     },
                 )
             })
-            .chain(self.failed.iter().map(|sign| format!("{FAILED}\t{sign}\n")))
+            .chain(
+                self.failed
+                    .iter()
+                    .map(|(sign, why)| format!("{FAILED}\t{sign}\t{why}\n")),
+            )
             .collect();
         lines.sort();
         // Только сама рабочая папка, не `.git` над ней: историю версий
@@ -204,10 +226,24 @@ mod tests {
 
         // Неудача помнится, пока файл тот же.
         let mut memory = memory;
-        memory.fail(&models);
+        memory.fail(&models, "SolidWorks дважды не справился");
         memory.save();
         let memory = Memory::load(tmp.path());
         assert!(memory.failed(&models));
+        assert_eq!(
+            memory.why_failed(&models),
+            Some("SolidWorks дважды не справился")
+        );
+        // Строка прежнего вида, без причины, читается как «тела нет».
+        let old = format!("failed\t{}\n", sign(&models).unwrap());
+        let file = tmp.path().join("intake-shapes.tsv");
+        let kept = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(&file, &old).unwrap();
+        assert_eq!(
+            Memory::load(tmp.path()).why_failed(&models),
+            Some("тела нет")
+        );
+        std::fs::write(&file, kept).unwrap();
         assert_eq!(
             memory.get(&models, Source::Exact),
             Some(shape),

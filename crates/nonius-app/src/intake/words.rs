@@ -23,8 +23,9 @@ use nonius_core::extension::Snapshot;
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::PartName;
 
+use super::exports::Exports;
 use super::key;
-use super::measure::{is_step, modified, Exports};
+use super::measure::{is_step, modified};
 use super::memory::sign;
 use crate::{App, Progress};
 
