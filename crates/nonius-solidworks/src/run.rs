@@ -8,10 +8,10 @@
 //! PowerShell: последняя строка его вывода — `OK` или `ERROR: причина`.
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::wire::{parse, Command, Line, QUIT};
-use crate::worker::{Got, Launch, PowerShell, Worker};
+use crate::session::{Failed, Hooks};
+use crate::wire::Command;
 
 /// Сколько ждать SolidWorks: холодный запуск и большая сборка — это минуты.
 const TIMEOUT: Duration = Duration::from_secs(300);
@@ -37,66 +37,36 @@ pub fn available() -> bool {
 /// Попросить SolidWorks записать STEP файла `source` в `target`.
 /// Ошибка — причина по-русски, её можно показать человеку.
 pub fn export_step(source: &Path, target: &Path) -> Result<(), String> {
+    step(source, target).map_err(|failed| match failed {
+        Failed::Refused(why) | Failed::Later(why) => why,
+        Failed::Cancelled => "остановлено".into(),
+    })
+}
+
+/// То же, но видно, окончателен ли отказ.
+pub(crate) fn step(source: &Path, target: &Path) -> Result<(), Failed> {
     // SolidWorks ищет открытую деталь по полному пути.
-    let full = |p: &Path| std::path::absolute(p).map_err(|e| format!("{}: {e}", p.display()));
+    let full = |p: &Path| {
+        std::path::absolute(p).map_err(|e| Failed::Later(format!("{}: {e}", p.display())))
+    };
     let (source, target) = (full(source)?, full(target)?);
     if !source.is_file() {
-        return Err(format!("файл не найден: {}", source.display()));
+        return Err(Failed::Later(format!(
+            "файл не найден: {}",
+            source.display()
+        )));
     }
     let step = Command::Step {
         source: &source,
         target: &target,
     };
-    through_worker(&PowerShell::default(), &step).map(|_| ())
-}
-
-/// Выполнить одну команду в своём SolidWorks: запустить рабочий процесс,
-/// дождаться ответа и вежливо закрыть. Возвращает строки данных ответа.
-fn through_worker(launch: &dyn Launch, command: &Command) -> Result<Vec<String>, String> {
-    let line = command.line()?;
-    let mut worker = launch.launch()?;
-    let deadline = Instant::now() + TIMEOUT;
-    let mut data = Vec::new();
-    let answer = loop {
-        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-            break Err("SolidWorks не ответил за 5 минут".to_string());
-        };
-        match worker.next(left) {
-            Got::Quiet => {}
-            Got::Closed => break Err("рабочий процесс SolidWorks закрылся".into()),
-            Got::Line(text) => match parse(&text) {
-                // Свой SolidWorks готов — теперь команда.
-                Line::Ready(_) => {
-                    if !worker.send(&line) {
-                        break Err("рабочий процесс SolidWorks закрылся".into());
-                    }
-                }
-                Line::Ok => break Ok(data),
-                Line::Error { why, .. } => break Err(why),
-                Line::Dep(file) => data.push(file),
-                Line::Gone => break Err("SolidWorks закрылся".into()),
-                Line::Beat { .. } | Line::Other => {}
-            },
-        }
+    let quiet = Hooks {
+        notify: &|_| {},
+        cancelled: &|| false,
+        phase: &|_| {},
     };
-    farewell(worker);
-    answer
+    crate::hub::hub().run(&step, &quiet).map(|_| ())
 }
-
-/// Попросить рабочий процесс закрыть свой SolidWorks и подождать, пока он
-/// уйдёт: снятый силой SolidWorks оставляет за собой мусор.
-fn farewell(mut worker: Box<dyn Worker>) {
-    if !worker.send(QUIT) {
-        return;
-    }
-    let deadline = Instant::now() + Duration::from_secs(25);
-    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        if worker.next(left) == Got::Closed {
-            return;
-        }
-    }
-}
-
 /// Выполнить скрипт с параметрами-путями. Возвращает строки его ответа без
 /// последней (`OK`); `ERROR: причина` и всё непонятное — ошибка.
 #[cfg(windows)]
@@ -146,7 +116,7 @@ pub(crate) fn script(text: &str, args: &[(&str, &Path)]) -> Result<Vec<String>, 
         let _ = out.read_to_end(&mut bytes);
         bytes
     });
-    let started = Instant::now();
+    let started = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,

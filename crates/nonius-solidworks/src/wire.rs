@@ -63,7 +63,7 @@ pub(crate) enum Line {
     Ready(Own),
     /// Команда выполнена.
     Ok,
-    /// Команда не выполнена: код ошибки COM (0 — ошибка не COM) и причина.
+    /// Команда не выполнена: код (см. [`fault`]) и причина.
     Error {
         /// Код.
         code: u32,
@@ -150,7 +150,10 @@ pub(crate) enum Fault {
     Dead,
     /// SolidWorks занят: повторить чуть позже.
     Busy,
-    /// Обычный отказ: SolidWorks жив и ответил «не могу».
+    /// SolidWorks жив и отказал окончательно (файл не открывается): пока
+    /// файл тот же, повторять бессмысленно.
+    Final,
+    /// Прочее: сейчас не вышло, в другой раз может выйти.
     Plain,
 }
 
@@ -160,6 +163,7 @@ pub(crate) fn fault(code: u32) -> Fault {
     match code {
         0x8001_0108 | 0x8007_06BA | 0x8001_0007 => Fault::Dead,
         0x8001_0001 | 0x8001_010A => Fault::Busy,
+        1 => Fault::Final,
         _ => Fault::Plain,
     }
 }
@@ -262,6 +266,7 @@ mod tests {
             assert_eq!(fault(busy), Fault::Busy);
         }
         assert_eq!(fault(0), Fault::Plain);
+        assert_eq!(fault(1), Fault::Final);
         assert_eq!(fault(0x8002_0009), Fault::Plain);
         assert!(crash_report("SOLIDWORKS Error Report"));
         assert!(!crash_report("SOLIDWORKS"));

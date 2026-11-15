@@ -27,7 +27,10 @@
 #   READY<таб>pid<таб>время старта<таб>версия — свой SolidWorks готов
 #   DEP<таб>путь                              — строка ответа на deps
 #   OK                                        — команда выполнена
-#   ERROR<таб>код COM или 0<таб>причина       — не выполнена
+#   ERROR<таб>код<таб>причина                 — не выполнена; код — ошибка COM
+#                                               (0x800706BA…), 1 — SolidWorks
+#                                               жив и отказал окончательно
+#                                               (файл не открывается), 0 — прочее
 #   BEAT<таб>мс процессора<таб>окно, GONE     — пульс сторожевой нити
 #
 # -Dry — без SolidWorks вовсе (для тестов Nonius): step копирует файл,
@@ -70,20 +73,30 @@ function Put($object, [string]$name, $value) {
     [System.__ComObject].InvokeMember($name, $Flags::SetProperty, $null, $object, @($value)) | Out-Null
 }
 
-# Код COM-ошибки (0x80010108 — «SolidWorks умер» и т. п.); 0 — ошибка не COM.
+# Пометка в начале причины: отказ окончательный — пока файл тот же,
+# повторять бессмысленно.
+$Final = 'FINAL:'
+
+# Код COM-ошибки (0x80010108 — «SolidWorks умер» и т. п.); 1 — окончательный
+# отказ; 0 — прочее.
 function Code($problem) {
     for ($e = $problem; $null -ne $e; $e = $e.InnerException) {
         if ($e -is [Runtime.InteropServices.COMException]) {
             return ('0x{0:X8}' -f $e.ErrorCode)
         }
     }
+    $e = $problem
+    while ($null -ne $e.InnerException) { $e = $e.InnerException }
+    if (([string]$e.Message).StartsWith($Final)) { return '1' }
     return '0'
 }
 
 function Text($problem) {
     $e = $problem
     while ($null -ne $e.InnerException) { $e = $e.InnerException }
-    return ([string]$e.Message).Replace("`t", ' ')
+    $text = ([string]$e.Message).Replace("`t", ' ')
+    if ($text.StartsWith($Final)) { $text = $text.Substring($Final.Length) }
+    return $text
 }
 
 function Start-Own {
@@ -126,7 +139,7 @@ function Export([string]$Source, [string]$Target) {
     $byRef[5] = $true
     $doc = [System.__ComObject].InvokeMember(
         'OpenDoc6', $Flags::InvokeMethod, $null, $script:sw, $arguments, @($byRef), $null, $null)
-    if ($null -eq $doc) { throw "SolidWorks не открыл файл (код $($arguments[4]))" }
+    if ($null -eq $doc) { throw "${Final}SolidWorks не открыл файл (код $($arguments[4]))" }
     try {
         # swSaveAsCurrentVersion = 0, swSaveAsOptions_Silent (1) + Copy (2):
         # «копия» — чтобы открытая деталь не стала считать себя файлом STEP.

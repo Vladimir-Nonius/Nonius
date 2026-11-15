@@ -25,10 +25,13 @@
 //! `links.ps1` — модуль `solidworks-links`, `close.ps1` — сторож, который
 //! держит SolidWorks открытым на время работы и закрывает после простоя.
 
+mod hub;
 mod links;
 mod run;
+mod session;
 mod stamp;
-// Часть слов (ping, deps, коды COM) понадобится долгоживущему процессу.
+// ping, deps и «над чем работаю» берут следующие шаги: состояние
+// наружу и связи файлов.
 #[allow(dead_code)]
 mod wire;
 mod worker;
@@ -42,6 +45,7 @@ use nonius_core::{Error, Result};
 
 pub use links::SolidWorksLinks;
 pub use run::{available, export_step};
+use session::Failed;
 
 /// Модуль: STEP из `.sldprt` и `.sldasm` силами установленного SolidWorks.
 pub struct SolidWorksConverter {
@@ -87,9 +91,14 @@ impl Converter for SolidWorksConverter {
     }
 
     fn to_step(&self, source: &Path, target: &Path) -> Result<()> {
-        export_step(source, target).map_err(|message| Error::Module {
-            module: Self::ID.into(),
-            message,
+        let module = Self::ID.to_string();
+        run::step(source, target).map_err(|failed| match failed {
+            Failed::Refused(message) => Error::Refused { module, message },
+            Failed::Later(message) => Error::Module { module, message },
+            Failed::Cancelled => Error::Module {
+                module,
+                message: "остановлено".into(),
+            },
         })
     }
 

@@ -281,6 +281,10 @@ namespace Nonius
                     Process.GetProcessById(parent).WaitForExit();
                 }
                 catch (Exception) { }
+                // Nonius не стало. Обычно он просто закончил работу: тогда
+                // рабочий процесс уже увидел конец stdin и сам вежливо
+                // закрывает SolidWorks. Даём на это время, потом снимаем.
+                Thread.Sleep(20000);
                 Kill();
                 Environment.Exit(3);
             });
