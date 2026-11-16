@@ -111,7 +111,8 @@ fn status_tells_restart_and_place_in_the_batch() {
     };
     let (mut restarting, mut working) = (false, false);
     std::thread::scope(|scope| {
-        let job = scope.spawn(|| step(&hub, "КТМ 640\\вал копия.sldprt", &ask));
+        // `/` — разделитель и в Windows, и в Linux (CI): имя файла выделится везде.
+        let job = scope.spawn(|| step(&hub, "КТМ 640/вал копия.sldprt", &ask));
         while !job.is_finished() {
             match hub.status() {
                 Status::Restarting => restarting = true,
