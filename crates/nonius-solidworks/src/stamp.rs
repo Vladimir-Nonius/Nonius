@@ -42,6 +42,8 @@ fn stamp_with(environment: &str, source: &Path) -> Option<String> {
 
 /// Путь `SLDWORKS.exe` установленного SolidWorks — того, что записан в
 /// реестре как `SldWorks.Application`.
+// Вне Windows SolidWorks нет — и звать это некому.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn exe() -> Option<PathBuf> {
     #[cfg(windows)]
     {

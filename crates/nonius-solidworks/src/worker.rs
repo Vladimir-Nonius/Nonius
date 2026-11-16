@@ -9,6 +9,8 @@ use std::time::Duration;
 
 /// Что пришло от рабочего процесса за время ожидания.
 #[derive(Debug, PartialEq, Eq)]
+// Вне Windows настоящего рабочего процесса нет: строки шлёт только поддельный в тестах.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) enum Got {
     /// Строка ответа.
     Line(String),
@@ -38,6 +40,7 @@ pub(crate) trait Launch: Send {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct PowerShell {
     /// Без SolidWorks (`-Dry`): для проверки самой трубы.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub dry: bool,
 }
 
