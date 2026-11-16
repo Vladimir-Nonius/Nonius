@@ -15,91 +15,17 @@
 //! ([`Failed::Refused`]) — склад STEP его запомнит, и больше его не пробуют.
 //! Остальная работа идёт дальше: уже посчитанное лежит на складе.
 //!
-//! После каждых [`Limits::restart_every`] команд SolidWorks перезапускается
+//! После каждых [`Limits::restart_every`] выгрузок STEP SolidWorks перезапускается
 //! вежливо: за долгую пачку он копит память.
 
 use std::time::{Duration, Instant};
 
+pub(crate) use crate::limits::{Failed, Hooks, Limits, Phase};
 use crate::wire::{crash_report, fault, parse, Command, Fault, Line, Own, QUIT};
 use crate::worker::{Got, Launch, Worker};
 
 /// Строка хода, пока свой SolidWorks поднимается заново.
 pub(crate) const RESTARTING: &str = "SolidWorks перезапускается";
-
-/// Сроки и счётчики надзора.
-#[derive(Debug, Clone)]
-pub(crate) struct Limits {
-    /// Сколько ждать запуска SolidWorks.
-    pub start: Duration,
-    /// Столько без работы процессора — завис.
-    pub stall: Duration,
-    /// Столько с окном-сообщением и без работы процессора — ждёт человека.
-    pub dialog: Duration,
-    /// Больше этого над одной командой не работаем, даже если считает.
-    pub hard: Duration,
-    /// Меньше этого времени процессора за срок — «не работает», мс.
-    pub work_ms: u64,
-    /// Сколько раз повторять команду, пока SolidWorks «занят».
-    pub busy_tries: usize,
-    /// Пауза перед повтором.
-    pub busy_pause: Duration,
-    /// Перезапуск после стольких команд.
-    pub restart_every: usize,
-    /// После неудачного запуска столько не пробуем снова.
-    pub rest: Duration,
-    /// Сколько ждать вежливого закрытия.
-    pub farewell: Duration,
-    /// Шаг ожидания строки (как часто проверять сроки и «Остановить»).
-    pub tick: Duration,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            start: Duration::from_secs(180),
-            stall: Duration::from_secs(90),
-            dialog: Duration::from_secs(20),
-            hard: Duration::from_secs(20 * 60),
-            work_ms: 1000,
-            busy_tries: 5,
-            busy_pause: Duration::from_secs(2),
-            restart_every: 40,
-            rest: Duration::from_secs(60),
-            farewell: Duration::from_secs(25),
-            tick: Duration::from_millis(200),
-        }
-    }
-}
-
-/// Почему команда не выполнена.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Failed {
-    /// Окончательно: с этим файлом не выйдет, пока он тот же.
-    Refused(String),
-    /// Сейчас не вышло: SolidWorks не запустился, занят, не установлен.
-    Later(String),
-    /// Человек нажал «Остановить».
-    Cancelled,
-}
-
-/// Чем занят сеанс — для состояния наружу.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Phase {
-    /// Выполняет команду.
-    Working,
-    /// Поднимает SolidWorks (первый раз или заново).
-    Restarting,
-}
-
-/// Связь с тем, кто просит: строка хода, «Остановить», состояние.
-pub(crate) struct Hooks<'a> {
-    /// Строка хода для человека.
-    pub notify: &'a (dyn Fn(&str) + Sync),
-    /// Попросили ли остановить.
-    pub cancelled: &'a (dyn Fn() -> bool + Sync),
-    /// Сеанс сменил занятие.
-    pub phase: &'a dyn Fn(Phase),
-}
 
 /// Чем кончилась одна попытка команды.
 enum Outcome {
@@ -119,7 +45,7 @@ pub(crate) struct Session {
     limits: Limits,
     worker: Option<Box<dyn Worker>>,
     own: Option<Own>,
-    /// Сколько команд выполнил этот рабочий процесс.
+    /// Сколько документов открыл этот рабочий процесс.
     served: usize,
     /// Остановленная команда ещё не ответила: её ответ надо дождаться.
     pending: bool,
@@ -155,6 +81,9 @@ impl Session {
     /// Выполнить команду. Ответ — строки данных.
     pub fn run(&mut self, command: &Command, hooks: &Hooks) -> Result<Vec<String>, Failed> {
         let line = command.line().map_err(Failed::Refused)?;
+        // В счёт до перезапуска идут только открытые документы: опрос
+        // связей и `ping` SolidWorks не нагружают.
+        let opened = usize::from(matches!(command, Command::Step { .. }));
         let (mut crashes, mut busy) = (0, 0);
         loop {
             if (hooks.cancelled)() {
@@ -166,17 +95,17 @@ impl Session {
             self.used = Instant::now();
             let why = match outcome {
                 Outcome::Done(data) => {
-                    self.served += 1;
+                    self.served += opened;
                     return Ok(data);
                 }
                 Outcome::Cancelled => return Err(Failed::Cancelled),
                 Outcome::Said { code, why } => match fault(code) {
                     Fault::Final => {
-                        self.served += 1;
+                        self.served += opened;
                         return Err(Failed::Refused(why));
                     }
                     Fault::Plain => {
-                        self.served += 1;
+                        self.served += opened;
                         return Err(Failed::Later(why));
                     }
                     Fault::Busy => {

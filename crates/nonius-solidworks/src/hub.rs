@@ -24,8 +24,9 @@ use crate::wire::{Command, Own};
 use crate::worker::PowerShell;
 
 /// После стольких секунд без дела свой SolidWorks закрывается: он занимает
-/// сотни мегабайт памяти.
-const IDLE: Duration = Duration::from_secs(60);
+/// сотни мегабайт памяти. Не короче: между выгрузками разбор папки подолгу
+/// считает сам, а новый запуск — это 5–8 с и медленная первая выгрузка.
+const IDLE: Duration = Duration::from_secs(120);
 
 /// Что сейчас со своим SolidWorks.
 #[derive(Debug, Clone, PartialEq, Eq)]

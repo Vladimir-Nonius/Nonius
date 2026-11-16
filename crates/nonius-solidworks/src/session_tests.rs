@@ -328,12 +328,17 @@ fn restart_after_so_many_commands() {
     let mut session = Session::new(fake, limits);
     let notes = Mutex::new(Vec::new());
     for name in ["а.sldprt", "б.sldprt", "в.sldprt"] {
+        // Опрос связей в счёт не идёт: документ он не открывает.
+        for _ in 0..3 {
+            let deps = Command::Deps(Path::new(name));
+            session.run(&deps, &hooks(&notes, &|| false)).unwrap();
+        }
         step(&mut session, name, &notes).unwrap();
     }
     let log = log.lock().unwrap();
     assert_eq!(log.launches, 2);
     assert_eq!(log.kills, 0, "перезапуск по счётчику — вежливый");
-    assert_eq!(log.sent[2], QUIT);
+    assert_eq!(log.sent[8], QUIT, "после двух выгрузок, перед третьей");
     assert_eq!(*notes.lock().unwrap(), [RESTARTING]);
 }
 

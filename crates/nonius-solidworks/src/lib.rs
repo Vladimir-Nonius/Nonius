@@ -29,12 +29,13 @@
 //! Файлы: здесь — модуль `solidworks-step`; `worker.ps1` и `helper.cs` —
 //! рабочий процесс и свой экземпляр SolidWorks; `wire.rs` — слова разговора
 //! с ним; `worker.rs` — труба к процессу; `session.rs` — надзор за каждой
-//! командой (сроки, «умер», «занят», перезапуск); `hub.rs` — один сеанс на
+//! командой («умер», «занят», перезапуск), сроки — `limits.rs`; `hub.rs` — один сеанс на
 //! программу, очередь и состояние; `run.rs` — есть ли SolidWorks, выгрузка
 //! STEP; `stamp.rs` — от чего зависит STEP (для склада); `links.rs` —
 //! модуль `solidworks-links`.
 
 mod hub;
+mod limits;
 mod links;
 mod run;
 mod session;
