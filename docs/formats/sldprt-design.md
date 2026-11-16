@@ -2,7 +2,7 @@
 
 О чём: что из «замысла» (дерево построения, размеры, уравнения, конфигурации, свойства, состав
 сборки, внешние ссылки, чертежи) читается прямо из `.sldprt` / `.sldasm` / `.slddrw`, без
-SolidWorks. Читать перед словами «что изменилось» не по геометрии и перед заменой `links.ps1`
+SolidWorks. Читать перед словами «что изменилось» не по геометрии и перед заменой опроса связей у SolidWorks (раньше `links.ps1`, теперь команда `deps` в `worker.ps1`)
 чтением файла. Контейнер и распаковка потоков — в [sldprt-container.md](sldprt-container.md), масса
 и превью — в [sldprt-display.md](sldprt-display.md), B-rep — в
 [sldprt-parasolid.md](sldprt-parasolid.md).
@@ -446,6 +446,11 @@ XML в пространстве `http://www.solidworks.com/sw2003/schema`, ко�
   абсолютному пути (оригиналы на месте), 2 — нигде [Nonius].
 
 ### 4.5 Сравнение с `links.ps1`
+
+> С 16.11.2026 (PR #27) `links.ps1` нет: тот же вызов `GetDocumentDependencies2(файл, false,
+> false, false)` делает команда `deps` рабочего процесса (`crates/nonius-solidworks/src/worker.ps1`,
+> разбор — `links.rs`). Сравнение ниже от этого не меняется: читай `links.ps1` как «опрос связей у
+> SolidWorks».
 
 `links.ps1` зовёт `GetDocumentDependencies2(файл, false, false, false)` — прямые ссылки, без обхода
 вглубь и **без поиска**, т.е. те же сохранённые пути; `links.rs` раскладывает их, `intake/units.rs`
