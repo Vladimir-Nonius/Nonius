@@ -33,6 +33,9 @@ pub(super) struct Proto {
     pub notes: Vec<String>,
     /// Модель, от которой эту отделила форма: о паре стоит спросить.
     pub rival: Option<usize>,
+    /// У этой пары два габарита из трёх те же (деталь могли укоротить):
+    /// вопрос идёт без мнения «похоже, нет».
+    pub rival_close: bool,
 }
 
 impl Proto {
@@ -151,6 +154,7 @@ pub(super) fn group(
                 verdict: None,
                 notes: Vec::new(),
                 rival: None,
+                rival_close: false,
                 settled: false,
             }]
         };
@@ -182,6 +186,7 @@ pub(super) fn group(
                 shape: part.verdict,
                 notes,
                 rival: part.rival,
+                rival_close: part.rival_close,
             });
         }
     }
@@ -222,6 +227,7 @@ pub(super) fn merge(
         kept.guessed = false;
         kept.shape = None;
         kept.rival = None;
+        kept.rival_close = false;
         kept.notes = vec!["вы ответили: это версии одной детали".into()];
     }
 }

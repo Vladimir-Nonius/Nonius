@@ -39,7 +39,7 @@ pub(super) fn hints(
                     pairs.push((a, b, how));
                     &mut alike
                 }
-                Likeness::Different(_) => continue,
+                Likeness::Different { .. } => continue,
             };
             lists[a].push(&parts[b].0);
             lists[b].push(&parts[a].0);
@@ -84,6 +84,7 @@ pub(super) fn hints(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intake::shape::Source;
 
     fn shape(volume: f64, dims: [f64; 3]) -> Shape {
         Shape {
@@ -91,7 +92,7 @@ mod tests {
             area: None,
             dims,
             faces: None,
-            rough: false,
+            source: Source::Exact,
         }
     }
 

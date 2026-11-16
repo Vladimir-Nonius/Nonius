@@ -16,6 +16,11 @@ pub struct IntakePlan {
     pub left: Vec<(String, String)>,
     /// Сколько ещё файлов не тронуто: не модели и не чертежи.
     pub other: usize,
+    /// План из быстрого прохода, и точный ([`intake_refine`]) может его
+    /// уточнить: связи сборок и чертежей, точная форма спорных деталей.
+    ///
+    /// [`intake_refine`]: super::ProjectSource::intake_refine
+    pub refine: bool,
 }
 
 /// Будущая деталь или сборка.
@@ -40,6 +45,8 @@ pub struct IntakeItem {
     pub sides: Vec<IntakeSide>,
     /// Что изменилось словами между соседними `sides`.
     pub changed: Vec<Vec<String>>,
+    /// Форма снята бегло, и её ответ на грани: точный проход его уточнит.
+    pub doubtful: bool,
 }
 
 /// Вопрос человеку.
@@ -58,6 +65,9 @@ pub struct IntakeQuestion {
     pub sides: Vec<IntakeSide>,
     /// Что изменилось словами между соседними `sides`.
     pub changed: Vec<Vec<String>>,
+    /// Форма этих моделей снята бегло, и ответ на грани: точный проход
+    /// может поменять и вопрос.
+    pub doubtful: bool,
 }
 
 /// Одна сторона сравнения в 3D: модель из разбираемой папки.

@@ -10,13 +10,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use nonius_core::extension::ConvertAsk;
 use nonius_core::meta::{ItemKind, PartMeta};
 use nonius_core::project::{Item, META_FILE};
 use nonius_core::{schema, PartName};
 
 use crate::materials::find_material;
 use crate::passport::update_mass;
-use crate::{App, Error, Result};
+use crate::steps::{StepKey, Stored};
+use crate::{App, Error, NoProgress, Progress, Result};
 
 /// Формат экспорта «превью детали»: модуль, который его объявляет, рисует
 /// `preview.png` для списка деталей.
@@ -32,6 +34,29 @@ pub(crate) struct Converted {
     _dir: tempfile::TempDir,
     pub(crate) step: PathBuf,
     pub(crate) read: Option<PartMeta>,
+    /// Ключ записи на складе STEP, если STEP туда лёг.
+    pub(crate) key: Option<StepKey>,
+}
+
+/// Пожелания к переводу в STEP: кто просит.
+pub(crate) struct Wish<'a> {
+    /// STEP ждёт человек: в очереди модуля перевода — вперёд фоновых.
+    pub urgent: bool,
+    /// Место в пачке: «3 из 27».
+    pub place: Option<(usize, usize)>,
+    /// Куда писать строку хода и откуда узнать об отмене.
+    pub progress: &'a dyn Progress,
+}
+
+impl<'a> Wish<'a> {
+    /// Просьба человека.
+    pub fn urgent(progress: &'a dyn Progress) -> Self {
+        Self {
+            urgent: true,
+            place: None,
+            progress,
+        }
+    }
 }
 
 /// Итог импорта.
@@ -54,6 +79,17 @@ impl App {
     /// расширения; деталь создаётся, если её нет) и обновить паспорт.
     /// Материал и плотность сохраняются, масса пересчитывается по новому объёму.
     pub fn import(&self, file: &Path, part: Option<&str>) -> Result<Imported> {
+        self.import_with(file, part, &NoProgress)
+    }
+
+    /// То же со строкой хода и отменой: STEP файла SolidWorks может
+    /// потребовать ожидания (очередь к SolidWorks, его перезапуск).
+    pub fn import_with(
+        &self,
+        file: &Path,
+        part: Option<&str>,
+        progress: &dyn Progress,
+    ) -> Result<Imported> {
         self.project.writable()?;
         if !file.is_file() {
             return Err(Error::FileNotFound(file.to_path_buf()));
@@ -84,7 +120,8 @@ impl App {
         let converted = if target == "model.step" {
             None
         } else {
-            self.convert(file, &mut warnings)
+            // Импорта ждёт человек: в очереди к SolidWorks — вперёд фонового.
+            self.convert(file, &Wish::urgent(progress), &mut warnings)
         };
         let read = match &converted {
             Some(c) => c.read.clone(),
@@ -148,7 +185,16 @@ impl App {
     /// Получить STEP файла CAD модулем перевода и прочитать его паспорт.
     /// `None` — модуля нет или перевод не удался (причина — в предупреждениях):
     /// импорт идёт дальше по-старому, без свежего STEP.
-    pub(crate) fn convert(&self, file: &Path, warnings: &mut Vec<String>) -> Option<Converted> {
+    ///
+    /// Сначала — склад STEP (`steps.rs`): готовый STEP того же содержимого
+    /// модуль второй раз не просят, а запомненный отказ («SolidWorks не
+    /// справился») сразу становится предупреждением.
+    pub(crate) fn convert(
+        &self,
+        file: &Path,
+        wish: &Wish,
+        warnings: &mut Vec<String>,
+    ) -> Option<Converted> {
         let converter = self.registry.converter_for(file)?;
         let failed = |why: String, warnings: &mut Vec<String>| {
             warnings.push(format!("STEP не получен: {why}"));
@@ -159,14 +205,47 @@ impl App {
             Err(e) => return failed(format!("временная папка: {e}"), warnings),
         };
         let step = dir.path().join("model.step");
-        if let Err(e) = converter.to_step(file, &step) {
-            return failed(e.to_string(), warnings);
+        let store = self.steps();
+        let key = self.step_key(file);
+        let stored = match key.as_ref().and_then(|k| store.get(k)) {
+            Some(Stored::Refused(why)) => {
+                let kept = "так было и в прошлый раз, а файл с тех пор не менялся";
+                return failed(format!("{why} ({kept})"), warnings);
+            }
+            // Со склада — копией: запись могут убрать, пока STEP в работе.
+            Some(Stored::Step(found)) => fs::copy(found, &step).is_ok(),
+            None => false,
+        };
+        if !stored {
+            let progress = wish.progress;
+            let ask = ConvertAsk {
+                urgent: wish.urgent,
+                place: wish.place,
+                notify: &|what| progress.step(what),
+                cancelled: &|| progress.cancelled(),
+            };
+            let mut done = None;
+            progress.outside(&mut || done = Some(converter.to_step_asked(file, &step, &ask)));
+            match done.unwrap_or_else(|| converter.to_step_asked(file, &step, &ask)) {
+                Ok(()) => {
+                    if let Some(key) = &key {
+                        store.put(key, &step);
+                    }
+                }
+                Err(e) => {
+                    if let (nonius_core::Error::Refused { message, .. }, Some(key)) = (&e, &key) {
+                        store.refuse(key, message);
+                    }
+                    return failed(e.to_string(), warnings);
+                }
+            }
         }
         match self.read_geometry(&step, warnings) {
             Ok(read) => Some(Converted {
                 _dir: dir,
                 step,
                 read,
+                key,
             }),
             Err(e) => failed(e.to_string(), warnings),
         }

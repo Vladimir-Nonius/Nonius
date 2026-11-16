@@ -7,11 +7,13 @@
 //! получает свежий STEP.
 //!
 //! Как: SolidWorks умеет выполнять команды других программ (это называется
-//! COM, тот же механизм, что у макросов). Модуль запускает маленький скрипт
-//! PowerShell (`export_step.ps1`), тот подключается к SolidWorks — к уже
-//! открытому или запускает невидимый — и просит «сохранить как STEP».
-//! Правила вежливости к человеку, который в это время работает в
-//! SolidWorks, записаны в начале скрипта.
+//! COM, тот же механизм, что у макросов). Модуль держит один рабочий
+//! процесс (скрипт PowerShell `worker.ps1`), а тот запускает **свой**,
+//! невидимый экземпляр SolidWorks и просит его «сохранить как STEP». К
+//! SolidWorks, открытому человеком, модуль не подключается и общих настроек
+//! не меняет: там несохранённая работа, а трудная деталь может SolidWorks
+//! уронить. Зависший или упавший свой SolidWorks перезапускается, деталь,
+//! которая роняет его дважды, получает окончательный отказ.
 //!
 //! Модуль подключается к точке [`Converter`] и только там, где SolidWorks
 //! установлен ([`available`]); без него импорт работает по-старому.
@@ -20,23 +22,40 @@
 //! собрана сборка и к какой модели относится чертёж. По ним Nonius сам
 //! раскладывает папку с файлами.
 //!
-//! Файлы: здесь — модуль `solidworks-step`, `run.rs` — запуск скриптов и
-//! разбор их ответа, `export_step.ps1` — выгрузка STEP, `links.rs` и
-//! `links.ps1` — модуль `solidworks-links`, `close.ps1` — сторож, который
-//! держит SolidWorks открытым на время работы и закрывает после простоя.
+//! Для окна: [`status`] — что сейчас со своим SolidWorks (свободен,
+//! работает над файлом, перезапускается, не установлен), [`own`] — его
+//! номер процесса и время старта.
+//!
+//! Файлы: здесь — модуль `solidworks-step`; `worker.ps1` и `helper.cs` —
+//! рабочий процесс и свой экземпляр SolidWorks; `wire.rs` — слова разговора
+//! с ним; `worker.rs` — труба к процессу; `session.rs` — надзор за каждой
+//! командой («умер», «занят», перезапуск), сроки — `limits.rs`; `hub.rs` — один сеанс на
+//! программу, очередь и состояние; `run.rs` — есть ли SolidWorks, выгрузка
+//! STEP; `stamp.rs` — от чего зависит STEP (для склада); `links.rs` —
+//! модуль `solidworks-links`.
 
+mod hub;
+mod limits;
 mod links;
 mod run;
+mod session;
+mod stamp;
+mod wire;
+mod worker;
 
 use std::path::Path;
 
 use nonius_core::extension::{
-    Converter, ExtensionPoint, Module, ModuleManifest, Registry, API_VERSION,
+    ConvertAsk, Converter, ExtensionPoint, Module, ModuleManifest, Registry, API_VERSION,
 };
 use nonius_core::{Error, Result};
 
+use hub::Ask;
+pub use hub::{own, status, Status};
 pub use links::SolidWorksLinks;
-pub use run::{available, export_step};
+pub use run::{available, export_step, ping};
+use session::Failed;
+pub use wire::Own;
 
 /// Модуль: STEP из `.sldprt` и `.sldasm` силами установленного SolidWorks.
 pub struct SolidWorksConverter {
@@ -82,10 +101,29 @@ impl Converter for SolidWorksConverter {
     }
 
     fn to_step(&self, source: &Path, target: &Path) -> Result<()> {
-        export_step(source, target).map_err(|message| Error::Module {
-            module: Self::ID.into(),
-            message,
+        self.to_step_asked(source, target, &ConvertAsk::plain())
+    }
+
+    fn to_step_asked(&self, source: &Path, target: &Path, ask: &ConvertAsk) -> Result<()> {
+        let module = Self::ID.to_string();
+        let ask = Ask {
+            urgent: ask.urgent,
+            place: ask.place,
+            notify: ask.notify,
+            cancelled: ask.cancelled,
+        };
+        run::step(source, target, &ask).map_err(|failed| match failed {
+            Failed::Refused(message) => Error::Refused { module, message },
+            Failed::Later(message) => Error::Module { module, message },
+            Failed::Cancelled => Error::Module {
+                module,
+                message: "остановлено".into(),
+            },
         })
+    }
+
+    fn stamp(&self, source: &Path) -> Option<String> {
+        stamp::stamp(source)
     }
 }
 

@@ -33,6 +33,7 @@ mod moving;
 mod outside;
 mod passport;
 mod settings;
+mod steps;
 mod system;
 
 use std::path::{Path, PathBuf};

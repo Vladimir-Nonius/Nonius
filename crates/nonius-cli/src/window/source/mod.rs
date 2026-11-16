@@ -1,12 +1,14 @@
 //! Мост от общего слоя `nonius-app` к окну: окно не знает про git и
 //! OpenCascade, а сравнения берёт из того же кэша, что и команды.
 //!
-//! Здесь — проект и замки чтения и записи; `compare.rs` — сравнение,
+//! Здесь — проект и замки чтения и записи; `gate.rs` — очередь к
+//! OpenCascade, из которой работа выходит, пока ждёт SolidWorks; `compare.rs` — сравнение,
 //! `files.rs` — файлы детали, `intake.rs` — разбор папки, `look.rs` — две модели разбора в 3D, `machine.rs` — git и имя автора, `words.rs` —
 //! ошибки и масса словами.
 
 mod compare;
 mod files;
+mod gate;
 mod intake;
 mod look;
 mod machine;
@@ -18,6 +20,8 @@ use words::{in_words, mass_entry};
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use gate::{Gate, Held, Steps};
 
 use crate::format::short_date;
 use crate::window_lock::WindowLock;
@@ -38,7 +42,8 @@ pub(super) struct AppSource {
     app: App,
     /// Одно сравнение за раз: OpenCascade падает при параллельном чтении STEP,
     /// а человек может быстро переключить версии, пока идёт прошлое сравнение.
-    busy: Mutex<()>,
+    /// Работа, которая ждёт SolidWorks, на это время из очереди выходит.
+    busy: Gate,
     /// Запись (сохранить версию, назначить материал) — когда никто не читает
     /// папку детали и git: иначе git спотыкается о свой index.lock, а
     /// сравнение видит полусохранённое.
@@ -55,7 +60,7 @@ impl AppSource {
         let lock = WindowLock::take(app.project().root())?;
         Ok(Box::new(Self {
             app,
-            busy: Mutex::new(()),
+            busy: Gate::default(),
             files: RwLock::new(()),
             study: Mutex::new(None),
             _lock: lock,
@@ -79,7 +84,38 @@ impl AppSource {
     fn writing(&self) -> RwLockWriteGuard<'_, ()> {
         self.files.write().unwrap_or_else(|e| e.into_inner())
     }
+
+    /// Очередь к OpenCascade: одна тяжёлая работа за раз. Занято (например,
+    /// остановленное сравнение доделывает булеву операцию — её не прервать)
+    /// — человек видит `waiting` в строке хода, а не немую «работу».
+    fn one_at_a_time(&self, progress: &dyn Progress, waiting: &str) -> Held<'_> {
+        self.busy.try_take().unwrap_or_else(|| {
+            progress.step(waiting);
+            self.busy.take()
+        })
+    }
+
+    /// Ход работы ядра для окна; пока ядро ждёт SolidWorks, очередь к
+    /// OpenCascade свободна. `tail` дописывается к каждой строке хода.
+    fn steps<'a>(&'a self, progress: &'a dyn Progress, tail: &'static str) -> Steps<'a> {
+        Steps {
+            progress,
+            gate: &self.busy,
+            tail,
+        }
+    }
 }
+
+/// Ход без строки хода.
+struct Silent;
+
+impl Progress for Silent {
+    fn step(&self, _what: &str) {}
+}
+
+/// Строка хода, пока ждём, когда OpenCascade освободится.
+const WAIT: &str =
+    "Жду, пока закончится прошлая работа (остановленное сравнение доделывает свой шаг)…";
 
 fn version(p: Pick) -> Result<Option<VersionNumber>> {
     Ok(match p {
@@ -298,9 +334,19 @@ impl ProjectSource for AppSource {
 
     fn add_model(&self, file: &Path, part: &str, message: &str) -> Result<AddedModel> {
         // Импорт читает STEP, а OpenCascade работает по одному.
-        let _one_at_a_time = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let _one_at_a_time = self.busy.take();
         let _files = self.writing();
-        let imported = self.app.import(file, Some(part)).map_err(in_words)?;
+        // Строки хода у этого окошка нет; но пока SolidWorks выгружает
+        // STEP, очередь к OpenCascade свободна.
+        let quiet = Steps {
+            progress: &Silent,
+            gate: &self.busy,
+            tail: "",
+        };
+        let imported = self
+            .app
+            .import_with(file, Some(part), &quiet)
+            .map_err(in_words)?;
         let name = imported.item.name.to_string();
         let version = match self.app.save_version(&name, message) {
             Ok(v) => Some(v.version.get()),
@@ -390,6 +436,10 @@ impl ProjectSource for AppSource {
 
     fn intake_study(&self, folder: &Path, progress: &dyn Progress) -> Result<IntakePlan> {
         self.study_folder(folder, progress)
+    }
+
+    fn intake_refine(&self, progress: &dyn Progress) -> Result<()> {
+        self.refine_folder(progress)
     }
 
     fn intake_plan(&self, answers: &[(String, bool)]) -> Result<IntakePlan> {

@@ -14,9 +14,14 @@
 | Новый код ошибки | `code()` в `error.rs` своего крейта и список `ERROR_CODES` в `nonius-app/src/error.rs` |
 | Задумано, но не сделано: сравнение в отдельном процессе | раздел «Задумано» в `docs/ARCHITECTURE.md`; идеи по интерфейсу — `docs/proposals/interface-next.md` |
 | Импорт файла модели | `nonius-app/src/import.rs` |
-| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение), `measure.rs` (откуда берётся форма: сначала из самого файла — `nonius-sldprt`, потом STEP, потом SolidWorks); вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs`, `links.ps1`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`, «Показать в 3D» — `sight.rs`; в ядре — `intake/look.rs` и `compare_files` в `outside.rs`, в мосте — `window/source/look.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
-| Форма детали прямо из файла `.sldprt`, без SolidWorks (сетка показа, превью) | контейнер файла — `nonius-sldprt/src/container.rs`, сетка и числа по ней — `mesh.rs`, модуль и отказы — `lib.rs`; точка `ShapeGlance` — `nonius-core/src/extension/traits.rs`; где разбор папки это зовёт — `nonius-app/src/intake/measure.rs` |
-| Файл SolidWorks без ручного STEP (Nonius сам просит STEP у SolidWorks) | разговор с SolidWorks — `nonius-solidworks/src/export_step.ps1`, запуск — `run.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
+| Разбор папки (Nonius сам раскладывает модели, версии и чертежи) | правила — `nonius-app/src/intake/plan.rs`, `grouping.rs`, `names.rs`; проверка версий формой — `shape.rs` (сравнение; источник формы `Source` и все поправки на беглую — `Limits`; спорный ли ответ — `doubtful`), `measure.rs` (откуда берётся форма: первый проход — бегло из самого файла (`nonius-sldprt`) или готовый STEP, второй — точная форма спорных групп через SolidWorks); два прохода изучения — `study.rs` (`intake_glance`, `intake_refine`), обход папки и побайтные копии — `disk.rs`; вопросы человеку и ответы — `questions.rs`, изучение папки один раз — `study.rs`; выполнение — `apply.rs`; связи файлов от SolidWorks — `nonius-solidworks/src/links.rs` (команда `deps` рабочего процесса); STEP от SolidWorks для разбора — `exports.rs`, склад — `nonius-app/src/steps.rs`; точка `LinkSource` — `nonius-core/src/extension/traits.rs`; команда — `nonius-cli/src/commands/intake.rs`; экран в окне — `nonius-gui/src/app/intake/` (состояние и действия — `mod.rs`, сам экран — `screen.rs`, рамка вопроса — `ask.rs`, уточнение через SolidWorks в фоне и его галочка — `refine.rs`, «Показать в 3D» — `sight.rs`; в ядре — `intake/look.rs` и `compare_files` в `outside.rs`, в мосте — `window/source/look.rs`), данные для него — `nonius-gui/src/source/intake.rs`, мост к ядру — `nonius-cli/src/window/source/intake.rs` |
+| Что изменилось в дереве построения между двумя версиями (без SolidWorks) | `nonius-core/src/design/diff.rs`; откуда берётся замысел — строка ниже |
+| Дерево построения, свойства, состав сборки, модель чертежа прямо из файла SolidWorks | `nonius-sldprt/src/design/` (начать с `mod.rs`), XML — `xml.rs`, модуль точки `DesignSource` — `source.rs`; общие данные ядра — `nonius-core/src/design/mod.rs`; что где лежит в файле — `docs/formats/sldprt-design.md` |
+| Форма детали прямо из файла `.sldprt`, без SolidWorks (сетка показа, превью) | контейнер файла — `nonius-sldprt/src/container/`, сетка и числа по ней — `mesh.rs`, модуль, отказы и неполный ответ — `glance.rs`; точка `ShapeGlance` — `nonius-core/src/extension/traits.rs`; где разбор папки это зовёт — `nonius-app/src/intake/measure.rs` |
+| Файл SolidWorks без ручного STEP (Nonius сам просит STEP у своего экземпляра SolidWorks) | сначала прочитать `docs/formats/solidworks-automation.md` (как надёжно запускать SolidWorks и чего не трогать); разговор с SolidWorks — `nonius-solidworks/src/worker.ps1` и `helper.cs`, слова — `wire.rs`, сроки и перезапуск — `session.rs`, очередь и состояние — `hub.rs`; где импорт это зовёт — `nonius-app/src/import.rs` (`convert`); точка `Converter` — `nonius-core/src/extension/traits.rs` |
+| Склад STEP: один и тот же STEP второй раз не просят | `nonius-app/src/steps.rs` (ключ, предел, очистка), от чего зависит STEP у SolidWorks — `nonius-solidworks/src/stamp.rs`; тесты — `nonius-app/tests/step_store.rs` |
+| Индикатор «что делает SolidWorks» в окне (ещё не сделан) | данные — `nonius_solidworks::status()` и `own()` в `nonius-solidworks/src/hub.rs` |
+| Что внутри файлов SolidWorks (байты, потоки, сетка, Parasolid, дерево построения, сборки) и как честно читать чужие форматы | `docs/formats/README.md` — оглавление базы знаний; дальше файл по теме |
 | Материал, плотность, масса | `nonius-app/src/passport.rs`, справочник — `materials.rs` |
 | Сравнение версий и его кэш | `nonius-app/src/compare.rs`, `cache.rs` |
 | Статус деталей (новая / изменена / сохранена) | `nonius-app/src/items.rs` |
@@ -33,7 +38,7 @@
 | Правила для ИИ в проекте | `nonius-core/src/project/agents.rs` |
 | Формат сообщения коммита, подпись ИИ | `nonius-store/src/message.rs`, `version.rs` (`AiActor`) |
 | Статус всего проекта одним проходом | `nonius-store/src/overview.rs`, `nonius-app/src/items.rs` |
-| Новый модуль (крейт) | `nonius-core/src/extension/traits.rs`, `extension/manifest.rs`, `contract.rs`; пример — `nonius-step/src/lib.rs` |
+| Новый модуль (крейт) | `nonius-core/src/extension/traits.rs`, `extension/manifest.rs`, `contract/`; пример — `nonius-step/src/lib.rs` |
 | Поле в `meta.yaml` / `tree.yaml` / `project.yaml` | `nonius-core/src/meta.rs` / `tree.rs` / `project/mod.rs` + `schema.rs` (миграция) |
 | Сравнение паспортов (числа, материал, свойства) | `nonius-core/src/compare/meta.rs`, формат отчёта — `compare/mod.rs` |
 | Чтение заголовка STEP | `nonius-step/src/header.rs` |
@@ -80,9 +85,12 @@
 | `project/templates.rs` | `.gitattributes` нового проекта |
 | `project/agents.rs` | `AGENTS.md` проекта: правила для ИИ, обновление блока между метками |
 | `extension/manifest.rs` | манифест модуля, точки расширения, права, версия API |
-| `extension/traits.rs` | трейты точек (`GeometrySource`, `Comparator`, `Converter`, …), `Snapshot`, `Event` |
+| `extension/traits.rs` | трейты точек (`GeometrySource`, `Comparator`, `Converter`, `ShapeGlance`, `DesignSource`, …), `Snapshot`, `Event` |
 | `extension/registry.rs` | реестр модулей и проверка при подключении |
-| `contract.rs` | контрактные проверки для каждой точки |
+| `design/mod.rs` | замысел из родного файла CAD, как его видит ядро: `Design`, `Operation`, `Size`, `Doubt`; третий исход чтения — `Partial` и `Gap` («прочитано частично, вот что не прочитано») |
+| `design/diff.rs` | `diff` двух замыслов по постоянному идентификатору операций: `Change` — добавлена, удалена, переименована, изменился размер; только данные, без слов |
+| `contract/mod.rs` | контрактные проверки точек: геометрия, дерево, сравнение, экспорт, перевод, связи |
+| `contract/reading.rs` | контракты чтения родного файла CAD: `glance` (и согласие неполного ответа со строгим — `partial_glance_problems`), `design_source` |
 | `compare/mod.rs` | формат отчёта: `Change`, `ChangeKind`, `ChangeReport` |
 | `compare/meta.rs` | встроенное сравнение паспортов `meta-compare` |
 | `compare/number.rs` | запись чисел без лишних нулей |
@@ -114,27 +122,45 @@
 | `lib.rs` | модуль `step-header` (`StepHeaderSource`) и его тесты |
 | `header.rs` | разбор `FILE_NAME`, `FILE_SCHEMA`, кириллицы `\X2\` |
 
-### `nonius-sldprt` — форма прямо из файла `.sldprt`
+### `nonius-sldprt` — форма и замысел прямо из файла SolidWorks
 
-SolidWorks не нужен: модуль читает сам файл (формат SolidWorks 2015 и новее). Числа приблизительные — по сетке, которой SolidWorks рисует деталь; в паспорт версии не идут, служат разбору папки.
+SolidWorks не нужен: модуль читает сам файл (новый, «блочный» контейнер; старый OLE называет прямо и не читает). Числа приблизительные — по сетке, которой SolidWorks рисует деталь; в паспорт версии не идут, служат разбору папки.
 
 | Файл | Что внутри |
 |---|---|
-| `lib.rs` | модуль `sldprt-glance` (`SldprtGlance`, точка `ShapeGlance`), `fingerprint` — числа формы или причина отказа (нет сетки, сетка старее модели, не замкнута), `preview_png` — картинка из файла, `register` |
-| `container.rs` | `Container`: куски файла (заголовок как у zip, имена с переставленными половинками байта, deflate, CRC-32); `chunk`, `chunk_by`, `names`; `pack` — собрать файл для тестов |
+| `lib.rs` | что читается из файла и чем; `register` — подключить оба модуля |
+| `glance.rs` | модуль `sldprt-glance` (`SldprtGlance`, точка `ShapeGlance`): `fingerprint` — строгий ответ или причина отказа (нет сетки, сетка старее модели, не замкнута, деталь производная); `look` и `glance_partial` — «прочитано частично» с перечнем оговорок; `preview_png` — картинка из файла |
+| `source.rs` | модуль `sldprt-design` (`SldprtDesign`, точка `DesignSource`): перевод прочитанного в данные ядра (`to_core`) |
+| `container/mod.rs` | `Container`: секции файла — список из центрального каталога, секция распаковывается один раз (`section`, `chunk`, `chunk_by`, `names`); `Listing` — список из каталога или обходом обрезанного файла; `Unreadable` — почему файл не открылся (старый OLE, не SolidWorks) |
+| `container/layout.rs` | разметка по байтам: запись конца каталога, каталог, локальная запись, запасной обход по меткам |
+| `container/budget.rs` | `Budget`: предел распаковки, растущий с размером файла |
+| `container/pack.rs` | `Container::pack` — собрать файл для тестов (с каталогом, ячейкой кэша и хвостом, как в настоящем) |
+| `xml.rs` | терпимое чтение XML секций: элементы, атрибуты, текст; UTF-8, UTF-16, windows-1251; на мусоре не падает, а говорит `clean = false` |
+| `design/mod.rs` | `Design` — замысел из файла (`Design::open`, `Design::read`): вид документа, операции, манифест, свойства и `gaps` — что не прочитано и почему (`Gap`, `Piece`, `Why`); материал и сохранённая масса активной конфигурации |
+| `design/keywords.rs` | `Tree`: операции из `swXmlContents/KeyWords` — постоянный номер, имя, тип, размеры (`Dimension` с пометкой радиус / диаметр / угол), конфигурации; служебные узлы помечены |
+| `design/manifest.rs` | `Manifest`: `swVersion`, конфигурации (активная, «не перестроена»), операции с внешними ссылками, состав сборки (`Component`, `direct_files`) — из `swXmlContents/Features` и `COMPINSTANCETREE` |
+| `design/props.rs` | `Props`: единицы, таблица параметров, сохранённая масса, свойства ЕСКД по конфигурациям, модели видов чертежа; личные данные из файла не читаются |
+| `design/doubt.rs` | `Doubt` — признаки «спорной» детали с причинами: не перестроена, производная, внешние ссылки, импорт, таблица параметров, несколько конфигураций, старая версия, прочитано не целиком |
 | `mesh.rs` | `measure`: записи граней в куске `Contents/DisplayLists` (ленты треугольников с нормалями) → объём с поправкой на кривизну, площадь, габариты, число граней; проверка, что сетка замкнута |
 
 ### `nonius-solidworks` — STEP из файлов SolidWorks
 
-Только Windows и только если SolidWorks установлен; иначе модуль не подключается, и импорт работает без него.
+Только Windows и только если SolidWorks установлен; иначе модуль не подключается, и импорт работает без него. Работает через свой, невидимый экземпляр SolidWorks; к SolidWorks человека не подключается.
 
 | Файл | Что внутри |
 |---|---|
-| `lib.rs` | модуль `solidworks-step` (`SolidWorksConverter`, точка `Converter`), `register` — подключить, если SolidWorks есть |
-| `run.rs` | `available` (есть ли SolidWorks; `NONIUS_NO_SOLIDWORKS=1` — считать, что нет), `export_step`, `script`: запуск скрипта без окна, ожидание до 5 минут, разбор ответа `OK` / `ERROR: причина`; `close_later` — оставить сторожа |
-| `links.rs`, `links.ps1` | модуль `solidworks-links` (точка `LinkSource`): из чего собрана сборка, к какой модели чертёж; вся папка одним запуском |
-| `close.ps1` | сторож: держит SolidWorks запущенным, пока Nonius к нему обращается, и закрывает наш невидимый после полуминуты простоя (иначе разбор папки запускал бы его на каждую деталь) |
-| `export_step.ps1` | сам разговор с SolidWorks (PowerShell + COM): открыть деталь, «сохранить как STEP», закрыть за собой; в начале — правила вежливости к работающему человеку и почему вызовы идут через `InvokeMember` |
+| `lib.rs` | модуль `solidworks-step` (`SolidWorksConverter`, точка `Converter`), `register` — подключить, если SolidWorks есть; наружу — `status`, `own`, `ping` |
+| `run.rs` | `available` (есть ли SolidWorks), `export_step` и `step` (выгрузка STEP через общий сеанс), `ping` |
+| `worker.ps1` | рабочий процесс, один на программу (PowerShell + COM): запускает свой SolidWorks и читает команды из stdin — `step`, `deps`, `ping`, `quit`; в начале — что такое «свой экземпляр», чего трогать нельзя и почему вызовы идут через `InvokeMember` |
+| `helper.cs` | C# для рабочего процесса: запуск `SLDWORKS.exe /r`, COM-объект своего процесса из ROT по `SolidWorks_PID_<pid>`, Job Object, строки UTF-8 мимо консоли, «пульс» (время процессора и окно-сообщение своего SolidWorks), слежение за Nonius |
+| `wire.rs` | слова разговора: команды (`Command`), строки ответа (`Line`), свой экземпляр (`Own`), что значат коды COM (`fault`: умер / занят / окончательный отказ) |
+| `worker.rs` | труба к рабочему процессу: `Worker` (строка туда, строки обратно), `Launch`; настоящий — `PowerShell` (`dry` — без SolidWorks, для теста трубы) |
+| `session.rs` | `Session`: надзор за каждой командой — зависание по времени процессора, окно отчёта об ошибке, перезапуск после сбоя и каждые N команд, повтор при «занят», окончательный отказ после двух падений, остановка |
+| `limits.rs` | сроки и счётчики надзора (`Limits`), почему команда не выполнена (`Failed`: окончательно / сейчас не вышло / остановлено), чем занят сеанс (`Phase`), связь с просящим (`Hooks`) |
+| `hub.rs` | `Hub`: один сеанс на программу, очередь (срочное — вперёд фонового), состояние наружу (`Status`, `status`, `own`), закрытие простаивающего SolidWorks |
+| `stamp.rs` | отпечаток условий перевода для склада STEP: `SLDWORKS.exe`, настройки STEP человека из реестра (только чтение), активная конфигурация, SHA-256 файлов-зависимостей (список — из файла, `nonius-sldprt`) |
+| `links.rs` | модуль `solidworks-links` (точка `LinkSource`): из чего собрана сборка, к какой модели чертёж — команда `deps` того же рабочего процесса |
+| `session_tests.rs`, `hub_tests.rs` | поддельный рабочий процесс (`Fake`) и тесты надзора и очереди без SolidWorks |
 
 ### `nonius-occt` — геометрия на OpenCascade
 
@@ -265,14 +291,16 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `intake/split.rs` | деление группы тёзок на настоящие детали: чему верить (`Evidence`: сборка → человек → форма → имя), копии из других папок (`dupes`) |
 | `intake/shape.rs` | форма детали: отпечаток (`Shape`), `compare` (та же / похожая / разная), итог `ShapeVerdict` |
 | `intake/measure.rs` | откуда берётся форма: паспорт STEP, для файла SolidWorks — STEP через модуль перевода |
+| `intake/exports.rs` | `Exports` — разрешение будить модуль перевода и кто просит (срочно или фоном, место в пачке, строка хода); `exported` — точная форма по STEP от модуля, что запоминать как «формы не будет» |
+| `steps.rs` | склад STEP проекта (`.git/nonius/steps`): ключ — содержимое файла и `Converter::stamp`; готовые STEP, окончательные отказы модуля, пометка «тела нет»; предел размера и очистка (`App::steps_size`, `App::forget_steps`) |
 | `intake/words.rs` | что изменилось между версиями словами («отверстие ⌀8 → ⌀10»): быстрые модули сравнения на STEP обеих версий, память `intake-words.tsv`; `Words` — готовые слова и список недостающих пар; `step_of` — STEP версии (рядом или от SolidWorks) |
 | `intake/look.rs` | «Показать в 3D»: `intake_compare` — STEP обеих моделей и `compare_files` |
-| `intake/memory.rs` | память о форме между разборами (`.git/nonius/intake-shapes.tsv`): второй разбор не ждёт SolidWorks |
+| `intake/memory.rs` | память о форме между разборами (`.git/nonius/intake-shapes.tsv`): второй разбор не ждёт SolidWorks; беглая форма помечена поколением (`mesh2`), строки прежних поколений не читаются |
 | `intake/hints.rs` | похожие и одинаковые формой детали с разными именами: строки-подсказки и пары для вопросов |
 | `intake/questions.rs` | диалог: `Question` (вопрос, улики, мнение программы, файлы сторон и слова для 3D), `Decisions` (ответы по парам моделей), `ask` (о чём спросить) |
 | `intake/plan.rs` | сборка плана: `Facts` (всё, что известно о файлах), папки по сборкам, «почему», вопросы |
 | `intake/apply.rs` | `intake_apply`: копии файлов в проект, версии в историю, итог |
-| `import.rs` | `import`: файл модели в деталь, паспорт, превью; для файла SolidWorks — свежий STEP через модуль перевода (`convert`) |
+| `import.rs` | `import` и `import_with` (со строкой хода): файл модели в деталь, паспорт, превью; для файла SolidWorks — свежий STEP со склада или через модуль перевода (`convert`, пожелания — `Wish`) |
 | `passport.rs` | `Passport`, `Mass` (масса только при заданном материале), `set_material` |
 | `materials.rs` | справочник материалов с плотностью |
 | `compare.rs` | `compare`, `Comparison`, `CompareOptions`, `Progress` (ход и отмена) |
@@ -290,6 +318,7 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `args.rs` | команды и параметры, текст справки |
 | `window.rs` | окно: `nonius` без команды, `nonius view` |
 | `window/source/mod.rs` | мост от `nonius-app` к окну (`AppSource`), замки чтения и записи |
+| `window/source/gate.rs` | очередь к OpenCascade (`Gate`): одна тяжёлая работа за раз; работа, которая ждёт SolidWorks, на это время из очереди выходит (`step_out`, `Steps` — ход ядра для окна) |
 | `window/source/compare.rs`, `files.rs` | сравнение для окна; файлы детали |
 | `window/source/intake.rs` | разбор папки для окна: `intake_study` один раз (изученное помнит `AppSource`), план по ответам, раскладка под замком записи |
 | `window/source/look.rs` | «Показать в 3D» для разбора: сцена сравнения двух файлов, не вышло — две модели рядом |
@@ -333,8 +362,14 @@ SolidWorks не нужен: модуль читает сам файл (форм�
 | `nonius-app/src/intake/shape_tests.rs` | сравнение формы на числах настоящих деталей (коллектор и его доработка): копия, версия, другая деталь; деление группы (`split.rs`): слово человека, копии из других папок, детали одной сборки |
 | `nonius-app/tests/intake.rs` | разбор настоящей папки на диске с поддельными связями: план, выполнение, версии в истории, повторный разбор; три глубины проверки формой; ответы на вопросы меняют план; копии проекта по папкам сворачиваются в одну деталь; слова об изменениях в плане и в вопросе (поддельное быстрое сравнение) |
 | `nonius-app/tests/convert.rs` | импорт файла SolidWorks с поддельным модулем перевода: STEP рядом, отказ перевода, без модуля |
+| `nonius-sldprt/src/container/tests.rs` | каталог, дополнительное поле после имени, обрезанный файл, испорченная секция, ложный размер, старый и чужой файл |
+| `nonius-sldprt/tests/design.rs` | замысел из файлов, собранных в тесте: деталь целиком, личные данные не выходят наружу, спорная деталь, мусор вместо XML, сборка, чертёж, контракт модуля `sldprt-design`, сравнение двух версий |
+| `nonius-sldprt/tests/real.rs` | прогон по настоящим папкам — `NONIUS_TEST_SLD_FOLDERS=папка;папка`: каждый файл открывается по каталогу, каждая секция читается, замысел читается (в вывод идут только числа и коды); сводка одного файла — `NONIUS_TEST_SLDPRT=путь`; сравнение двух версий — `NONIUS_TEST_SLDPRT_PAIR=старая;новая` |
 | `nonius-sldprt/tests/glance.rs` | файл собирается в тесте: брусок и цилиндр (поправка объёма), отказы, превью, контракт; с настоящими файлами — `NONIUS_TEST_SLDPRT=путь к .sldprt`, сверка с эталоном — `NONIUS_TEST_SLDPRT_TRUTH=путь к .tsv` |
-| `nonius-solidworks/tests/contract.rs` | контракт модуля; с настоящим SolidWorks — только если задать `NONIUS_TEST_SOLIDWORKS=путь к .sldprt` |
+| `nonius-app/tests/step_store.rs` | склад STEP с поддельным модулем перевода: повторный запрос модуль не зовёт, копия под другим именем — тот же STEP, окончательный отказ запоминается, условия перевода входят в ключ, строка модуля доходит до хода работы |
+| `nonius-solidworks/src/session_tests.rs`, `hub_tests.rs` | поддельный рабочий процесс: команды, зависание, «умер», «занят», перезапуск, отказ после двух падений, остановка; очередь (срочное вперёд), состояние наружу |
+| `nonius-solidworks/src/worker.rs` (тесты) | настоящий PowerShell без SolidWorks (`-Dry`): кириллица и пробелы в путях туда и обратно; обещания скриптов (нет подключения к чужому SolidWorks, нет общих настроек) |
+| `nonius-solidworks/tests/contract.rs` | контракт модуля; с настоящим SolidWorks — только если задать `NONIUS_TEST_SOLIDWORKS=путь к .sldprt`: выгрузка, связи, свой экземпляр (один на все просьбы, не SolidWorks человека, тот остаётся на месте) |
 | `nonius-cli/tests/cli.rs` | команды `nonius` от начала до конца |
 | `nonius-cli/tests/folders.rs` | `folder new`, `part move`, `map --json`, `upgrade` |
 

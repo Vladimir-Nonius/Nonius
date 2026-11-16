@@ -51,6 +51,10 @@ fn folder_goes_into_the_project_from_the_window() {
     assert_eq!(plan.other, 1, "заметки не тронуты");
     // Пересчёт без ответов — тот же план.
     assert_eq!(src.intake_plan(&[]).unwrap(), plan);
+    // SolidWorks в тестах нет: уточнять нечем, а уточнение не ломает план.
+    assert!(!plan.refine);
+    src.intake_refine(&Quiet).unwrap();
+    assert_eq!(src.intake_plan(&[]).unwrap(), plan);
 
     // Ответ «нет» на вопрос о версиях разводит их на две детали.
     let mut answers = Vec::new();

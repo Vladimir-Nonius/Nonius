@@ -9,7 +9,7 @@ fn shape(volume: f64, dims: [f64; 3]) -> Shape {
         area: None,
         dims,
         faces: None,
-        rough: false,
+        source: Source::Exact,
     }
 }
 
@@ -55,15 +55,26 @@ fn passport_becomes_a_shape() {
         volume_mm3: Some(1000.0),
         ..Default::default()
     };
-    assert_eq!(Shape::of(&g), None, "без габаритов сравнивать нечем");
+    assert_eq!(
+        Shape::of(&g, Source::Exact),
+        None,
+        "без габаритов сравнивать нечем"
+    );
     g.bbox = Some(BoundingBox {
         min: [0.0, -5.0, 0.0],
         max: [30.0, 5.0, 20.0],
     });
     // Как деталь повёрнута — не важно: габариты по возрастанию.
-    assert_eq!(Shape::of(&g).unwrap().dims, [10.0, 20.0, 30.0]);
+    assert_eq!(
+        Shape::of(&g, Source::Exact).unwrap().dims,
+        [10.0, 20.0, 30.0]
+    );
     g.volume_mm3 = Some(0.0);
-    assert_eq!(Shape::of(&g), None, "поверхность без объёма — не деталь");
+    assert_eq!(
+        Shape::of(&g, Source::Exact),
+        None,
+        "поверхность без объёма — не деталь"
+    );
 }
 
 #[test]
@@ -112,7 +123,7 @@ fn exact_and_rough_shapes_are_compared_softly() {
     let rough = Shape {
         volume: exact.volume * 1.002,
         faces: Some(316),
-        rough: true,
+        source: Source::Glance,
         ..exact
     };
     assert_eq!(compare(&exact, &rough), Likeness::Same);
@@ -131,13 +142,19 @@ fn other_part_is_different() {
     let plate = shape(10_000.0, [5.0, 40.0, 50.0]);
     assert_eq!(
         compare(&shaft, &plate),
-        Likeness::Different("габариты 20×20×100 мм и 5,0×40×50 мм".into())
+        Likeness::Different {
+            how: "габариты 20×20×100 мм и 5,0×40×50 мм".into(),
+            kept_two: false,
+        }
     );
     // Габариты те же, а металла вдвое меньше: труба вместо прутка.
     let pipe = shape(5_000.0, [20.0, 20.0, 100.0]);
     assert_eq!(
         compare(&shaft, &pipe),
-        Likeness::Different("объём −50,0 %".into())
+        Likeness::Different {
+            how: "объём −50,0 %".into(),
+            kept_two: false,
+        }
     );
 }
 
@@ -273,12 +290,16 @@ fn shortened_part_is_marked_as_close() {
     let long = shape(100_000.0, [40.0, 40.0, 52.0]);
     let short = shape(48_000.0, [25.0, 40.0, 40.0]);
     match compare(&long, &short) {
-        Likeness::Different(how) => assert!(how.contains(TWO_KEPT), "{how}"),
+        Likeness::Different { how, kept_two } => {
+            assert!(kept_two && how.contains(TWO_KEPT), "{how}")
+        }
         other => panic!("ждал «другая», получил {other:?}"),
     }
     let other = shape(48_000.0, [25.0, 30.0, 70.0]);
     match compare(&long, &other) {
-        Likeness::Different(how) => assert!(!how.contains(TWO_KEPT), "{how}"),
+        Likeness::Different { how, kept_two } => {
+            assert!(!kept_two && !how.contains(TWO_KEPT), "{how}")
+        }
         other => panic!("ждал «другая», получил {other:?}"),
     }
 }

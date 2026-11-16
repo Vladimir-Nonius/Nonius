@@ -30,6 +30,9 @@ pub enum ExtensionPoint {
     /// Беглый взгляд на форму прямо из файла CAD
     /// ([`ShapeGlance`](super::ShapeGlance)).
     Glance,
+    /// Замысел конструктора прямо из файла CAD: операции, размеры,
+    /// свойства ([`DesignSource`](super::DesignSource)).
+    Design,
     /// Реакция на события проекта ([`EventHandler`](super::EventHandler)).
     Events,
     /// Панели и вкладки интерфейса (подключаются веб-интерфейсом).

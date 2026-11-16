@@ -158,6 +158,13 @@ fn program_page(app: &mut App, ui: &mut egui::Ui) {
     {
         app.settings.save();
     }
+    if ui
+        .checkbox(&mut app.settings.intake_refine, t.intake_refine)
+        .on_hover_text(t.intake_refine_hint)
+        .changed()
+    {
+        app.settings.save();
+    }
     ui.add_space(4.0);
     ui.label(RichText::new(t.program_settings_where).weak());
 }

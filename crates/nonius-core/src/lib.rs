@@ -9,6 +9,7 @@
 
 pub mod compare;
 pub mod contract;
+pub mod design;
 pub mod error;
 pub mod extension;
 pub mod meta;

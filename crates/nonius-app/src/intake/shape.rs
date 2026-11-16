@@ -27,14 +27,55 @@ const TOUCHED: f64 = 0.10;
 /// Насколько может уйти третий габарит и объём у версий одной детали.
 const MAX_CHANGE: f64 = 0.25;
 /// Форма «другая», но два габарита из трёх те же: так выглядит и деталь,
-/// которую укоротили или утолщили. По этим словам вопрос человеку задаётся
-/// без мнения «похоже, нет» (см. `questions.rs`).
+/// которую укоротили или утолщили. Слова для человека; сам признак —
+/// поле `kept_two` у [`Likeness::Different`].
 pub(super) const TWO_KEPT: &str = "два габарита из трёх совпали";
 /// Копия: все числа совпали с точностью записи в файл.
 const COPY: f64 = 1e-4;
-/// Копия, когда одну форму сняли точно (по STEP), а другую — бегло, по
-/// сетке показа из файла: способы расходятся до 2 %, мельче не разглядеть.
-const COPY_MIXED: f64 = 0.02;
+/// Насколько беглая форма может разойтись с точной: габариты по сетке —
+/// до 1 %, объём — до 2 % (сверка 101 детали с SolidWorks).
+const GLANCE_ERROR: f64 = 0.02;
+
+/// Откуда сняты числа формы.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Source {
+    /// По STEP: от SolidWorks или готовый рядом с файлом.
+    Exact,
+    /// Беглый взгляд: по сетке показа из самого файла CAD (`ShapeGlance`).
+    /// Числа чуть грубее, а граней в сетке меньше, чем в STEP.
+    Glance,
+}
+
+/// Чего ждать от сравнения двух форм — зависит только от того, откуда
+/// сняты числа. Все поправки на беглую форму — здесь, и больше нигде.
+struct Limits {
+    /// Ниже этого расхождения — копия.
+    copy: f64,
+    /// Число граней сравнимо: обе формы из одного источника.
+    faces: bool,
+    /// На сколько ответ может ошибаться у порогов: у точных форм — ни на
+    /// сколько, если хоть одна беглая — на [`GLANCE_ERROR`].
+    error: f64,
+}
+
+impl Limits {
+    fn between(a: Source, b: Source) -> Self {
+        let error = if a == Source::Exact && b == Source::Exact {
+            0.0
+        } else {
+            GLANCE_ERROR
+        };
+        // Одна форма точная, другая беглая — способы расходятся, и копию
+        // мельче их расхождения не разглядеть. Обе беглые — источник один:
+        // копия даёт те же числа.
+        let mixed = a != b;
+        Self {
+            copy: if mixed { GLANCE_ERROR } else { COPY },
+            faces: !mixed,
+            error,
+        }
+    }
+}
 
 /// Что форма говорит о версиях детали.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -59,15 +100,13 @@ pub(super) struct Shape {
     pub dims: [f64; 3],
     /// Число граней.
     pub faces: Option<u32>,
-    /// Числа сняты бегло — по сетке показа из самого файла CAD, а не по
-    /// STEP. Они чуть грубее, а граней в сетке меньше, чем в STEP, поэтому
-    /// с точной формой такая сравнивается мягче (см. [`compare`]).
-    pub rough: bool,
+    /// Откуда числа: от этого зависит, насколько им верить (см. [`Limits`]).
+    pub source: Source,
 }
 
 impl Shape {
     /// Отпечаток из паспорта. Нет объёма или габаритов — сравнивать нечем.
-    pub fn of(g: &GeometrySummary) -> Option<Self> {
+    pub fn of(g: &GeometrySummary, source: Source) -> Option<Self> {
         let volume = g.volume_mm3.filter(|v| *v > 0.0)?;
         let b = g.bbox?;
         let mut dims = [
@@ -81,7 +120,7 @@ impl Shape {
             area: g.area_mm2,
             dims,
             faces: g.faces,
-            rough: false,
+            source,
         })
     }
 
@@ -103,8 +142,14 @@ pub(super) enum Likeness {
     Same,
     /// Версии одной детали; внутри — что изменилось, словами.
     Similar(String),
-    /// Разные детали; внутри — чем отличаются, словами.
-    Different(String),
+    /// Разные детали.
+    Different {
+        /// Чем отличаются, словами.
+        how: String,
+        /// Два габарита из трёх те же: деталь могли просто укоротить или
+        /// утолщить — вопрос человеку идёт без мнения «похоже, нет».
+        kept_two: bool,
+    },
 }
 
 /// Число по-русски: с запятой.
@@ -119,6 +164,22 @@ fn gap(a: f64, b: f64) -> f64 {
 
 /// Сравнить форму «было» и «стало».
 pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
+    judge(a, b, 0.0)
+}
+
+/// Ответ сравнения на грани: беглая форма ошибается на проценты, и при
+/// чуть других числах ответ был бы другим (похожи ↔ разные, копия ↔
+/// версия). Такие пары стоит досчитать точно. Точные формы спорными не
+/// бывают.
+pub(super) fn doubtful(a: &Shape, b: &Shape) -> bool {
+    let error = Limits::between(a.source, b.source).error;
+    let kind = |l: &Likeness| std::mem::discriminant(l);
+    error > 0.0 && kind(&judge(a, b, -error)) != kind(&judge(a, b, error))
+}
+
+/// Сравнение с порогами, сдвинутыми на `shift` (0 — как есть).
+fn judge(a: &Shape, b: &Shape, shift: f64) -> Likeness {
+    let limits = Limits::between(a.source, b.source);
     let sizes: Vec<f64> = (0..3).map(|i| gap(a.dims[i], b.dims[i])).collect();
     let worst = sizes.iter().copied().fold(0.0, f64::max);
     let volume = gap(a.volume, b.volume);
@@ -126,14 +187,18 @@ pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
         (Some(x), Some(y)) => gap(x, y),
         _ => 0.0,
     };
-    // Точная форма и беглая — числа из разных источников: грани не
-    // сравниваем вовсе, остальное — с запасом на расхождение способов.
-    let mixed = a.rough != b.rough;
     let faces = match (a.faces, b.faces) {
-        (Some(x), Some(y)) if !mixed => x == y,
+        (Some(x), Some(y)) if limits.faces => x == y,
         _ => true,
     };
-    let copy = if mixed { COPY_MIXED } else { COPY };
+    // Точная копия — точная при любом сдвиге; сдвигается только запас на
+    // расхождение способов.
+    let copy = if limits.copy > COPY {
+        (limits.copy + shift).max(COPY)
+    } else {
+        COPY
+    };
+    let (same_size, touched, max_change) = (SAME_SIZE + shift, TOUCHED + shift, MAX_CHANGE + shift);
     if worst < copy && volume < copy && area < copy && faces {
         return Likeness::Same;
     }
@@ -142,9 +207,9 @@ pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
         if b.volume >= a.volume { "+" } else { "−" },
         number(volume * 100.0, 1)
     );
-    let kept = sizes.iter().filter(|s| **s <= SAME_SIZE).count();
-    let resized = kept >= 2 && worst <= MAX_CHANGE;
-    if worst > TOUCHED && !resized {
+    let kept = sizes.iter().filter(|s| **s <= same_size).count();
+    let resized = kept >= 2 && worst <= max_change;
+    if worst > touched && !resized {
         let sizes = format!("габариты {} и {}", a.size(), b.size());
         // Габариты отсортированы, поэтому «те же два» ищем без учёта места.
         let mut free = b.dims.to_vec();
@@ -152,14 +217,19 @@ pub(super) fn compare(a: &Shape, b: &Shape) -> Likeness {
             let hit = free.iter().position(|&o| gap(d, o) <= SAME_SIZE);
             hit.map(|at| free.swap_remove(at)).is_some()
         });
-        return Likeness::Different(if same.count() >= 2 {
+        let kept_two = same.count() >= 2;
+        let how = if kept_two {
             format!("{sizes}; {TWO_KEPT}")
         } else {
             sizes
-        });
+        };
+        return Likeness::Different { how, kept_two };
     }
-    if volume > MAX_CHANGE {
-        return Likeness::Different(percent);
+    if volume > max_change {
+        return Likeness::Different {
+            how: percent,
+            kept_two: false,
+        };
     }
     Likeness::Similar(if kept == 3 {
         format!("{percent}, габариты те же")

@@ -135,6 +135,7 @@ fn run(cli: Cli) -> Result<()> {
             apply,
             quick,
             deep,
+            fast,
             ask,
             yes,
             no,
@@ -142,6 +143,7 @@ fn run(cli: Cli) -> Result<()> {
             let options = intake::Options {
                 apply: *apply,
                 check: intake::check(*quick, *deep),
+                fast: *fast,
                 ask: *ask,
                 yes,
                 no,

@@ -1,15 +1,21 @@
 //! Связи файлов SolidWorks: из чего собрана сборка, к какой модели чертёж.
 //!
-//! SolidWorks отвечает по файлам на диске, не открывая их: вся папка — один
-//! запуск скрипта `links.ps1` и доли секунды.
+//! Отвечает свой SolidWorks (команда `deps` рабочего процесса, `hub.rs`) —
+//! по файлам на диске, не открывая их: миллисекунды на файл. Тот же сеанс и
+//! та же очередь, что у выгрузки STEP; к SolidWorks человека Nonius не
+//! подключается.
+//!
+//! То же самое без SolidWorks читает `nonius-sldprt` (`Design`: состав
+//! сборки, модель чертежа) — этот модуль его не заменяет и не трогает.
 
 use std::path::{Path, PathBuf};
 
 use nonius_core::extension::{ExtensionPoint, LinkSource, Module, ModuleManifest, API_VERSION};
 use nonius_core::{Error, Result};
 
-#[cfg(any(windows, test))]
-const LINKS: &str = include_str!("links.ps1");
+use crate::hub::{Ask, Hub};
+use crate::session::Failed;
+use crate::wire::Command;
 
 /// Модуль: связи файлов `.sldasm`, `.slddrw`, `.sldprt` от установленного
 /// SolidWorks.
@@ -58,91 +64,108 @@ impl LinkSource for SolidWorksLinks {
     }
 
     fn links(&self, files: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>> {
-        ask(files).map_err(|message| Error::Module {
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        ask(crate::hub::hub(), files).map_err(|message| Error::Module {
             module: Self::ID.into(),
             message,
         })
     }
 }
 
-/// Спросить SolidWorks про все файлы одним запуском.
-fn ask(files: &[PathBuf]) -> std::result::Result<Vec<Vec<PathBuf>>, String> {
-    if files.is_empty() {
-        return Ok(Vec::new());
-    }
-    #[cfg(windows)]
-    {
-        let dir = tempfile::tempdir().map_err(|e| format!("временная папка: {e}"))?;
-        let list = dir.path().join("files.txt");
-        let text: String = files
-            .iter()
-            .map(|f| format!("{}\r\n", f.display()))
-            .collect();
-        std::fs::write(&list, text).map_err(|e| format!("список файлов: {e}"))?;
-        let lines = crate::run::script(LINKS, &[("-List", &list)])?;
-        Ok(parse(&lines, files))
-    }
-    #[cfg(not(windows))]
-    {
-        Err("SolidWorks есть только в Windows".into())
-    }
-}
-
-/// Разобрать ответ скрипта: `FILE<таб>путь`, за ним его `DEP<таб>путь`.
-/// Ответ раскладывается по порядку вопроса; о ком скрипт промолчал — пусто.
-#[cfg(any(windows, test))]
-fn parse(lines: &[String], files: &[PathBuf]) -> Vec<Vec<PathBuf>> {
-    let mut found = vec![Vec::new(); files.len()];
-    let mut next = 0;
-    let mut current = None;
-    for line in lines {
-        if line.strip_prefix("FILE\t").is_some() {
-            // Строки FILE идут в порядке вопроса, по одной на файл.
-            current = (next < files.len()).then_some(next);
-            next += 1;
-        } else if let (Some(dep), Some(i)) = (line.strip_prefix("DEP\t"), current) {
-            let dep = PathBuf::from(dep.trim());
-            if !found[i].contains(&dep) {
-                found[i].push(dep);
+/// Спросить свой SolidWorks про каждый файл. Это фоновая работа: просьбы
+/// человека (импорт, «Показать в 3D») идут в очереди вперёд.
+///
+/// Один нечитаемый файл не роняет разбор всей папки: у него просто нет
+/// связей. Ошибка — только когда SolidWorks не ответил ни про один файл
+/// (не запустился, не установлен).
+fn ask(hub: &Hub, files: &[PathBuf]) -> std::result::Result<Vec<Vec<PathBuf>>, String> {
+    let mut found = Vec::with_capacity(files.len());
+    let (mut answered, mut problem) = (false, None);
+    for (n, file) in files.iter().enumerate() {
+        let ask = Ask {
+            urgent: false,
+            place: Some((n + 1, files.len())),
+            ..Ask::plain()
+        };
+        let mut links: Vec<PathBuf> = Vec::new();
+        match hub.run(&Command::Deps(file), &ask) {
+            Ok(lines) => {
+                answered = true;
+                for line in lines {
+                    let link = PathBuf::from(line.trim());
+                    if !links.contains(&link) {
+                        links.push(link);
+                    }
+                }
             }
+            // SolidWorks жив, но про этот файл не ответил.
+            Err(Failed::Refused(_)) => answered = true,
+            // Не запустился — остальные файлы не ждут: сеанс минуту не
+            // пробует снова и отвечает сразу.
+            Err(Failed::Later(why)) => problem = Some(why),
+            Err(Failed::Cancelled) => return Err("остановлено".into()),
         }
+        found.push(links);
     }
-    found
+    match problem {
+        Some(why) if !answered => Err(why),
+        _ => Ok(found),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::tests::{line, quick, run, Fake};
+    use crate::session::Session;
 
     #[test]
-    fn answer_is_laid_out_in_question_order() {
+    fn links_come_from_the_worker_in_question_order() {
+        let (fake, log) = Fake::new(vec![run(|command| {
+            if command.contains("узел") {
+                vec![
+                    line("DEP\tC:\\п\\КТМ 640\\вал.SLDPRT"),
+                    line("DEP\tC:\\п\\КТМ 640\\втулка.SLDPRT"),
+                    line("DEP\tC:\\п\\КТМ 640\\вал.SLDPRT"),
+                    line("OK"),
+                ]
+            } else if command.contains("битый") {
+                vec![line("ERROR\t0\tфайл не читается")]
+            } else if command.contains("вал.SLDDRW") {
+                vec![line("DEP\tC:\\п\\КТМ 640\\вал.SLDPRT"), line("OK")]
+            } else {
+                vec![line("OK")]
+            }
+        })]);
+        let hub = Hub::new(Session::new(fake, quick()));
         let files = [
-            PathBuf::from(r"C:\п\узел.SLDASM"),
-            PathBuf::from(r"C:\п\вал.SLDPRT"),
-            PathBuf::from(r"C:\п\вал.SLDDRW"),
+            PathBuf::from(r"C:\п\КТМ 640\узел.SLDASM"),
+            PathBuf::from(r"C:\п\КТМ 640\вал.SLDPRT"),
+            PathBuf::from(r"C:\п\КТМ 640\битый.SLDPRT"),
+            PathBuf::from(r"C:\п\КТМ 640\вал.SLDDRW"),
         ];
-        let lines: Vec<String> = [
-            "FILE\tC:\\п\\узел.SLDASM",
-            "DEP\tC:\\п\\вал.SLDPRT",
-            "DEP\tC:\\п\\втулка.SLDPRT",
-            "DEP\tC:\\п\\вал.SLDPRT",
-            "FILE\tC:\\п\\вал.SLDPRT",
-            "FILE\tC:\\п\\вал.SLDDRW",
-            "DEP\tC:\\п\\вал.SLDPRT",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        let links = parse(&lines, &files);
+        let links = ask(&hub, &files).unwrap();
+        assert_eq!(links.len(), 4);
         assert_eq!(links[0].len(), 2, "повтор детали в сборке — одна связь");
         assert!(links[1].is_empty());
-        assert_eq!(links[2], [PathBuf::from(r"C:\п\вал.SLDPRT")]);
+        assert!(links[2].is_empty(), "нечитаемый файл разбор не роняет");
+        assert_eq!(links[3], [PathBuf::from(r"C:\п\КТМ 640\вал.SLDPRT")]);
+        let log = log.lock().unwrap();
+        assert_eq!(log.launches, 1, "вся папка — один SolidWorks");
+        assert!(log.sent.iter().all(|l| l.starts_with("deps\t")));
     }
 
     #[test]
-    fn script_answers_in_the_agreed_words() {
-        assert!(LINKS.contains("\"FILE`t$file\""));
-        assert!(LINKS.contains("\"DEP`t$($pairs[$i])\""));
-        assert!(!LINKS.contains("ExitApp"));
+    fn silent_solidworks_is_an_error_not_an_empty_answer() {
+        // SolidWorks не запускается: «связей нет» было бы неправдой.
+        let (fake, log) = Fake::new(Vec::new());
+        let hub = Hub::new(Session::new(fake, quick()));
+        let files: Vec<PathBuf> = (0..40)
+            .map(|n| PathBuf::from(format!("{n}.SLDASM")))
+            .collect();
+        assert!(ask(&hub, &files).unwrap_err().contains("не установлен"));
+        assert_eq!(log.lock().unwrap().launches, 1, "сорок раз не пробуем");
     }
 }

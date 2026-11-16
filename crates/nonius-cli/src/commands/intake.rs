@@ -4,6 +4,10 @@
 //! по именам, проверяются формой деталей; `--quick` — без этой проверки,
 //! `--deep` — посмотреть форму всех деталей.
 //!
+//! Форма сначала снимается бегло, из самих файлов; спорные детали потом
+//! уточняются через SolidWorks (он же даёт связи сборок и чертежей).
+//! `--fast` — только быстро: SolidWorks не будить, спорное пометить.
+//!
 //! Где программа не уверена, в плане стоят вопросы. `--ask` задаёт их по
 //! одному прямо в консоли; `--yes ID` и `--no ID` отвечают заранее (так
 //! отвечают окно и ИИ). После каждого ответа план пересчитывается.
@@ -12,8 +16,8 @@ use std::path::Path;
 
 use anyhow::Result;
 use nonius_app::{
-    App, IntakeDone, IntakePlan, PlannedItem, Progress, Question, ShapeCheck, ShapeVerdict,
-    NOT_OURS,
+    App, IntakeDone, IntakePlan, IntakeStudy, PlannedItem, Progress, Question, ShapeCheck,
+    ShapeVerdict, NOT_OURS,
 };
 use nonius_core::meta::ItemKind;
 
@@ -35,6 +39,8 @@ pub struct Options<'a> {
     pub apply: bool,
     /// Глубина проверки формой.
     pub check: ShapeCheck,
+    /// Только быстро: без SolidWorks.
+    pub fast: bool,
     /// Задать вопросы по одному в консоли.
     pub ask: bool,
     /// Вопросы, на которые ответ «да» и «нет» (их `id`).
@@ -56,8 +62,23 @@ pub fn answers(yes: &[String], no: &[String]) -> Vec<(String, bool)> {
     [ids(yes, true), ids(no, false)].concat()
 }
 
+/// Изучить папку: только быстро (`fast`) или с уточнением через SolidWorks.
+pub fn study(
+    app: &App,
+    folder: &Path,
+    check: ShapeCheck,
+    fast: bool,
+    progress: &dyn Progress,
+) -> nonius_app::Result<IntakeStudy> {
+    if fast {
+        app.intake_glance(folder, check, progress)
+    } else {
+        app.intake_study(folder, check, progress)
+    }
+}
+
 pub fn intake(app: &App, folder: &Path, options: &Options) -> Result<()> {
-    let study = app.intake_study(folder, options.check, &Printed)?;
+    let study = study(app, folder, options.check, options.fast, &Printed)?;
     let mut said = answers(options.yes, options.no);
     let mut plan = study.plan(&said);
     if options.ask {
@@ -73,6 +94,11 @@ pub fn intake(app: &App, folder: &Path, options: &Options) -> Result<()> {
         println!();
     }
     print_plan(&plan, options.ask);
+    if study.needs_refine() {
+        println!();
+        println!("Только быстро: форма снята бегло, связи сборок и чертежей не спрошены.");
+        println!("Уточнить через SolidWorks — та же команда без --fast.");
+    }
     if plan.items.is_empty() {
         return Ok(());
     }
@@ -184,7 +210,8 @@ fn print_plan(plan: &IntakePlan, asked: bool) {
             String::new()
         };
         let mark = if unsure(item) { "  (?)" } else { "" };
-        println!("  {kind} «{}»{versions}{mark}", item.name);
+        let rough = if item.doubtful { "  (бегло)" } else { "" };
+        println!("  {kind} «{}»{versions}{mark}{rough}", item.name);
         for why in &item.why {
             println!("      {why}");
         }
@@ -195,6 +222,9 @@ fn print_plan(plan: &IntakePlan, asked: bool) {
     if plan.items.iter().any(unsure) {
         println!();
         println!("(?) — догадка, которую форма деталей не подтвердила: проверьте.");
+    }
+    if plan.items.iter().any(|i| i.doubtful) {
+        println!("(бегло) — форма снята бегло из файла, и ответ на грани: уточнит SolidWorks.");
     }
     if !plan.questions.is_empty() {
         println!();

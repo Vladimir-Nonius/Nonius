@@ -89,6 +89,8 @@ pub enum Done {
     Batch(Report),
     /// Папка изучена: номер разбора и план.
     IntakeStudied(u64, anyhow::Result<IntakePlan>),
+    /// Точный проход по папке закончился (план надо попросить заново).
+    IntakeRefined(u64, anyhow::Result<()>),
     /// План пересчитан после ответа на вопрос.
     IntakePlanned(u64, anyhow::Result<IntakePlan>),
     /// Папка разложена в проект.

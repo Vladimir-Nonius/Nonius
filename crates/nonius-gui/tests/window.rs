@@ -65,6 +65,12 @@ struct Fake {
     broken: Arc<Mutex<bool>>,
     /// Что делал разбор папки: изучение и раскладка.
     intake: Arc<Mutex<Vec<String>>>,
+    /// План разбора — из быстрого прохода, и его можно уточнить.
+    rough: Arc<Mutex<bool>>,
+    /// Держит уточнение разбора, пока тест смотрит на «уточняю…».
+    refine_gate: Arc<Mutex<()>>,
+    /// Уточнения разбора: было ли каждое остановлено.
+    refines: Arc<Mutex<Vec<bool>>>,
 }
 
 impl Fake {
@@ -323,7 +329,10 @@ impl ProjectSource for Fake {
         &self,
         answers: &[(String, bool)],
     ) -> anyhow::Result<nonius_gui::source::IntakePlan> {
-        Ok(intake::plan(answers))
+        Ok(self.intake_plan_now(answers))
+    }
+    fn intake_refine(&self, progress: &dyn Progress) -> anyhow::Result<()> {
+        self.refine(progress)
     }
     fn intake_apply(
         &self,
@@ -579,6 +588,9 @@ fn fake(dir: &Path, title: &'static str) -> Fake {
         gate: Arc::default(),
         broken: Arc::default(),
         intake: Arc::default(),
+        rough: Arc::default(),
+        refine_gate: Arc::default(),
+        refines: Arc::default(),
     }
 }
 

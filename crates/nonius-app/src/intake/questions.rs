@@ -45,6 +45,9 @@ pub struct Question {
     /// Что изменилось словами между соседними `versions` (на одну строку
     /// меньше, чем версий; пусто — слов нет).
     pub changed: Vec<Vec<String>>,
+    /// Форма этих моделей снята бегло и ответ на грани: точный проход
+    /// может поменять и вопрос, и мнение программы.
+    pub doubtful: bool,
 }
 
 /// Ответы человека: про каждую пару моделей — одна это деталь или нет.
@@ -147,6 +150,7 @@ pub(super) fn ask(
                 suggested,
                 versions,
                 changed: words,
+                doubtful: false,
             });
         }
     };
@@ -162,8 +166,7 @@ pub(super) fn ask(
         if let Some(rival) = p.rival {
             // Два габарита из трёх те же — деталь могли просто укоротить:
             // тут своего мнения у программы нет.
-            let close = p.notes.iter().any(|n| n.contains(super::shape::TWO_KEPT));
-            let opinion = if close { None } else { Some(false) };
+            let opinion = if p.rival_close { None } else { Some(false) };
             push(vec![rival, p.members[0]], p.notes.clone(), opinion);
         }
     }

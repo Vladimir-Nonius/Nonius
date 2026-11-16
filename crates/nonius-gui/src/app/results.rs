@@ -188,9 +188,9 @@ impl App {
                     None => self.tab.message = Some(format!("{}: {e:#}", t.error)),
                 },
                 Done::Batch(report) => self.batch_done(ctx, report),
-                Done::IntakeStudied(run, plan) | Done::IntakePlanned(run, plan) => {
-                    self.intake_planned(run, plan)
-                }
+                Done::IntakeStudied(run, plan) => self.intake_studied(ctx, run, plan),
+                Done::IntakePlanned(run, plan) => self.intake_planned(run, plan),
+                Done::IntakeRefined(run, result) => self.intake_refined(ctx, run, result),
                 Done::IntakeApplied(run, outcome) => self.intake_applied(ctx, run, outcome),
                 Done::IntakeLooked(run, id, result) => self.intake_looked(run, id, result),
                 Done::Added(Ok(added)) => self.added(ctx, added),

@@ -8,7 +8,7 @@ use nonius_core::meta::ItemKind;
 use nonius_core::PartName;
 
 use super::super::questions::Decisions;
-use super::super::shape::Shape;
+use super::super::shape::{Shape, Source};
 use super::super::words::Words;
 use super::super::{key, Found, IntakePlan, ShapeVerdict};
 use super::{build, Facts};
@@ -63,7 +63,7 @@ fn shaped(shapes: &mut HashMap<String, Shape>, rel: &str, volume: f64, dims: [f6
         area: None,
         dims,
         faces: None,
-        rough: false,
+        source: Source::Exact,
     };
     shapes.insert(key(&Path::new(ROOT).join(rel)), shape);
 }

@@ -3,8 +3,9 @@
 use std::path::Path;
 
 use super::{
-    Comparator, Converter, Event, EventHandler, Exporter, ExtensionPoint, GeometrySource,
-    LinkSource, Module, ModuleManifest, Renderer, ShapeGlance, Snapshot, TreeSource,
+    Comparator, Converter, DesignSource, Event, EventHandler, Exporter, ExtensionPoint,
+    GeometrySource, LinkSource, Module, ModuleManifest, Renderer, ShapeGlance, Snapshot,
+    TreeSource,
 };
 use crate::compare::{ChangeReport, CompareContext};
 use crate::error::{Error, Result};
@@ -20,6 +21,7 @@ pub struct Registry {
     converters: Vec<Box<dyn Converter>>,
     links: Vec<Box<dyn LinkSource>>,
     glances: Vec<Box<dyn ShapeGlance>>,
+    designs: Vec<Box<dyn DesignSource>>,
     events: Vec<Box<dyn EventHandler>>,
 }
 
@@ -102,6 +104,13 @@ impl Registry {
     pub fn add_glance(&mut self, m: Box<dyn ShapeGlance>) -> Result<()> {
         check(m.manifest(), ExtensionPoint::Glance, ids(&self.glances))?;
         self.glances.push(m);
+        Ok(())
+    }
+
+    /// Подключить источник замысла.
+    pub fn add_design_source(&mut self, m: Box<dyn DesignSource>) -> Result<()> {
+        check(m.manifest(), ExtensionPoint::Design, ids(&self.designs))?;
+        self.designs.push(m);
         Ok(())
     }
 
@@ -206,6 +215,14 @@ impl Registry {
             .map(|m| m.as_ref())
     }
 
+    /// Первый модуль, который умеет прочитать замысел из этого файла.
+    pub fn design_source_for(&self, path: &Path) -> Option<&dyn DesignSource> {
+        self.designs
+            .iter()
+            .find(|m| m.can_read(path))
+            .map(|m| m.as_ref())
+    }
+
     /// Все подключённые источники связей файлов.
     pub fn link_sources(&self) -> impl Iterator<Item = &dyn LinkSource> + '_ {
         self.links.iter().map(|m| m.as_ref())
@@ -219,7 +236,7 @@ impl Registry {
     /// Манифесты всех подключённых модулей (модуль с несколькими точками — один раз).
     pub fn manifests(&self) -> Vec<&ModuleManifest> {
         let mut all: Vec<&ModuleManifest> = Vec::new();
-        let lists: [Vec<&ModuleManifest>; 9] = [
+        let lists: [Vec<&ModuleManifest>; 10] = [
             self.geometry.iter().map(|m| m.manifest()).collect(),
             self.trees.iter().map(|m| m.manifest()).collect(),
             self.comparators.iter().map(|m| m.manifest()).collect(),
@@ -228,6 +245,7 @@ impl Registry {
             self.converters.iter().map(|m| m.manifest()).collect(),
             self.links.iter().map(|m| m.manifest()).collect(),
             self.glances.iter().map(|m| m.manifest()).collect(),
+            self.designs.iter().map(|m| m.manifest()).collect(),
             self.events.iter().map(|m| m.manifest()).collect(),
         ];
         for m in lists.into_iter().flatten() {

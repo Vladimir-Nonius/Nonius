@@ -42,6 +42,8 @@ pub(super) struct Cluster {
     pub notes: Vec<String>,
     /// Модель, от которой эту отделила форма: о паре стоит спросить.
     pub rival: Option<usize>,
+    /// У соперника два габарита из трёх те же: мнения «похоже, нет» нет.
+    pub rival_close: bool,
     /// Все версии подтвердил человек: спрашивать больше не о чем.
     pub settled: bool,
 }
@@ -59,7 +61,7 @@ pub(super) fn split(members: &[usize], ev: &Evidence) -> Vec<Cluster> {
         |a: usize, b: usize| (ev.apart)(members[a], members[b]) || said(a, b) == Some(false);
     let linked = |a: usize, b: usize| {
         said(a, b).unwrap_or_else(|| match likeness(a, b) {
-            Some(like) => !matches!(like, Likeness::Different(_)),
+            Some(like) => !matches!(like, Likeness::Different { .. }),
             None => (ev.trust)(members[a], members[b]),
         })
     };
@@ -108,6 +110,7 @@ fn cluster(
         verdict: None,
         notes: Vec::new(),
         rival: None,
+        rival_close: false,
         settled: false,
     };
     if let [only] = at[..] {
@@ -120,10 +123,10 @@ fn cluster(
         }
         // Отделила форма: сказать, от кого и чем отличается.
         let differs = others().find_map(|o| match likeness(o, only) {
-            Some(Likeness::Different(how)) => Some((o, how)),
+            Some(Likeness::Different { how, kept_two }) => Some((o, how, kept_two)),
             _ => None,
         });
-        if let Some((other, how)) = differs {
+        if let Some((other, how, kept_two)) = differs {
             part.notes.push(format!(
                 "имя похоже на «{}», но форма другая: {how}",
                 label(other)
@@ -133,6 +136,7 @@ fn cluster(
             // разных папках слишком много.
             if (ev.trust)(members[other], members[only]) {
                 part.rival = Some(members[other]);
+                part.rival_close = kept_two;
             }
         }
         return part;
@@ -168,7 +172,7 @@ fn cluster(
                 label(old),
                 label(new)
             )),
-            Some(Likeness::Different(how)) => {
+            Some(Likeness::Different { how, .. }) => {
                 unsure = true;
                 part.notes.push(format!(
                     "«{}» → «{}» изменилась сильно: {how}",
