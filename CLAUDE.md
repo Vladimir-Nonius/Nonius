@@ -3,7 +3,8 @@
 Правила работы в репозитории — в [AGENTS.md](AGENTS.md), архитектура — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Прочитай оба файла перед изменениями. Какие файлы открывать под задачу — в [docs/CODEMAP.md](docs/CODEMAP.md); весь код не читай.
 
 Коротко:
-- Rust workspace: `crates/nonius-core` (ядро), `crates/nonius-store` (версии на git + LFS), `crates/nonius-step` (заголовок STEP), `crates/nonius-occt` (геометрия OpenCascade), `crates/nonius-sldprt` (форма прямо из файла `.sldprt`), `crates/nonius-app` (действия программы: общие для CLI, окна, MCP), `crates/nonius-cli` (команда `nonius`, тонкая обёртка).
+- Rust workspace: `crates/nonius-core` (ядро), `crates/nonius-store` (версии на git + LFS), `crates/nonius-step` (заголовок STEP), `crates/nonius-occt` (геометрия OpenCascade), `crates/nonius-sldprt` (форма, превью и замысел прямо из файла SolidWorks), `crates/nonius-solidworks` (STEP и связи через свой невидимый SolidWorks), `crates/nonius-scene` (3D-сцена изменений, glTF), `crates/nonius-app` (действия программы: общие для CLI, окна, MCP), `crates/nonius-gui` (окно), `crates/nonius-cli` (команда `nonius`, тонкая обёртка).
+- Что внутри файлов SolidWorks и как с ним работать — база знаний [docs/formats/](docs/formats/README.md); перед правкой `nonius-sldprt` или `nonius-solidworks` прочитай нужный файл оттуда.
 - Тестам хранилища нужны `git` и `git-lfs` в PATH.
 - Проверки: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
 - Новые модули — отдельными крейтами через трейты `nonius_core::extension` + контрактный тест из `nonius_core::contract`.
